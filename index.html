@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
+    <title>Günlük Efor Takibi</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="data-store.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="header-copy">
+        <span class="eyebrow">Çalışma günlüğü</span>
+        <h1>Günlük Efor Takibi</h1>
+        <p>Eforlarını tek yerde kaydet, güne ve projeye göre kolayca takip et.</p>
+      </div>
+      <div class="today-chip" aria-label="Bugünün tarihi">
+        <span>Bugün</span>
+        <strong id="todayLabel"></strong>
+      </div>
+    </header>
+
+    <main>
+      <section class="summary-grid" aria-labelledby="summaryTitle">
+        <h2 id="summaryTitle" class="sr-only">Efor özeti</h2>
+        <article class="summary-card accent">
+          <span>Seçili gün</span>
+          <strong id="dailyTotal">0 sa</strong>
+          <small id="selectedDateLabel">—</small>
+        </article>
+        <article class="summary-card">
+          <span>Toplam efor</span>
+          <strong id="grandTotal">0 sa</strong>
+          <small>Tüm kayıtlar</small>
+        </article>
+        <article class="summary-card">
+          <span>Kayıt sayısı</span>
+          <strong id="entryCount">0</strong>
+          <small>Girilen çalışma</small>
+        </article>
+      </section>
+
+      <div class="content-grid">
+        <section class="panel form-panel" aria-labelledby="formTitle">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">Yeni kayıt</span>
+              <h2 id="formTitle">Efor ekle</h2>
+            </div>
+          </div>
+
+          <form id="effortForm" novalidate>
+            <input id="entryId" type="hidden">
+            <div class="form-grid">
+              <label class="field">
+                <span>Tarih</span>
+                <input id="dateInput" name="date" type="date" required>
+              </label>
+              <label class="field">
+                <span>Süre (saat)</span>
+                <input id="hoursInput" name="hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal" placeholder="Örn. 2,5" required>
+              </label>
+              <label class="field field-wide">
+                <span>Proje</span>
+                <input id="projectInput" name="project" type="text" maxlength="80" autocomplete="organization" placeholder="Proje adını yazın" required>
+              </label>
+              <label class="field field-wide">
+                <span>Açıklama</span>
+                <textarea id="descriptionInput" name="description" rows="4" maxlength="120" placeholder="Bugün ne üzerinde çalıştınız?" required></textarea>
+                <small><span id="descriptionCount">0</span>/120 karakter</small>
+              </label>
+            </div>
+            <p id="formMessage" class="form-message" role="alert" aria-live="polite"></p>
+            <div class="form-actions">
+              <button class="button primary" type="submit"><span id="submitLabel">Kaydı ekle</span></button>
+              <button id="cancelEditButton" class="button secondary hidden" type="button">Vazgeç</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel list-panel" aria-labelledby="listTitle">
+          <div class="panel-heading list-heading">
+            <div>
+              <span class="eyebrow">Geçmiş</span>
+              <h2 id="listTitle">Efor kayıtları</h2>
+            </div>
+            <label class="filter-field">
+              <span>Günü filtrele</span>
+              <input id="filterDateInput" type="date">
+            </label>
+          </div>
+
+          <div id="emptyState" class="empty-state">
+            <div aria-hidden="true">◎</div>
+            <h3>Henüz kayıt yok</h3>
+            <p>İlk efor kaydını soldaki formdan ekleyebilirsiniz.</p>
+          </div>
+          <div id="entryList" class="entry-list" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+
+    <template id="entryTemplate">
+      <article class="entry-card">
+        <div class="entry-date" aria-hidden="true"><strong></strong><span></span></div>
+        <div class="entry-content">
+          <div class="entry-title-row"><h3></h3><span class="hours-badge"></span></div>
+          <p></p>
+          <time></time>
+        </div>
+        <div class="entry-actions">
+          <button class="icon-button calendar-button" type="button" aria-label="Kaydı Google Takvim'e ekle">Takvime ekle</button>
+          <button class="icon-button edit-button" type="button" aria-label="Kaydı düzenle">Düzenle</button>
+          <button class="icon-button danger delete-button" type="button" aria-label="Kaydı sil">Sil</button>
+        </div>
+      </article>
+    </template>
+  </body>
+</html>
