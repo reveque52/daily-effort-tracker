@@ -116,6 +116,22 @@
     writeAll([]);
   }
 
+  function replaceAll(importedEntries) {
+    if (!Array.isArray(importedEntries)) return { valid: false, errors: { entries: "Yedek dosyası geçersiz." } };
+    const normalized = [];
+    for (const item of importedEntries) {
+      const result = validate(item);
+      if (!result.valid) return { valid: false, errors: result.errors };
+      const now = new Date().toISOString();
+      normalized.push(Object.assign({ id: item.id || makeId() }, result.value, {
+        createdAt: item.createdAt || now,
+        updatedAt: item.updatedAt || now
+      }));
+    }
+    writeAll(normalized);
+    return { valid: true, errors: {}, value: normalized };
+  }
+
   function summarize(entries) {
     const source = Array.isArray(entries) ? entries : readAll();
     const byProject = {};
@@ -148,6 +164,7 @@
     update: update,
     remove: remove,
     clear: clear,
+    replaceAll: replaceAll,
     summarize: summarize,
   });
 })(window);

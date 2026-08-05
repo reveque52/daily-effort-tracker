@@ -6,7 +6,9 @@
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="data-store.js" defer></script>
+    <script src="drive-sync.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -40,6 +42,23 @@
           <strong id="entryCount">0</strong>
           <small>Girilen çalışma</small>
         </article>
+      </section>
+
+      <section class="drive-panel" aria-labelledby="driveTitle">
+        <div>
+          <span class="eyebrow">Bulut yedekleme</span>
+          <h2 id="driveTitle">Google Drive</h2>
+          <p id="driveStatus">Drive senkronizasyonu için OAuth Client ID’nizi kaydedin.</p>
+        </div>
+        <div class="drive-controls">
+          <label class="drive-client-field">
+            <span>Google OAuth Client ID</span>
+            <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
+          </label>
+          <button id="saveDriveSettings" class="button secondary" type="button">Ayarı kaydet</button>
+          <button id="backupToDrive" class="button primary" type="button">Drive’a yedekle</button>
+          <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan geri yükle</button>
+        </div>
       </section>
 
       <div class="content-grid">

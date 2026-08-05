@@ -7,6 +7,7 @@ const path = require("node:path");
 const root = path.join(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const drive = fs.readFileSync(path.join(root, "drive-sync.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 
 const requiredIds = [
@@ -31,6 +32,12 @@ assert.match(app, /store\?\.remove/, "Delete entegrasyonu eksik");
 assert.match(html, /class="icon-button calendar-button"/, "Google Takvim düğmesi eksik");
 assert.match(app, /calendar\.google\.com\/calendar\/render/, "Google Takvim etkinlik adresi eksik");
 assert.match(app, /dates:\s*`\$\{start\}\/\$\{end\}`/, "Takvim tarih aralığı eksik");
+assert.ok(html.indexOf('src="drive-sync.js"') < html.indexOf('src="app.js"'), "Drive modülü uygulamadan önce yüklenmeli");
+assert.match(html, /id="backupToDrive"/, "Drive yedekleme düğmesi eksik");
+assert.match(html, /id="restoreFromDrive"/, "Drive geri yükleme düğmesi eksik");
+assert.match(drive, /drive\.appdata/, "En az yetkili Drive kapsamı kullanılmalı");
+assert.match(drive, /parents:\s*\["appDataFolder"\]/, "Yedek appDataFolder içine yazılmalı");
+assert.doesNotMatch(drive, /client_secret/i, "Client Secret tarayıcı kodunda bulunmamalı");
 
 console.log("✓ frontend DOM/veri katmanı sözleşmesi");
 console.log("✓ responsive kırılımlar ve güvenli metin render kontrolü");

@@ -123,6 +123,25 @@
 
   function updateCount() { $("#descriptionCount").textContent = fields.description.value.length; }
 
+  function setDriveStatus(message, isError = false) {
+    const status = $("#driveStatus");
+    status.textContent = message;
+    status.classList.toggle("drive-error", isError);
+  }
+
+  function setDriveBusy(busy) {
+    ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive"].forEach((selector) => {
+      $(selector).disabled = busy;
+    });
+  }
+
+  async function runDriveAction(action) {
+    setDriveBusy(true);
+    try { await action(); }
+    catch (error) { setDriveStatus(error.message || "Google Drive işlemi tamamlanamadı.", true); }
+    finally { setDriveBusy(false); }
+  }
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const invalid = Object.values(fields).filter((field) => field !== fields.id && !field.checkValidity());
@@ -157,7 +176,34 @@
   $("#filterDateInput").addEventListener("change", render);
   $("#cancelEditButton").addEventListener("click", resetForm);
 
+  $("#saveDriveSettings").addEventListener("click", () => {
+    try {
+      window.DriveSync.setClientId($("#googleClientId").value);
+      setDriveStatus("OAuth Client ID kaydedildi. Artık Drive yedeklemesini kullanabilirsiniz.");
+    } catch (error) { setDriveStatus(error.message, true); }
+  });
+
+  $("#backupToDrive").addEventListener("click", () => runDriveAction(async () => {
+    const result = await window.DriveSync.backup(readEntries());
+    const when = result.modifiedTime ? dateFormatter.format(new Date(result.modifiedTime)) : "şimdi";
+    setDriveStatus(`Yedek Google Drive’a kaydedildi (${when}).`);
+  }));
+
+  $("#restoreFromDrive").addEventListener("click", () => runDriveAction(async () => {
+    const backup = await window.DriveSync.restore();
+    if (!confirm(`Drive yedeğindeki ${backup.entries.length} kayıt mevcut yerel kayıtların yerine yüklensin mi?`)) {
+      setDriveStatus("Geri yükleme iptal edildi.");
+      return;
+    }
+    const result = getStore().replaceAll(backup.entries);
+    if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "Yedek doğrulanamadı.");
+    render();
+    setDriveStatus(`${backup.entries.length} kayıt Google Drive’dan geri yüklendi.`);
+  }));
+
   $("#todayLabel").textContent = dateFormatter.format(new Date());
+  $("#googleClientId").value = window.DriveSync?.getClientId() || "";
+  if ($("#googleClientId").value) setDriveStatus("Drive ayarı hazır. Yedekleme veya geri yükleme yapabilirsiniz.");
   fields.date.value = isoToday();
   render();
 })();

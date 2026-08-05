@@ -72,6 +72,15 @@ test("bozuk localStorage içeriğini güvenle boş liste kabul eder", () => {
   assert.equal(loadStore("{}").store.list().length, 0);
 });
 
+test("Drive yedeğini doğrulayıp yerel kayıtların yerine yükler", () => {
+  const { store } = loadStore();
+  const imported = [{ id: "drive-1", date: "2026-08-05", project: "Drive", task: "Yedek", hours: 2 }];
+  assert.equal(store.replaceAll(imported).valid, true);
+  assert.equal(store.list()[0].id, "drive-1");
+  assert.equal(store.replaceAll([{ date: "bozuk" }]).valid, false);
+  assert.equal(store.list().length, 1);
+});
+
 let failures = 0;
 for (const { name, fn } of tests) {
   try {
@@ -84,4 +93,3 @@ for (const { name, fn } of tests) {
   }
 }
 if (failures) process.exitCode = 1;
-
