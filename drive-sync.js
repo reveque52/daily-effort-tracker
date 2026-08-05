@@ -20,10 +20,11 @@
     accessToken = "";
   }
 
-  function authorize() {
+  function authorize(options = {}) {
     const clientId = getClientId();
     if (!clientId) return Promise.reject(new Error("Önce Google OAuth Client ID’nizi kaydedin."));
     if (!window.google?.accounts?.oauth2) return Promise.reject(new Error("Google oturum kütüphanesi yüklenemedi."));
+    if (accessToken) return Promise.resolve(accessToken);
 
     return new Promise((resolve, reject) => {
       const callback = (response) => {
@@ -38,7 +39,8 @@
           error_callback: (error) => reject(new Error(error.message || error.type || "Google yetkilendirmesi tamamlanamadı."))
         });
       } else tokenClient.callback = callback;
-      tokenClient.requestAccessToken({ prompt: accessToken ? "" : "consent" });
+      const prompt = options.silent ? "" : (accessToken ? "" : "consent");
+      tokenClient.requestAccessToken({ prompt });
     });
   }
 
@@ -56,7 +58,7 @@
     return response;
   }
 
-  async function findBackup() {
+  async function findBackup(options = {}) {
     const params = new URLSearchParams({
       spaces: "appDataFolder",
       q: `name='${FILE_NAME}' and trashed=false`,
@@ -64,17 +66,18 @@
       pageSize: "1",
       fields: "files(id,name,modifiedTime)"
     });
-    const response = await driveFetch(`https://www.googleapis.com/drive/v3/files?${params}`);
+    const response = await driveFetch(`https://www.googleapis.com/drive/v3/files?${params}`, { keepalive: Boolean(options.keepalive) });
     return (await response.json()).files?.[0] || null;
   }
 
-  async function backup(entries) {
-    await authorize();
+  async function backup(entries, options = {}) {
+    await authorize({ silent: Boolean(options.silent) });
     const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), entries }, null, 2);
-    let file = await findBackup();
+    let file = await findBackup(options);
     if (!file) {
       const created = await driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name,modifiedTime", {
         method: "POST",
+        keepalive: Boolean(options.keepalive),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: FILE_NAME, parents: ["appDataFolder"], mimeType: "application/json" })
       });
@@ -82,15 +85,16 @@
     }
     const uploaded = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media&fields=id,name,modifiedTime`, {
       method: "PATCH",
+      keepalive: Boolean(options.keepalive),
       headers: { "Content-Type": "application/json" },
       body: payload
     });
     return uploaded.json();
   }
 
-  async function restore() {
-    await authorize();
-    const file = await findBackup();
+  async function restore(options = {}) {
+    await authorize({ silent: Boolean(options.silent) });
+    const file = await findBackup(options);
     if (!file) throw new Error("Google Drive’da daha önce oluşturulmuş bir yedek bulunamadı.");
     const response = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?alt=media`);
     const payload = await response.json();
@@ -98,5 +102,7 @@
     return { file, entries: payload.entries, exportedAt: payload.exportedAt };
   }
 
-  window.DriveSync = Object.freeze({ getClientId, setClientId, authorize, backup, restore });
+  const hasAccessToken = () => Boolean(accessToken);
+
+  window.DriveSync = Object.freeze({ getClientId, setClientId, hasAccessToken, authorize, backup, restore });
 })();

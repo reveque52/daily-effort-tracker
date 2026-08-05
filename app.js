@@ -8,6 +8,7 @@
     description: $("#descriptionInput"), hours: $("#hoursInput")
   };
   let entries = [];
+  let autoBackupTimer;
 
   const dateFormatter = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long", year: "numeric" });
   const shortMonthFormatter = new Intl.DateTimeFormat("tr-TR", { month: "short" });
@@ -90,7 +91,7 @@
       });
       card.querySelector(".edit-button").addEventListener("click", () => startEdit(entry));
       card.querySelector(".delete-button").addEventListener("click", () => {
-        if (confirm(`“${entry.project}” kaydı silinsin mi?`)) { removeEntry(entry.id); render(); }
+        if (confirm(`“${entry.project}” kaydı silinsin mi?`)) { removeEntry(entry.id); render(); scheduleAutoBackup(); }
       });
       list.append(card);
     });
@@ -135,6 +136,40 @@
     });
   }
 
+  function scheduleAutoBackup() {
+    clearTimeout(autoBackupTimer);
+    if (!window.DriveSync?.getClientId() || !window.DriveSync.hasAccessToken()) return;
+    setDriveStatus("Değişiklikler Drive’a kaydediliyor…");
+    autoBackupTimer = setTimeout(async () => {
+      try {
+        await window.DriveSync.backup(readEntries(), { silent: true });
+        setDriveStatus("Değişiklikler Google Drive’a otomatik kaydedildi.");
+      } catch (error) {
+        setDriveStatus(`Otomatik yedekleme yapılamadı: ${error.message}`, true);
+      }
+    }, 700);
+  }
+
+  function finalAutoBackup() {
+    if (!window.DriveSync?.getClientId() || !window.DriveSync.hasAccessToken()) return;
+    clearTimeout(autoBackupTimer);
+    window.DriveSync.backup(readEntries(), { silent: true, keepalive: true }).catch(() => {});
+  }
+
+  async function autoRestoreOnOpen() {
+    if (!window.DriveSync?.getClientId()) return;
+    setDriveStatus("Google Drive yedeği kontrol ediliyor…");
+    try {
+      const backup = await window.DriveSync.restore({ silent: true });
+      const result = getStore().replaceAll(backup.entries);
+      if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "Yedek doğrulanamadı.");
+      render();
+      setDriveStatus(`${backup.entries.length} kayıt açılışta Drive’dan otomatik yüklendi.`);
+    } catch (error) {
+      setDriveStatus(`Otomatik geri yükleme için Drive bağlantısı gerekiyor: ${error.message}`, true);
+    }
+  }
+
   async function runDriveAction(action) {
     setDriveBusy(true);
     try { await action(); }
@@ -169,6 +204,7 @@
     $("#formMessage").textContent = editing ? "Kayıt güncellendi." : "Efor kaydı eklendi.";
     $("#formMessage").classList.add("success");
     render();
+    scheduleAutoBackup();
   });
 
   fields.description.addEventListener("input", updateCount);
@@ -201,9 +237,15 @@
     setDriveStatus(`${backup.entries.length} kayıt Google Drive’dan geri yüklendi.`);
   }));
 
+  window.addEventListener("pagehide", finalAutoBackup);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") finalAutoBackup();
+  });
+
   $("#todayLabel").textContent = dateFormatter.format(new Date());
   $("#googleClientId").value = window.DriveSync?.getClientId() || "";
   if ($("#googleClientId").value) setDriveStatus("Drive ayarı hazır. Yedekleme veya geri yükleme yapabilirsiniz.");
   fields.date.value = isoToday();
   render();
+  window.addEventListener("load", () => setTimeout(autoRestoreOnOpen, 300));
 })();
