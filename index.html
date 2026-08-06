@@ -44,20 +44,43 @@
         </article>
       </section>
 
-      <section class="drive-panel" aria-labelledby="driveTitle">
-        <div>
-          <span class="eyebrow">Bulut yedekleme</span>
-          <h2 id="driveTitle">Google Drive</h2>
-          <p id="driveStatus">Drive senkronizasyonu için OAuth Client ID’nizi kaydedin.</p>
+      <nav class="drive-toolbar" aria-label="Google Drive araçları">
+        <div class="drive-toolbar-status">
+          <span class="sync-dot" aria-hidden="true"></span>
+          <div>
+            <strong>Google Drive</strong>
+            <p id="driveStatus" aria-live="polite">Drive bağlantısı bekleniyor.</p>
+          </div>
         </div>
-        <div class="drive-controls">
-          <label class="drive-client-field">
-            <span>Google OAuth Client ID</span>
-            <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
-          </label>
-          <button id="saveDriveSettings" class="button secondary" type="button">Ayarı kaydet</button>
-          <button id="backupToDrive" class="button primary" type="button">Drive’a yedekle</button>
-          <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan geri yükle</button>
+        <div class="last-backup">
+          <span>Drive’daki son sürüm</span>
+          <strong id="lastBackupTime">Henüz yedeklenmedi</strong>
+        </div>
+        <div class="drive-toolbar-actions">
+          <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan yükle</button>
+          <button id="backupToDrive" class="button primary" type="button">Şimdi yedekle</button>
+          <details class="drive-settings">
+            <summary class="button secondary">Ayarlar</summary>
+            <div class="drive-settings-popover">
+              <label class="drive-client-field">
+                <span>Google OAuth Client ID</span>
+                <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
+              </label>
+              <button id="saveDriveSettings" class="button primary" type="button">Ayarı kaydet</button>
+            </div>
+          </details>
+        </div>
+      </nav>
+
+      <section id="restorePrompt" class="restore-prompt hidden" aria-labelledby="restorePromptTitle">
+        <div class="restore-prompt-icon" aria-hidden="true">↻</div>
+        <div>
+          <h2 id="restorePromptTitle">Drive yedeğini yükleyerek başla</h2>
+          <p>En güncel efor kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
+        </div>
+        <div class="restore-prompt-actions">
+          <button id="initialRestoreButton" class="button primary" type="button">Drive’dan geri yükle</button>
+          <button id="skipInitialRestore" class="button secondary" type="button">Şimdilik geç</button>
         </div>
       </section>
 

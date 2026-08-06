@@ -4,10 +4,15 @@
   const SCOPE = "https://www.googleapis.com/auth/drive.appdata";
   const FILE_NAME = "daily-effort-tracker.json";
   const CLIENT_ID_KEY = "daily-effort-tracker.google-client-id";
+  const LAST_BACKUP_KEY = "daily-effort-tracker.last-drive-backup";
   let tokenClient;
   let accessToken = "";
 
   const getClientId = () => localStorage.getItem(CLIENT_ID_KEY) || "";
+  const getLastBackupTime = () => localStorage.getItem(LAST_BACKUP_KEY) || "";
+  const rememberBackupTime = (value) => {
+    if (value) localStorage.setItem(LAST_BACKUP_KEY, value);
+  };
 
   function setClientId(value) {
     const clientId = String(value || "").trim();
@@ -89,7 +94,9 @@
       headers: { "Content-Type": "application/json" },
       body: payload
     });
-    return uploaded.json();
+    const result = await uploaded.json();
+    rememberBackupTime(result.modifiedTime);
+    return result;
   }
 
   async function restore(options = {}) {
@@ -99,10 +106,18 @@
     const response = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?alt=media`);
     const payload = await response.json();
     if (payload.version !== 1 || !Array.isArray(payload.entries)) throw new Error("Drive yedeğinin biçimi geçersiz.");
+    rememberBackupTime(file.modifiedTime);
     return { file, entries: payload.entries, exportedAt: payload.exportedAt };
+  }
+
+  async function getBackupInfo() {
+    await authorize();
+    const file = await findBackup();
+    if (file?.modifiedTime) rememberBackupTime(file.modifiedTime);
+    return file;
   }
 
   const hasAccessToken = () => Boolean(accessToken);
 
-  window.DriveSync = Object.freeze({ getClientId, setClientId, hasAccessToken, authorize, backup, restore });
+  window.DriveSync = Object.freeze({ getClientId, setClientId, getLastBackupTime, hasAccessToken, authorize, getBackupInfo, backup, restore });
 })();

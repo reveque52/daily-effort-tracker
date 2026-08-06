@@ -13,7 +13,8 @@ const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 const requiredIds = [
   "effortForm", "entryId", "dateInput", "hoursInput", "projectInput",
   "descriptionInput", "filterDateInput", "entryList", "entryTemplate",
-  "dailyTotal", "grandTotal", "entryCount", "formMessage",
+  "dailyTotal", "grandTotal", "entryCount", "formMessage", "lastBackupTime",
+  "restorePrompt", "initialRestoreButton", "skipInitialRestore",
 ];
 
 for (const id of requiredIds) {
@@ -38,8 +39,10 @@ assert.match(html, /id="restoreFromDrive"/, "Drive geri yükleme düğmesi eksik
 assert.match(drive, /drive\.appdata/, "En az yetkili Drive kapsamı kullanılmalı");
 assert.match(drive, /parents:\s*\["appDataFolder"\]/, "Yedek appDataFolder içine yazılmalı");
 assert.doesNotMatch(drive, /client_secret/i, "Client Secret tarayıcı kodunda bulunmamalı");
-assert.match(app, /autoRestoreOnOpen/, "Açılışta otomatik Drive geri yükleme eksik");
-assert.match(app, /scheduleAutoBackup/, "Değişiklik sonrası otomatik yedekleme eksik");
+assert.match(html, /class="drive-toolbar"/, "Drive araç çubuğu eksik");
+assert.match(app, /backupAndReport\(editing/, "Kayıt sonrası anlık Drive yedekleme eksik");
+assert.match(app, /initialRestoreButton.*restoreFromDrive/s, "Açılış geri yükleme çağrısı eksik");
+assert.match(drive, /LAST_BACKUP_KEY/, "Son Drive sürümü zamanı saklanmalı");
 assert.match(app, /pagehide/, "Kapanış yedekleme olayı eksik");
 assert.match(app, /visibilitychange/, "Arka plana geçiş yedekleme olayı eksik");
 assert.match(drive, /keepalive:\s*Boolean\(options\.keepalive\)/, "Kapanış isteği keepalive kullanmalı");
