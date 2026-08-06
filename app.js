@@ -3,11 +3,17 @@
 
   const $ = (selector) => document.querySelector(selector);
   const form = $("#effortForm");
+  const taskForm = $("#taskForm");
   const fields = {
     id: $("#entryId"), date: $("#dateInput"), project: $("#projectInput"),
     description: $("#descriptionInput"), hours: $("#hoursInput")
   };
+  const taskFields = {
+    id: $("#taskId"), title: $("#taskTitleInput"), dueDate: $("#taskDueDateInput"), status: $("#taskStatusInput")
+  };
   let entries = [];
+  let tasks = [];
+  let nextDashboardTask = null;
 
   const dateFormatter = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long", year: "numeric" });
   const shortMonthFormatter = new Intl.DateTimeFormat("tr-TR", { month: "short" });
@@ -17,16 +23,16 @@
   const parseDate = (value) => new Date(`${value}T12:00:00`);
   const formatHours = (value) => `${numberFormatter.format(Number(value) || 0)} sa`;
 
-  function googleCalendarUrl(entry) {
-    const start = entry.date.replaceAll("-", "");
-    const nextDay = parseDate(entry.date);
+  function googleCalendarUrl(task) {
+    const start = task.dueDate.replaceAll("-", "");
+    const nextDay = parseDate(task.dueDate);
     nextDay.setDate(nextDay.getDate() + 1);
     const end = [nextDay.getFullYear(), String(nextDay.getMonth() + 1).padStart(2, "0"), String(nextDay.getDate()).padStart(2, "0")].join("");
     const params = new URLSearchParams({
       action: "TEMPLATE",
-      text: `${entry.project} – ${formatHours(entry.hours)}`,
+      text: task.title,
       dates: `${start}/${end}`,
-      details: `${entry.task || entry.description || ""}\n\nKaydedilen efor: ${formatHours(entry.hours)}`
+      details: `Görev teslim tarihi · Durum: ${statusLabel(task.status)}`
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
   }
@@ -86,15 +92,80 @@
       const time = card.querySelector("time");
       time.dateTime = entry.date;
       time.textContent = dateFormatter.format(date);
-      card.querySelector(".calendar-button").addEventListener("click", () => {
-        window.open(googleCalendarUrl(entry), "_blank", "noopener,noreferrer");
-      });
       card.querySelector(".edit-button").addEventListener("click", () => startEdit(entry));
       card.querySelector(".delete-button").addEventListener("click", () => {
         if (confirm(`“${entry.project}” kaydı silinsin mi?`)) { removeEntry(entry.id); render(); backupAndReport("Silme işlemi Drive’a gönderildi."); }
       });
       list.append(card);
     });
+  }
+
+  function statusLabel(status) {
+    return ({ planned: "Planlandı", in_progress: "Devam ediyor", completed: "Tamamlandı" })[status] || status;
+  }
+
+  function renderTasks() {
+    tasks = window.TaskStore.list();
+    const openTasks = tasks.filter((task) => task.status !== "completed");
+    $("#taskTabCount").textContent = String(openTasks.length);
+    $("#openTaskCount").textContent = `${openTasks.length} açık`;
+    $("#taskEmptyState").classList.toggle("hidden", tasks.length > 0);
+
+    nextDashboardTask = openTasks[0] || null;
+    $("#nextTaskTitle").textContent = nextDashboardTask?.title || "Görev yok";
+    $("#nextTaskDate").textContent = nextDashboardTask ? dateFormatter.format(parseDate(nextDashboardTask.dueDate)) : "Teslim tarihi bulunmuyor";
+    $("#addNextTaskToCalendar").disabled = !nextDashboardTask;
+
+    const list = $("#taskList");
+    list.replaceChildren();
+    tasks.forEach((task) => {
+      const card = $("#taskTemplate").content.firstElementChild.cloneNode(true);
+      card.dataset.id = task.id;
+      card.classList.toggle("completed", task.status === "completed");
+      card.querySelector("h3").textContent = task.title;
+      const badge = card.querySelector(".task-status");
+      badge.textContent = statusLabel(task.status);
+      badge.dataset.status = task.status;
+      const time = card.querySelector("time");
+      time.dateTime = task.dueDate;
+      time.textContent = `Teslim: ${dateFormatter.format(parseDate(task.dueDate))}`;
+      card.querySelector(".task-check").classList.toggle("checked", task.status === "completed");
+      card.querySelector(".task-check").addEventListener("click", () => {
+        window.TaskStore.update(task.id, { ...task, status: task.status === "completed" ? "planned" : "completed" });
+        renderTasks();
+        backupAndReport("Görev durumu Drive’a gönderildi.");
+      });
+      card.querySelector(".task-edit-button").addEventListener("click", () => startTaskEdit(task));
+      card.querySelector(".task-delete-button").addEventListener("click", () => {
+        if (confirm(`“${task.title}” görevi silinsin mi?`)) {
+          window.TaskStore.remove(task.id);
+          renderTasks();
+          backupAndReport("Silinen görev Drive’a gönderildi.");
+        }
+      });
+      list.append(card);
+    });
+  }
+
+  function startTaskEdit(task) {
+    taskFields.id.value = task.id;
+    taskFields.title.value = task.title;
+    taskFields.dueDate.value = task.dueDate;
+    taskFields.status.value = task.status;
+    $("#taskSubmitLabel").textContent = "Değişiklikleri kaydet";
+    $("#cancelTaskEdit").classList.remove("hidden");
+    taskFields.title.focus();
+  }
+
+  function resetTaskForm() {
+    taskForm.reset();
+    taskFields.id.value = "";
+    taskFields.dueDate.value = isoToday();
+    taskFields.status.value = "planned";
+    $("#taskSubmitLabel").textContent = "Görevi ekle";
+    $("#cancelTaskEdit").classList.add("hidden");
+    $("#taskFormMessage").textContent = "";
+    $("#taskFormMessage").classList.remove("success");
   }
 
   function startEdit(entry) {
@@ -135,6 +206,10 @@
     $("#lastBackupTime").textContent = value ? dateTimeFormatter.format(new Date(value)) : "Henüz yedeklenmedi";
   }
 
+  function backupBundle() {
+    return { entries: readEntries(), tasks: window.TaskStore.list() };
+  }
+
   function setDriveBusy(busy) {
     ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive", "#initialRestoreButton"].forEach((selector) => {
       $(selector).disabled = busy;
@@ -144,7 +219,7 @@
   async function backupAndReport(message = "Kayıt Drive’a otomatik gönderildi.") {
     setDriveStatus("Veriler Google Drive’a gönderiliyor…");
     try {
-      const result = await window.DriveSync.backup(readEntries());
+      const result = await window.DriveSync.backup(backupBundle());
       updateLastBackupTime(result.modifiedTime);
       setDriveStatus(message);
       $("#restorePrompt").classList.add("hidden");
@@ -157,7 +232,7 @@
 
   function finalAutoBackup() {
     if (!window.DriveSync?.getClientId() || !window.DriveSync.hasAccessToken()) return;
-    window.DriveSync.backup(readEntries(), { silent: true, keepalive: true }).catch(() => {});
+    window.DriveSync.backup(backupBundle(), { silent: true, keepalive: true }).catch(() => {});
   }
 
   async function restoreFromDrive() {
@@ -168,7 +243,10 @@
     }
     const result = getStore().replaceAll(backup.entries);
     if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "Yedek doğrulanamadı.");
+    const taskResult = window.TaskStore.replaceAll(backup.tasks || []);
+    if (!taskResult.valid) throw new Error(Object.values(taskResult.errors || {}).join(" ") || "Görev yedeği doğrulanamadı.");
     render();
+    renderTasks();
     updateLastBackupTime(backup.file.modifiedTime);
     $("#restorePrompt").classList.add("hidden");
     setDriveStatus(`${backup.entries.length} kayıt Google Drive’dan geri yüklendi.`);
@@ -211,6 +289,43 @@
     backupAndReport(editing ? "Güncellenen kayıt Drive’a gönderildi." : "Yeni kayıt Drive’a gönderildi.");
   });
 
+  taskForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const editing = Boolean(taskFields.id.value);
+    const payload = {
+      title: taskFields.title.value.trim(),
+      dueDate: taskFields.dueDate.value,
+      status: taskFields.status.value
+    };
+    const result = editing ? window.TaskStore.update(taskFields.id.value, payload) : window.TaskStore.create(payload);
+    if (!result.valid) {
+      $("#taskFormMessage").textContent = Object.values(result.errors || {}).join(" ");
+      $("#taskFormMessage").classList.remove("success");
+      return;
+    }
+    resetTaskForm();
+    $("#taskFormMessage").textContent = editing ? "Görev güncellendi." : "Görev eklendi.";
+    $("#taskFormMessage").classList.add("success");
+    renderTasks();
+    backupAndReport(editing ? "Güncellenen görev Drive’a gönderildi." : "Yeni görev Drive’a gönderildi.");
+  });
+
+  $("#cancelTaskEdit").addEventListener("click", resetTaskForm);
+  $("#addNextTaskToCalendar").addEventListener("click", () => {
+    if (nextDashboardTask) window.open(googleCalendarUrl(nextDashboardTask), "_blank", "noopener,noreferrer");
+  });
+
+  document.querySelectorAll(".tab-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".tab-button").forEach((item) => {
+        const active = item === button;
+        item.classList.toggle("active", active);
+        item.setAttribute("aria-selected", String(active));
+      });
+      document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== button.dataset.tab));
+    });
+  });
+
   fields.description.addEventListener("input", updateCount);
   fields.date.addEventListener("change", render);
   $("#filterDateInput").addEventListener("change", render);
@@ -251,5 +366,7 @@
     setDriveStatus("Ayarlar’dan Google OAuth Client ID’nizi kaydedin.");
   }
   fields.date.value = isoToday();
+  taskFields.dueDate.value = isoToday();
   render();
+  renderTasks();
 })();

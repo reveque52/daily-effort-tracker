@@ -75,9 +75,13 @@
     return (await response.json()).files?.[0] || null;
   }
 
-  async function backup(entries, options = {}) {
+  async function backup(data, options = {}) {
     await authorize({ silent: Boolean(options.silent) });
-    const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), entries }, null, 2);
+    const bundle = Array.isArray(data) ? { entries: data, tasks: [] } : {
+      entries: Array.isArray(data?.entries) ? data.entries : [],
+      tasks: Array.isArray(data?.tasks) ? data.tasks : []
+    };
+    const payload = JSON.stringify({ version: 2, exportedAt: new Date().toISOString(), ...bundle }, null, 2);
     let file = await findBackup(options);
     if (!file) {
       const created = await driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name,modifiedTime", {
@@ -105,9 +109,9 @@
     if (!file) throw new Error("Google Drive’da daha önce oluşturulmuş bir yedek bulunamadı.");
     const response = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?alt=media`);
     const payload = await response.json();
-    if (payload.version !== 1 || !Array.isArray(payload.entries)) throw new Error("Drive yedeğinin biçimi geçersiz.");
+    if (![1, 2].includes(payload.version) || !Array.isArray(payload.entries)) throw new Error("Drive yedeğinin biçimi geçersiz.");
     rememberBackupTime(file.modifiedTime);
-    return { file, entries: payload.entries, exportedAt: payload.exportedAt };
+    return { file, entries: payload.entries, tasks: Array.isArray(payload.tasks) ? payload.tasks : [], exportedAt: payload.exportedAt };
   }
 
   async function getBackupInfo() {

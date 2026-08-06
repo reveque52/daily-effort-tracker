@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="styles.css">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="data-store.js" defer></script>
+    <script src="tasks-store.js" defer></script>
     <script src="drive-sync.js" defer></script>
     <script src="app.js" defer></script>
   </head>
@@ -25,24 +26,10 @@
     </header>
 
     <main>
-      <section class="summary-grid" aria-labelledby="summaryTitle">
-        <h2 id="summaryTitle" class="sr-only">Efor özeti</h2>
-        <article class="summary-card accent">
-          <span>Seçili gün</span>
-          <strong id="dailyTotal">0 sa</strong>
-          <small id="selectedDateLabel">—</small>
-        </article>
-        <article class="summary-card">
-          <span>Toplam efor</span>
-          <strong id="grandTotal">0 sa</strong>
-          <small>Tüm kayıtlar</small>
-        </article>
-        <article class="summary-card">
-          <span>Kayıt sayısı</span>
-          <strong id="entryCount">0</strong>
-          <small>Girilen çalışma</small>
-        </article>
-      </section>
+      <nav class="app-tabs" aria-label="Uygulama bölümleri">
+        <button class="tab-button active" type="button" data-tab="effortsView" aria-selected="true">Eforlar</button>
+        <button class="tab-button" type="button" data-tab="tasksView" aria-selected="false">Görevler <span id="taskTabCount">0</span></button>
+      </nav>
 
       <nav class="drive-toolbar" aria-label="Google Drive araçları">
         <div class="drive-toolbar-status">
@@ -57,8 +44,6 @@
           <strong id="lastBackupTime">Henüz yedeklenmedi</strong>
         </div>
         <div class="drive-toolbar-actions">
-          <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan yükle</button>
-          <button id="backupToDrive" class="button primary" type="button">Şimdi yedekle</button>
           <details class="drive-settings">
             <summary class="button secondary">Ayarlar</summary>
             <div class="drive-settings-popover">
@@ -67,6 +52,10 @@
                 <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
               </label>
               <button id="saveDriveSettings" class="button primary" type="button">Ayarı kaydet</button>
+              <div class="drive-settings-actions">
+                <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan yükle</button>
+                <button id="backupToDrive" class="button primary" type="button">Şimdi yedekle</button>
+              </div>
             </div>
           </details>
         </div>
@@ -76,7 +65,7 @@
         <div class="restore-prompt-icon" aria-hidden="true">↻</div>
         <div>
           <h2 id="restorePromptTitle">Drive yedeğini yükleyerek başla</h2>
-          <p>En güncel efor kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
+          <p>En güncel efor ve görev kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
         </div>
         <div class="restore-prompt-actions">
           <button id="initialRestoreButton" class="button primary" type="button">Drive’dan geri yükle</button>
@@ -84,64 +73,86 @@
         </div>
       </section>
 
-      <div class="content-grid">
-        <section class="panel form-panel" aria-labelledby="formTitle">
-          <div class="panel-heading">
-            <div>
-              <span class="eyebrow">Yeni kayıt</span>
-              <h2 id="formTitle">Efor ekle</h2>
-            </div>
-          </div>
-
-          <form id="effortForm" novalidate>
-            <input id="entryId" type="hidden">
-            <div class="form-grid">
-              <label class="field">
-                <span>Tarih</span>
-                <input id="dateInput" name="date" type="date" required>
-              </label>
-              <label class="field">
-                <span>Süre (saat)</span>
-                <input id="hoursInput" name="hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal" placeholder="Örn. 2,5" required>
-              </label>
-              <label class="field field-wide">
-                <span>Proje</span>
-                <input id="projectInput" name="project" type="text" maxlength="80" autocomplete="organization" placeholder="Proje adını yazın" required>
-              </label>
-              <label class="field field-wide">
-                <span>Açıklama</span>
-                <textarea id="descriptionInput" name="description" rows="4" maxlength="120" placeholder="Bugün ne üzerinde çalıştınız?" required></textarea>
-                <small><span id="descriptionCount">0</span>/120 karakter</small>
-              </label>
-            </div>
-            <p id="formMessage" class="form-message" role="alert" aria-live="polite"></p>
-            <div class="form-actions">
-              <button class="button primary" type="submit"><span id="submitLabel">Kaydı ekle</span></button>
-              <button id="cancelEditButton" class="button secondary hidden" type="button">Vazgeç</button>
-            </div>
-          </form>
+      <section id="effortsView" class="tab-view">
+        <section class="summary-grid" aria-labelledby="summaryTitle">
+          <h2 id="summaryTitle" class="sr-only">Dashboard özeti</h2>
+          <article class="summary-card accent">
+            <span>Seçili gün</span>
+            <strong id="dailyTotal">0 sa</strong>
+            <small id="selectedDateLabel">—</small>
+          </article>
+          <article class="summary-card">
+            <span>Toplam efor</span>
+            <strong id="grandTotal">0 sa</strong>
+            <small>Tüm kayıtlar</small>
+          </article>
+          <article class="summary-card">
+            <span>Kayıt sayısı</span>
+            <strong id="entryCount">0</strong>
+            <small>Girilen çalışma</small>
+          </article>
+          <article class="summary-card calendar-dashboard-card">
+            <span>Yaklaşan görev</span>
+            <strong id="nextTaskTitle">Görev yok</strong>
+            <small id="nextTaskDate">Teslim tarihi bulunmuyor</small>
+            <button id="addNextTaskToCalendar" class="calendar-action" type="button" disabled>Google Takvim’e ekle</button>
+          </article>
         </section>
 
-        <section class="panel list-panel" aria-labelledby="listTitle">
-          <div class="panel-heading list-heading">
-            <div>
-              <span class="eyebrow">Geçmiş</span>
-              <h2 id="listTitle">Efor kayıtları</h2>
+        <div class="content-grid">
+          <section class="panel form-panel" aria-labelledby="formTitle">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">Yeni kayıt</span>
+                <h2 id="formTitle">Efor ekle</h2>
+              </div>
             </div>
-            <label class="filter-field">
-              <span>Günü filtrele</span>
-              <input id="filterDateInput" type="date">
-            </label>
-          </div>
+            <form id="effortForm" novalidate>
+              <input id="entryId" type="hidden">
+              <div class="form-grid">
+                <label class="field"><span>Tarih</span><input id="dateInput" name="date" type="date" required></label>
+                <label class="field"><span>Süre (saat)</span><input id="hoursInput" name="hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal" placeholder="Örn. 2,5" required></label>
+                <label class="field field-wide"><span>Proje</span><input id="projectInput" name="project" type="text" maxlength="80" autocomplete="organization" placeholder="Proje adını yazın" required></label>
+                <label class="field field-wide"><span>Açıklama</span><textarea id="descriptionInput" name="description" rows="4" maxlength="120" placeholder="Bugün ne üzerinde çalıştınız?" required></textarea><small><span id="descriptionCount">0</span>/120 karakter</small></label>
+              </div>
+              <p id="formMessage" class="form-message" role="alert" aria-live="polite"></p>
+              <div class="form-actions"><button class="button primary" type="submit"><span id="submitLabel">Kaydı ekle</span></button><button id="cancelEditButton" class="button secondary hidden" type="button">Vazgeç</button></div>
+            </form>
+          </section>
 
-          <div id="emptyState" class="empty-state">
-            <div aria-hidden="true">◎</div>
-            <h3>Henüz kayıt yok</h3>
-            <p>İlk efor kaydını soldaki formdan ekleyebilirsiniz.</p>
-          </div>
-          <div id="entryList" class="entry-list" aria-live="polite"></div>
-        </section>
-      </div>
+          <section class="panel list-panel" aria-labelledby="listTitle">
+            <div class="panel-heading list-heading">
+              <div><span class="eyebrow">Geçmiş</span><h2 id="listTitle">Efor kayıtları</h2></div>
+              <label class="filter-field"><span>Günü filtrele</span><input id="filterDateInput" type="date"></label>
+            </div>
+            <div id="emptyState" class="empty-state"><div aria-hidden="true">◎</div><h3>Henüz kayıt yok</h3><p>İlk efor kaydını soldaki formdan ekleyebilirsiniz.</p></div>
+            <div id="entryList" class="entry-list" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="tasksView" class="tab-view hidden">
+        <div class="tasks-layout">
+          <section class="panel task-form-panel" aria-labelledby="taskFormTitle">
+            <div class="panel-heading"><div><span class="eyebrow">Yapılacak iş</span><h2 id="taskFormTitle">Görev ekle</h2></div></div>
+            <form id="taskForm" novalidate>
+              <input id="taskId" type="hidden">
+              <div class="task-form-grid">
+                <label class="field field-wide"><span>Başlık</span><input id="taskTitleInput" type="text" maxlength="120" placeholder="Yapılacak işi yazın" required></label>
+                <label class="field"><span>Teslim tarihi</span><input id="taskDueDateInput" type="date" required></label>
+                <label class="field"><span>Durum</span><select id="taskStatusInput" required><option value="planned">Planlandı</option><option value="in_progress">Devam ediyor</option><option value="completed">Tamamlandı</option></select></label>
+              </div>
+              <p id="taskFormMessage" class="form-message" role="alert" aria-live="polite"></p>
+              <div class="form-actions"><button class="button primary" type="submit"><span id="taskSubmitLabel">Görevi ekle</span></button><button id="cancelTaskEdit" class="button secondary hidden" type="button">Vazgeç</button></div>
+            </form>
+          </section>
+          <section class="panel task-list-panel" aria-labelledby="taskListTitle">
+            <div class="panel-heading"><div><span class="eyebrow">Görev planı</span><h2 id="taskListTitle">Yapılacak işler</h2></div><strong id="openTaskCount" class="task-count-badge">0 açık</strong></div>
+            <div id="taskEmptyState" class="empty-state"><div aria-hidden="true">✓</div><h3>Henüz görev yok</h3><p>İlk yapılacak işi soldaki formdan ekleyebilirsiniz.</p></div>
+            <div id="taskList" class="task-list" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
     </main>
 
     <template id="entryTemplate">
@@ -153,10 +164,17 @@
           <time></time>
         </div>
         <div class="entry-actions">
-          <button class="icon-button calendar-button" type="button" aria-label="Kaydı Google Takvim'e ekle">Takvime ekle</button>
           <button class="icon-button edit-button" type="button" aria-label="Kaydı düzenle">Düzenle</button>
           <button class="icon-button danger delete-button" type="button" aria-label="Kaydı sil">Sil</button>
         </div>
+      </article>
+    </template>
+
+    <template id="taskTemplate">
+      <article class="task-card">
+        <button class="task-check" type="button" aria-label="Görevi tamamlandı olarak işaretle">✓</button>
+        <div class="task-content"><div class="task-title-row"><h3></h3><span class="task-status"></span></div><time></time></div>
+        <div class="entry-actions"><button class="icon-button task-edit-button" type="button">Düzenle</button><button class="icon-button danger task-delete-button" type="button">Sil</button></div>
       </article>
     </template>
   </body>
