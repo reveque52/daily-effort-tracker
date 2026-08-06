@@ -22,6 +22,8 @@
   const isoToday = () => new Date().toLocaleDateString("en-CA");
   const parseDate = (value) => new Date(`${value}T12:00:00`);
   const formatHours = (value) => `${numberFormatter.format(Number(value) || 0)} sa`;
+  const isoFromDate = (date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+  const addDays = (date, days) => { const next = new Date(date); next.setDate(next.getDate() + days); return next; };
 
   function googleCalendarUrl(task) {
     const start = task.dueDate.replaceAll("-", "");
@@ -98,6 +100,7 @@
       });
       list.append(card);
     });
+    renderTimesheet();
   }
 
   function statusLabel(status) {
@@ -145,6 +148,116 @@
       });
       list.append(card);
     });
+  }
+
+  function getTimesheetRange() {
+    const period = $("#timesheetPeriod").value;
+    const reference = parseDate($("#timesheetReferenceDate").value || isoToday());
+    if (period === "week") {
+      const mondayOffset = (reference.getDay() + 6) % 7;
+      const start = addDays(reference, -mondayOffset);
+      return { start, end: addDays(start, 6), period };
+    }
+    if (period === "month") {
+      return {
+        start: new Date(reference.getFullYear(), reference.getMonth(), 1, 12),
+        end: new Date(reference.getFullYear(), reference.getMonth() + 1, 0, 12),
+        period
+      };
+    }
+    const startValue = $("#timesheetStartDate").value;
+    const endValue = $("#timesheetEndDate").value;
+    if (!startValue || !endValue || startValue > endValue) return null;
+    return { start: parseDate(startValue), end: parseDate(endValue), period };
+  }
+
+  function tableCell(tag, text, className = "") {
+    const cell = document.createElement(tag);
+    cell.textContent = text;
+    if (className) cell.className = className;
+    return cell;
+  }
+
+  function renderTimesheet() {
+    const range = getTimesheetRange();
+    const table = $("#timesheetTable");
+    const head = table.querySelector("thead");
+    const body = table.querySelector("tbody");
+    const foot = table.querySelector("tfoot");
+    head.replaceChildren(); body.replaceChildren(); foot.replaceChildren();
+    if (!range) {
+      table.classList.add("hidden");
+      $("#timesheetEmpty").classList.remove("hidden");
+      $("#timesheetPeriodLabel").textContent = "Geçerli bir tarih aralığı seçin";
+      $("#timesheetDayCount").textContent = "";
+      $("#timesheetTotalHours").textContent = "0 sa";
+      return;
+    }
+
+    const includeWeekends = $("#includeWeekends").checked;
+    const dates = [];
+    for (let date = new Date(range.start); date <= range.end; date = addDays(date, 1)) {
+      if (includeWeekends || (date.getDay() !== 0 && date.getDay() !== 6)) dates.push(new Date(date));
+    }
+    const startIso = isoFromDate(range.start);
+    const endIso = isoFromDate(range.end);
+    const filtered = readEntries().filter((entry) => entry.date >= startIso && entry.date <= endIso && (includeWeekends || ![0, 6].includes(parseDate(entry.date).getDay())));
+    const groups = new Map();
+    filtered.forEach((entry) => {
+      const key = `${entry.project}\u0000${entry.task || entry.description || ""}`;
+      if (!groups.has(key)) groups.set(key, { project: entry.project, task: entry.task || entry.description || "", days: new Map(), total: 0 });
+      const group = groups.get(key);
+      group.days.set(entry.date, (group.days.get(entry.date) || 0) + Number(entry.hours));
+      group.total += Number(entry.hours);
+    });
+    const rows = Array.from(groups.values()).sort((a, b) => a.project.localeCompare(b.project, "tr") || a.task.localeCompare(b.task, "tr"));
+    const dayTotals = new Map(dates.map((date) => [isoFromDate(date), 0]));
+    let grandTotal = 0;
+
+    const headerRow = document.createElement("tr");
+    headerRow.append(tableCell("th", "Proje", "sticky-column project-column"), tableCell("th", "Açıklama", "sticky-column description-column"));
+    dates.forEach((date) => {
+      const cell = tableCell("th", "", "day-column");
+      const day = document.createElement("strong");
+      day.textContent = String(date.getDate()).padStart(2, "0");
+      const weekday = document.createElement("span");
+      weekday.textContent = new Intl.DateTimeFormat("tr-TR", { weekday: "short" }).format(date);
+      cell.append(day, weekday);
+      if ([0, 6].includes(date.getDay())) cell.classList.add("weekend");
+      headerRow.append(cell);
+    });
+    headerRow.append(tableCell("th", "Toplam", "total-column"));
+    head.append(headerRow);
+
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      tr.append(tableCell("td", row.project, "sticky-column project-column"), tableCell("td", row.task, "sticky-column description-column"));
+      dates.forEach((date) => {
+        const iso = isoFromDate(date);
+        const hours = row.days.get(iso) || 0;
+        dayTotals.set(iso, (dayTotals.get(iso) || 0) + hours);
+        const cell = tableCell("td", hours ? numberFormatter.format(hours) : "", "hours-cell");
+        if ([0, 6].includes(date.getDay())) cell.classList.add("weekend");
+        tr.append(cell);
+      });
+      grandTotal += row.total;
+      tr.append(tableCell("td", formatHours(row.total), "row-total total-column"));
+      body.append(tr);
+    });
+
+    const totalRow = document.createElement("tr");
+    const label = tableCell("th", `Toplam (${rows.length} satır)`, "sticky-column total-label");
+    label.colSpan = 2;
+    totalRow.append(label);
+    dates.forEach((date) => totalRow.append(tableCell("th", dayTotals.get(isoFromDate(date)) ? numberFormatter.format(dayTotals.get(isoFromDate(date))) : "", "hours-cell")));
+    totalRow.append(tableCell("th", formatHours(grandTotal), "total-column"));
+    foot.append(totalRow);
+
+    table.classList.toggle("hidden", rows.length === 0);
+    $("#timesheetEmpty").classList.toggle("hidden", rows.length > 0);
+    $("#timesheetTotalHours").textContent = formatHours(grandTotal);
+    $("#timesheetPeriodLabel").textContent = `${dateFormatter.format(range.start)} – ${dateFormatter.format(range.end)}`;
+    $("#timesheetDayCount").textContent = `${dates.length} gün · ${rows.length} satır`;
   }
 
   function startTaskEdit(task) {
@@ -326,6 +439,34 @@
     });
   });
 
+  function updateTimesheetControls() {
+    const custom = $("#timesheetPeriod").value === "custom";
+    $("#timesheetPeriodNavigation").classList.toggle("hidden", custom);
+    $("#timesheetStartField").classList.toggle("hidden", !custom);
+    $("#timesheetEndField").classList.toggle("hidden", !custom);
+    renderTimesheet();
+  }
+
+  $("#timesheetPeriod").addEventListener("change", updateTimesheetControls);
+  $("#timesheetReferenceDate").addEventListener("change", renderTimesheet);
+  $("#timesheetStartDate").addEventListener("change", renderTimesheet);
+  $("#timesheetEndDate").addEventListener("change", renderTimesheet);
+  $("#includeWeekends").addEventListener("change", renderTimesheet);
+  $("#timesheetPrevious").addEventListener("click", () => {
+    const reference = parseDate($("#timesheetReferenceDate").value || isoToday());
+    if ($("#timesheetPeriod").value === "month") { reference.setDate(1); reference.setMonth(reference.getMonth() - 1); }
+    else reference.setDate(reference.getDate() - 7);
+    $("#timesheetReferenceDate").value = isoFromDate(reference);
+    renderTimesheet();
+  });
+  $("#timesheetNext").addEventListener("click", () => {
+    const reference = parseDate($("#timesheetReferenceDate").value || isoToday());
+    if ($("#timesheetPeriod").value === "month") { reference.setDate(1); reference.setMonth(reference.getMonth() + 1); }
+    else reference.setDate(reference.getDate() + 7);
+    $("#timesheetReferenceDate").value = isoFromDate(reference);
+    renderTimesheet();
+  });
+
   fields.description.addEventListener("input", updateCount);
   fields.date.addEventListener("change", render);
   $("#filterDateInput").addEventListener("change", render);
@@ -367,6 +508,11 @@
   }
   fields.date.value = isoToday();
   taskFields.dueDate.value = isoToday();
+  $("#timesheetReferenceDate").value = isoToday();
+  const todayForRange = parseDate(isoToday());
+  const rangeMonday = addDays(todayForRange, -((todayForRange.getDay() + 6) % 7));
+  $("#timesheetStartDate").value = isoFromDate(rangeMonday);
+  $("#timesheetEndDate").value = isoFromDate(addDays(rangeMonday, 6));
   render();
   renderTasks();
 })();

@@ -28,6 +28,7 @@
     <main>
       <nav class="app-tabs" aria-label="Uygulama bölümleri">
         <button class="tab-button active" type="button" data-tab="effortsView" aria-selected="true">Eforlar</button>
+        <button class="tab-button" type="button" data-tab="timesheetView" aria-selected="false">Timesheet</button>
         <button class="tab-button" type="button" data-tab="tasksView" aria-selected="false">Görevler <span id="taskTabCount">0</span></button>
       </nav>
 
@@ -129,6 +130,31 @@
             <div id="entryList" class="entry-list" aria-live="polite"></div>
           </section>
         </div>
+      </section>
+
+      <section id="timesheetView" class="tab-view hidden">
+        <section class="panel timesheet-panel" aria-labelledby="timesheetTitle">
+          <div class="timesheet-heading">
+            <div><span class="eyebrow">Efor görünümü</span><h2 id="timesheetTitle">Timesheet</h2></div>
+            <div class="timesheet-total"><span>Görünen toplam</span><strong id="timesheetTotalHours">0 sa</strong></div>
+          </div>
+          <div class="timesheet-filters">
+            <label class="filter-control"><span>Görünüm</span><select id="timesheetPeriod"><option value="week">Haftalık</option><option value="month">Aylık</option><option value="custom">Tarih aralığı</option></select></label>
+            <div id="timesheetPeriodNavigation" class="period-navigation"><button id="timesheetPrevious" class="icon-button" type="button" aria-label="Önceki dönem">‹</button><label class="filter-control"><span>Referans tarihi</span><input id="timesheetReferenceDate" type="date"></label><button id="timesheetNext" class="icon-button" type="button" aria-label="Sonraki dönem">›</button></div>
+            <label id="timesheetStartField" class="filter-control hidden"><span>Başlangıç</span><input id="timesheetStartDate" type="date"></label>
+            <label id="timesheetEndField" class="filter-control hidden"><span>Bitiş</span><input id="timesheetEndDate" type="date"></label>
+            <label class="weekend-toggle"><input id="includeWeekends" type="checkbox"><span>Hafta sonlarını dahil et</span></label>
+          </div>
+          <div class="timesheet-period-summary"><strong id="timesheetPeriodLabel"></strong><span id="timesheetDayCount"></span></div>
+          <div class="timesheet-scroll">
+            <table id="timesheetTable">
+              <thead></thead>
+              <tbody></tbody>
+              <tfoot></tfoot>
+            </table>
+            <div id="timesheetEmpty" class="empty-state hidden"><div aria-hidden="true">▦</div><h3>Bu dönemde efor yok</h3><p>Seçili tarih aralığı için kayıt bulunamadı.</p></div>
+          </div>
+        </section>
       </section>
 
       <section id="tasksView" class="tab-view hidden">

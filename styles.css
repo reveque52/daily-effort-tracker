@@ -134,10 +134,46 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .task-status[data-status="in_progress"] { color: var(--brand-dark); background: var(--brand-soft); }
 .task-status[data-status="completed"] { color: #137052; background: #e9f8f2; }
 .task-content time { display: block; margin-top: .35rem; color: var(--muted); font-size: .73rem; }
+.timesheet-panel { overflow: visible; }
+.timesheet-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; padding: 1.2rem 1.3rem .9rem; border-bottom: 1px solid var(--line); }
+.timesheet-heading h2 { margin: .18rem 0 0; font-size: 1.3rem; }
+.timesheet-total { text-align: right; }
+.timesheet-total span, .timesheet-total strong { display: block; }
+.timesheet-total span { color: var(--muted); font-size: .7rem; text-transform: uppercase; }
+.timesheet-total strong { margin-top: .15rem; font-size: 1.2rem; }
+.timesheet-filters { display: flex; align-items: end; gap: .75rem; padding: .9rem 1.3rem; border-bottom: 1px solid var(--line); background: #fafbfe; flex-wrap: wrap; }
+.filter-control { display: grid; gap: .3rem; min-width: 135px; }
+.filter-control span { font-size: .72rem; font-weight: 750; }
+.filter-control input, .filter-control select { padding: .55rem .65rem; font-size: .8rem; }
+.period-navigation { display: flex; align-items: end; gap: .25rem; }
+.period-navigation .icon-button { height: 37px; padding: .35rem .7rem; border: 1px solid var(--line); background: #fff; font-size: 1.2rem; }
+.weekend-toggle { display: flex; align-items: center; gap: .5rem; min-height: 37px; padding: .5rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: .76rem; font-weight: 700; }
+.weekend-toggle input { width: auto; accent-color: var(--brand); }
+.timesheet-period-summary { display: flex; justify-content: space-between; gap: 1rem; padding: .65rem 1.3rem; color: var(--muted); font-size: .75rem; }
+.timesheet-period-summary strong { color: var(--ink); }
+.timesheet-scroll { max-width: 100%; overflow-x: auto; border-top: 1px solid var(--line); }
+#timesheetTable { width: max-content; min-width: 100%; border-spacing: 0; font-size: .74rem; }
+#timesheetTable th, #timesheetTable td { min-width: 54px; height: 43px; padding: .5rem .45rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: center; }
+#timesheetTable thead th { position: sticky; top: 0; z-index: 3; color: var(--muted); background: #fafbfe; font-weight: 750; }
+#timesheetTable thead th strong, #timesheetTable thead th span { display: block; }
+#timesheetTable thead th strong { color: var(--ink); font-size: .78rem; }
+#timesheetTable thead th span { margin-top: .12rem; font-size: .62rem; text-transform: uppercase; }
+#timesheetTable tbody tr:nth-child(even) td { background: #f8f9fd; }
+#timesheetTable .sticky-column { position: sticky; z-index: 2; text-align: left; background: #fff; }
+#timesheetTable thead .sticky-column { z-index: 5; background: #fafbfe; }
+#timesheetTable .project-column { left: 0; min-width: 140px; max-width: 140px; font-weight: 800; }
+#timesheetTable .description-column { left: 140px; min-width: 260px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#timesheetTable tbody tr:nth-child(even) .sticky-column { background: #f8f9fd; }
+#timesheetTable .weekend { background: #f2efff !important; }
+#timesheetTable .hours-cell { color: var(--brand-dark); font-weight: 750; }
+#timesheetTable .total-column { min-width: 76px; color: var(--ink); background: #f3f4fa; font-weight: 900; }
+#timesheetTable tfoot th { position: sticky; bottom: 0; z-index: 3; color: var(--ink); background: #e9eaff; }
+#timesheetTable .total-label { left: 0; z-index: 4; background: #e9eaff; }
 
 @media (max-width: 850px) {
   .content-grid { grid-template-columns: 1fr; }
   .tasks-layout { grid-template-columns: 1fr; }
+  .timesheet-filters { align-items: stretch; }
   .drive-toolbar { grid-template-columns: 1fr auto; }
   .last-backup { grid-row: 2; padding: .65rem 0 0; border-top: 1px solid var(--line); border-left: 0; }
   .drive-toolbar-actions { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; align-items: stretch; }
@@ -175,6 +211,13 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
   .entry-actions { grid-column: 2; flex-wrap: wrap; }
   .task-card { grid-template-columns: auto 1fr; padding: 1rem; }
   .task-card .entry-actions { grid-column: 2; }
+  .timesheet-heading { align-items: start; }
+  .timesheet-filters { display: grid; grid-template-columns: 1fr 1fr; padding: .8rem; }
+  .period-navigation, .weekend-toggle { grid-column: 1 / -1; }
+  .period-navigation .filter-control { flex: 1; }
+  .timesheet-period-summary { flex-direction: column; gap: .2rem; padding: .6rem .8rem; }
+  #timesheetTable .project-column { min-width: 110px; max-width: 110px; }
+  #timesheetTable .description-column { left: 110px; min-width: 190px; max-width: 190px; }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }

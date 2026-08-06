@@ -18,6 +18,8 @@ const requiredIds = [
   "restorePrompt", "initialRestoreButton", "skipInitialRestore",
   "tasksView", "taskForm", "taskTitleInput", "taskDueDateInput", "taskStatusInput",
   "taskList", "taskTemplate", "addNextTaskToCalendar",
+  "timesheetView", "timesheetPeriod", "timesheetReferenceDate", "timesheetStartDate",
+  "timesheetEndDate", "includeWeekends", "timesheetTable", "timesheetTotalHours",
 ];
 
 for (const id of requiredIds) {
@@ -51,6 +53,11 @@ assert.match(drive, /LAST_BACKUP_KEY/, "Son Drive sürümü zamanı saklanmalı"
 assert.match(drive, /tasks:\s*Array\.isArray/, "Drive yedeği görevleri de içermeli");
 assert.match(tasks, /planned.*in_progress.*completed/, "Görev durumları eksik");
 assert.match(html, /drive-settings-popover[\s\S]*restoreFromDrive[\s\S]*backupToDrive/, "Drive işlemleri Ayarlar içinde olmalı");
+assert.match(html, /value="week"[\s\S]*value="month"[\s\S]*value="custom"/, "Timesheet dönem seçenekleri eksik");
+assert.match(app, /getTimesheetRange/, "Timesheet tarih aralığı hesaplaması eksik");
+assert.match(app, /includeWeekends/, "Hafta sonu filtresi eksik");
+assert.match(app, /dayTotals/, "Timesheet günlük toplamları eksik");
+assert.match(css, /timesheet-scroll[^{]*\{[^}]*overflow-x:\s*auto/, "Timesheet yatay kaydırma eksik");
 assert.match(app, /pagehide/, "Kapanış yedekleme olayı eksik");
 assert.match(app, /visibilitychange/, "Arka plana geçiş yedekleme olayı eksik");
 assert.match(drive, /keepalive:\s*Boolean\(options\.keepalive\)/, "Kapanış isteği keepalive kullanmalı");
