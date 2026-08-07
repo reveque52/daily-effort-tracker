@@ -2,7 +2,8 @@
   "use strict";
 
   const STORAGE_KEY = "daily-effort-tracker.entries.v1";
-  const MAX_TEXT_LENGTH = 120;
+  const MAX_PROJECT_LENGTH = 120;
+  const MAX_TASK_LENGTH = 1000;
   const MAX_NOTES_LENGTH = 1000;
 
   function cleanText(value) {
@@ -27,21 +28,32 @@
       jiraId: cleanText(value.jiraId),
       hours: Number(value.hours),
       notes: cleanText(value.notes),
+      jiraWorklogId: cleanText(value.jiraWorklogId),
+      jiraWorklogIssueKey: cleanText(value.jiraWorklogIssueKey),
+      jiraSyncStatus: cleanText(value.jiraSyncStatus),
+      jiraSyncDirection: cleanText(value.jiraSyncDirection),
+      jiraSyncError: cleanText(value.jiraSyncError),
+      jiraSyncedAt: cleanText(value.jiraSyncedAt),
     };
     const errors = {};
 
     if (!isValidDate(normalized.date)) errors.date = "Geçerli bir tarih seçin.";
     if (!normalized.project) errors.project = "Proje adı zorunludur.";
-    else if (normalized.project.length > MAX_TEXT_LENGTH) errors.project = "Proje adı en fazla 120 karakter olabilir.";
+    else if (normalized.project.length > MAX_PROJECT_LENGTH) errors.project = "Proje adı en fazla 120 karakter olabilir.";
     if (!normalized.jiraId && !(options && options.allowLegacy)) errors.jiraId = "JIRA maddesi seçimi zorunludur.";
     if (!normalized.task) errors.task = "Görev açıklaması zorunludur.";
-    else if (normalized.task.length > MAX_TEXT_LENGTH) errors.task = "Görev açıklaması en fazla 120 karakter olabilir.";
+    else if (normalized.task.length > MAX_TASK_LENGTH) errors.task = "Efor açıklaması en fazla 1000 karakter olabilir.";
     if (!Number.isFinite(normalized.hours) || normalized.hours <= 0 || normalized.hours > 24) {
       errors.hours = "Efor 0 ile 24 saat arasında olmalıdır.";
     } else {
       normalized.hours = Math.round(normalized.hours * 100) / 100;
     }
     if (normalized.notes.length > MAX_NOTES_LENGTH) errors.notes = "Notlar en fazla 1000 karakter olabilir.";
+    if (normalized.jiraWorklogId.length > 80) errors.jiraWorklogId = "JIRA worklog kimliği geçersiz.";
+    if (normalized.jiraWorklogIssueKey.length > 100) errors.jiraWorklogIssueKey = "JIRA worklog issue key değeri geçersiz.";
+    if (normalized.jiraSyncStatus && !["pending", "synced", "failed"].includes(normalized.jiraSyncStatus)) errors.jiraSyncStatus = "JIRA senkronizasyon durumu geçersiz.";
+    if (normalized.jiraSyncDirection && !["pushed", "imported"].includes(normalized.jiraSyncDirection)) errors.jiraSyncDirection = "JIRA senkronizasyon yönü geçersiz.";
+    if (normalized.jiraSyncError.length > 500) errors.jiraSyncError = "JIRA senkronizasyon hatası en fazla 500 karakter olabilir.";
 
     return { valid: Object.keys(errors).length === 0, errors: errors, value: normalized };
   }
@@ -134,6 +146,52 @@
     return { valid: true, errors: {}, value: normalized };
   }
 
+  function mergeJiraWorklogs(importedEntries) {
+    if (!Array.isArray(importedEntries)) return { valid: false, errors: { entries: "JIRA worklog verisi geçersiz." } };
+    const entries = readAll();
+    const byWorklogId = new Map();
+    entries.forEach(function (entry, index) {
+      if (entry.jiraWorklogId && !byWorklogId.has(entry.jiraWorklogId)) byWorklogId.set(entry.jiraWorklogId, index);
+    });
+    const now = new Date().toISOString();
+    const comparableFields = ["date", "project", "task", "jiraId", "hours", "notes", "jiraWorklogId", "jiraWorklogIssueKey", "jiraSyncStatus", "jiraSyncDirection", "jiraSyncError", "jiraSyncedAt"];
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+    let conflicts = 0;
+
+    for (const item of importedEntries) {
+      const result = validate(item);
+      if (!result.valid) return result;
+      if (!result.value.jiraWorklogId) return { valid: false, errors: { jiraWorklogId: "JIRA worklog kimliği zorunludur." } };
+      const index = byWorklogId.get(result.value.jiraWorklogId);
+      if (index === undefined) {
+        const entry = Object.assign({ id: makeId() }, result.value, { createdAt: item.createdAt || now, updatedAt: now });
+        entries.push(entry);
+        byWorklogId.set(entry.jiraWorklogId, entries.length - 1);
+        created += 1;
+        continue;
+      }
+      const current = entries[index];
+      if (["pending", "failed"].includes(current.jiraSyncStatus)) {
+        conflicts += 1;
+        continue;
+      }
+      const nextValue = Object.assign({}, result.value, {
+        jiraSyncDirection: current.jiraSyncDirection === "pushed" ? "pushed" : (result.value.jiraSyncDirection || "imported")
+      });
+      const changed = comparableFields.some(function (field) { return String(current[field] ?? "") !== String(nextValue[field] ?? ""); });
+      if (!changed) {
+        unchanged += 1;
+        continue;
+      }
+      entries[index] = Object.assign({}, current, nextValue, { updatedAt: now });
+      updated += 1;
+    }
+    writeAll(entries);
+    return { valid: true, errors: {}, value: { created, updated, unchanged, conflicts, total: entries.length } };
+  }
+
   function summarize(entries) {
     const source = Array.isArray(entries) ? entries : readAll();
     const byProject = {};
@@ -167,6 +225,7 @@
     remove: remove,
     clear: clear,
     replaceAll: replaceAll,
+    mergeJiraWorklogs: mergeJiraWorklogs,
     summarize: summarize,
   });
 })(window);

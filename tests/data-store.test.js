@@ -36,6 +36,8 @@ test("zorunlu alanları ve saat sınırlarını doğrular", () => {
   assert.equal(store.validate({ date: "2026-08-05", project: " P ", task: " T ", hours: "1.255" }).value.hours, 1.25);
   assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "T", hours: 1 }).errors.jiraId.length > 0, true);
   assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "T", jiraId: " jira-1 ", hours: 1 }).value.jiraId, "jira-1");
+  assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "A".repeat(1000), jiraId: "jira-1", hours: 1 }).valid, true);
+  assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "A".repeat(1001), jiraId: "jira-1", hours: 1 }).valid, false);
 });
 
 test("CRUD akışı veriyi localStorage içinde kalıcı tutar", () => {
@@ -91,6 +93,49 @@ test("aynı tarihte birden fazla efor kaydını ayrı tutup toplamını hesaplar
   const { store } = loadStore(JSON.stringify(rows));
   assert.equal(store.list({ date: "2026-08-06" }).length, 2);
   assert.equal(store.summarize().byDate["2026-08-06"], 5.5);
+});
+
+test("JIRA worklog senkronizasyon bilgisini kayıt ve yedek akışında korur", () => {
+  const { store } = loadStore();
+  const created = store.create({
+    date: "2026-08-07", project: "DIP-43", task: "Hazırlık", jiraId: "jira-43", hours: 2,
+    jiraWorklogId: "501", jiraWorklogIssueKey: "DIP-43", jiraSyncStatus: "synced", jiraSyncDirection: "pushed", jiraSyncedAt: "2026-08-07T10:00:00Z"
+  });
+  assert.equal(created.valid, true);
+  assert.equal(store.get("test-id").jiraWorklogId, "501");
+  assert.equal(store.get("test-id").jiraSyncStatus, "synced");
+  assert.equal(store.get("test-id").jiraSyncDirection, "pushed");
+  assert.equal(store.replaceAll(store.list()).value[0].jiraWorklogIssueKey, "DIP-43");
+  assert.equal(store.validate({ date: "2026-08-07", project: "DIP-43", task: "Hazırlık", jiraId: "jira-43", hours: 2, jiraSyncStatus: "unknown" }).valid, false);
+});
+
+test("JIRA'dan alınan worklogları kimliğine göre mükerrer oluşturmadan birleştirir", () => {
+  const { store } = loadStore();
+  const first = store.mergeJiraWorklogs([{
+    date: "2026-08-06", project: "DIP-43", task: "Analiz", jiraId: "jira-43", hours: 2, notes: "",
+    jiraWorklogId: "601", jiraWorklogIssueKey: "DIP-43", jiraSyncStatus: "synced", jiraSyncDirection: "imported", jiraSyncedAt: "2026-08-06T10:00:00Z"
+  }]);
+  assert.equal(first.valid, true);
+  assert.equal(first.value.created, 1);
+  assert.equal(store.list().length, 1);
+
+  const repeated = store.mergeJiraWorklogs([{
+    date: "2026-08-06", project: "DIP-43", task: "Analiz güncellendi", jiraId: "jira-43", hours: 3, notes: "",
+    jiraWorklogId: "601", jiraWorklogIssueKey: "DIP-43", jiraSyncStatus: "synced", jiraSyncDirection: "imported", jiraSyncedAt: "2026-08-06T11:00:00Z"
+  }]);
+  assert.equal(repeated.value.created, 0);
+  assert.equal(repeated.value.updated, 1);
+  assert.equal(store.list().length, 1);
+  assert.equal(store.list()[0].hours, 3);
+  assert.equal(store.list()[0].task, "Analiz güncellendi");
+
+  store.update("test-id", { ...store.get("test-id"), task: "Yerel revizyon", jiraSyncStatus: "pending" });
+  const conflict = store.mergeJiraWorklogs([{
+    date: "2026-08-06", project: "DIP-43", task: "JIRA revizyonu", jiraId: "jira-43", hours: 4, notes: "",
+    jiraWorklogId: "601", jiraWorklogIssueKey: "DIP-43", jiraSyncStatus: "synced", jiraSyncDirection: "imported", jiraSyncedAt: "2026-08-06T12:00:00Z"
+  }]);
+  assert.equal(conflict.value.conflicts, 1);
+  assert.equal(store.get("test-id").task, "Yerel revizyon");
 });
 
 let failures = 0;
