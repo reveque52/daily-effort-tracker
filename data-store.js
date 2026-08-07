@@ -18,12 +18,13 @@
       date.getUTCDate() === parts[2];
   }
 
-  function validate(input) {
+  function validate(input, options) {
     const value = input && typeof input === "object" ? input : {};
     const normalized = {
       date: cleanText(value.date),
       project: cleanText(value.project),
       task: cleanText(value.task),
+      jiraId: cleanText(value.jiraId),
       hours: Number(value.hours),
       notes: cleanText(value.notes),
     };
@@ -32,6 +33,7 @@
     if (!isValidDate(normalized.date)) errors.date = "Geçerli bir tarih seçin.";
     if (!normalized.project) errors.project = "Proje adı zorunludur.";
     else if (normalized.project.length > MAX_TEXT_LENGTH) errors.project = "Proje adı en fazla 120 karakter olabilir.";
+    if (!normalized.jiraId && !(options && options.allowLegacy)) errors.jiraId = "JIRA maddesi seçimi zorunludur.";
     if (!normalized.task) errors.task = "Görev açıklaması zorunludur.";
     else if (normalized.task.length > MAX_TEXT_LENGTH) errors.task = "Görev açıklaması en fazla 120 karakter olabilir.";
     if (!Number.isFinite(normalized.hours) || normalized.hours <= 0 || normalized.hours > 24) {
@@ -47,7 +49,7 @@
   function readAll() {
     try {
       const parsed = JSON.parse(global.localStorage.getItem(STORAGE_KEY) || "[]");
-      return Array.isArray(parsed) ? parsed.filter(function (item) { return validate(item).valid && item.id; }) : [];
+      return Array.isArray(parsed) ? parsed.filter(function (item) { return validate(item, { allowLegacy: true }).valid && item.id; }) : [];
     } catch (_error) {
       return [];
     }
@@ -120,7 +122,7 @@
     if (!Array.isArray(importedEntries)) return { valid: false, errors: { entries: "Yedek dosyası geçersiz." } };
     const normalized = [];
     for (const item of importedEntries) {
-      const result = validate(item);
+      const result = validate(item, { allowLegacy: true });
       if (!result.valid) return { valid: false, errors: result.errors };
       const now = new Date().toISOString();
       normalized.push(Object.assign({ id: item.id || makeId() }, result.value, {

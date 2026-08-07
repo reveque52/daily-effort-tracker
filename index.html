@@ -5,19 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260807-33">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="data-store.js" defer></script>
-    <script src="tasks-store.js" defer></script>
-    <script src="drive-sync.js" defer></script>
-    <script src="app.js" defer></script>
+    <script src="data-store.js?v=20260806-19" defer></script>
+    <script src="tasks-store.js?v=20260806-20" defer></script>
+    <script src="jira-store.js?v=20260807-24" defer></script>
+    <script src="reminders-store.js?v=20260806-22" defer></script>
+    <script src="ai-assistant.js?v=20260806-23" defer></script>
+    <script src="drive-sync.js?v=20260806-22" defer></script>
+    <script src="app.js?v=20260807-31" defer></script>
   </head>
   <body>
     <header class="page-header">
       <div class="header-copy">
         <span class="eyebrow">Çalışma günlüğü</span>
         <h1>Günlük Efor Takibi</h1>
-        <p>Eforlarını tek yerde kaydet, güne ve projeye göre kolayca takip et.</p>
+        <p>Eforlarını JIRA maddelerine bağla, güne ve issue’ya göre kolayca takip et.</p>
       </div>
       <div class="today-chip" aria-label="Bugünün tarihi">
         <span>Bugün</span>
@@ -27,9 +30,11 @@
 
     <main>
       <nav class="app-tabs" aria-label="Uygulama bölümleri">
-        <button class="tab-button active" type="button" data-tab="effortsView" aria-selected="true">Eforlar</button>
+        <button class="tab-button active" type="button" data-tab="homeView" aria-selected="true">Ana Sayfa</button>
+        <button class="tab-button" type="button" data-tab="effortsView" aria-selected="false">Eforlar</button>
         <button class="tab-button" type="button" data-tab="timesheetView" aria-selected="false">Timesheet</button>
         <button class="tab-button" type="button" data-tab="tasksView" aria-selected="false">Görevler <span id="taskTabCount">0</span></button>
+        <button class="tab-button" type="button" data-tab="jiraView" aria-selected="false">JIRA Maddeleri <span id="jiraTabCount">0</span></button>
       </nav>
 
       <nav class="drive-toolbar" aria-label="Google Drive araçları">
@@ -66,7 +71,7 @@
         <div class="restore-prompt-icon" aria-hidden="true">↻</div>
         <div>
           <h2 id="restorePromptTitle">Drive yedeğini yükleyerek başla</h2>
-          <p>En güncel efor ve görev kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
+          <p>En güncel efor, görev, JIRA ve hatırlatma kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
         </div>
         <div class="restore-prompt-actions">
           <button id="initialRestoreButton" class="button primary" type="button">Drive’dan geri yükle</button>
@@ -74,7 +79,92 @@
         </div>
       </section>
 
-      <section id="effortsView" class="tab-view">
+      <section id="homeView" class="tab-view">
+        <header class="home-intro">
+          <div>
+            <span class="eyebrow">Güncel durum</span>
+            <h2>Çalışma özeti</h2>
+            <p id="homeWeekLabel">Bu haftanın görev ve efor görünümü</p>
+          </div>
+          <button class="button primary" type="button" data-home-target="effortsView">+ Efor ekle</button>
+        </header>
+
+        <section class="home-kpi-grid" aria-label="Haftalık özet">
+          <article class="home-kpi-card home-kpi-primary">
+            <span>Bu haftaki efor</span>
+            <strong id="homeWeeklyHours">0 sa</strong>
+            <small id="homeWeeklyGoal">40 saatlik hedefin %0’ı</small>
+          </article>
+          <article class="home-kpi-card">
+            <span>Haftalık kayıt</span>
+            <strong id="homeWeeklyEntryCount">0</strong>
+            <small>Girilen efor kaydı</small>
+          </article>
+          <article class="home-kpi-card">
+            <span>Bekleyen görev</span>
+            <strong id="homePlannedTasks">0</strong>
+            <small>Henüz başlanmadı</small>
+          </article>
+          <article class="home-kpi-card">
+            <span>Devam eden görev</span>
+            <strong id="homeInProgressTasks">0</strong>
+            <small>Aktif çalışma</small>
+          </article>
+        </section>
+
+        <div class="home-dashboard-grid">
+          <section class="panel dashboard-panel weekly-chart-panel" aria-labelledby="weeklyEffortTitle">
+            <div class="panel-heading dashboard-panel-heading">
+              <div><span class="eyebrow">Günlük dağılım</span><h2 id="weeklyEffortTitle">Haftalık efor</h2></div>
+              <button class="dashboard-link" type="button" data-home-target="timesheetView">Timesheet’i aç →</button>
+            </div>
+            <div id="weeklyEffortChart" class="weekly-effort-chart" role="img" aria-label="Bu haftanın günlere göre efor grafiği"></div>
+          </section>
+
+          <section class="panel dashboard-panel task-chart-panel" aria-labelledby="taskStatusTitle">
+            <div class="panel-heading dashboard-panel-heading">
+              <div><span class="eyebrow">Görev dağılımı</span><h2 id="taskStatusTitle">Görev durumları</h2></div>
+              <button class="dashboard-link" type="button" data-home-target="tasksView">Tüm görevler →</button>
+            </div>
+            <div id="taskStatusChart" class="task-status-chart" role="img" aria-label="Görevlerin durumlara göre dağılımı"></div>
+          </section>
+
+          <section class="panel dashboard-panel jira-effort-panel" aria-labelledby="jiraEffortTitle">
+            <div class="panel-heading dashboard-panel-heading">
+              <div><span class="eyebrow">Bu hafta</span><h2 id="jiraEffortTitle">JIRA bazlı efor</h2></div>
+              <span class="dashboard-note">İlk 5 madde</span>
+            </div>
+            <div id="jiraEffortChart" class="jira-effort-chart"></div>
+          </section>
+
+          <section class="panel dashboard-panel pending-task-panel" aria-labelledby="pendingTasksTitle">
+            <div class="panel-heading dashboard-panel-heading">
+              <div><span class="eyebrow">Öncelik sırası</span><h2 id="pendingTasksTitle">Açık görevler</h2></div>
+              <span id="homeOpenTaskCount" class="task-count-badge">0 açık</span>
+            </div>
+            <div id="homePendingTaskList" class="home-pending-task-list"></div>
+          </section>
+
+          <section class="panel dashboard-panel reminder-panel" aria-labelledby="reminderPanelTitle">
+            <div class="panel-heading dashboard-panel-heading reminder-panel-heading">
+              <div><span class="eyebrow">Kişisel alan</span><h2 id="reminderPanelTitle">Önemli Notlar ve Hatırlatmalar</h2></div>
+              <strong id="reminderOpenCount" class="task-count-badge">0 aktif</strong>
+            </div>
+            <form id="reminderForm" class="reminder-form" novalidate>
+              <input id="reminderId" type="hidden">
+              <label class="field reminder-text-field"><span>Not / hatırlatma</span><input id="reminderTextInput" type="text" maxlength="300" placeholder="Unutmamanız gereken konuyu yazın" required></label>
+              <label class="field"><span>Hatırlatma zamanı</span><input id="reminderDateInput" type="datetime-local"></label>
+              <label class="field"><span>Önem</span><select id="reminderImportanceInput"><option value="important">Önemli</option><option value="normal" selected>Normal</option></select></label>
+              <div class="reminder-form-actions"><button class="button primary" type="submit"><span id="reminderSubmitLabel">Ekle</span></button><button id="cancelReminderEdit" class="button secondary hidden" type="button">Vazgeç</button></div>
+              <p id="reminderFormMessage" class="form-message" role="alert" aria-live="polite"></p>
+            </form>
+            <div id="reminderEmptyState" class="dashboard-empty">Henüz önemli bir not veya hatırlatma eklenmedi.</div>
+            <div id="reminderList" class="reminder-list" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="effortsView" class="tab-view hidden">
         <section class="summary-grid" aria-labelledby="summaryTitle">
           <h2 id="summaryTitle" class="sr-only">Dashboard özeti</h2>
           <article class="summary-card accent">
@@ -113,7 +203,22 @@
               <div class="form-grid">
                 <label class="field"><span>Tarih</span><input id="dateInput" name="date" type="date" required></label>
                 <label class="field"><span>Süre (saat)</span><input id="hoursInput" name="hours" type="number" min="0.25" max="24" step="0.25" inputmode="decimal" placeholder="Örn. 2,5" required></label>
-                <label class="field field-wide"><span>Proje</span><input id="projectInput" name="project" type="text" maxlength="80" autocomplete="organization" placeholder="Proje adını yazın" required></label>
+                <div class="field field-wide">
+                  <label class="field-label" for="jiraItemPickerButton">JIRA maddesi</label>
+                  <div id="jiraItemPicker" class="effort-jira-picker">
+                    <button id="jiraItemPickerButton" class="jira-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="jiraItemPickerDropdown">
+                      <span id="jiraItemPickerValue">JIRA-YOK — Henüz JIRA maddesi atanmadı</span>
+                      <span class="jira-picker-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    <div id="jiraItemPickerDropdown" class="jira-picker-dropdown hidden">
+                      <input id="jiraItemSearchInput" type="search" autocomplete="off" placeholder="Key, summary, kişi veya durum ara..." aria-controls="jiraItemOptionList" aria-describedby="jiraItemSearchCount">
+                      <div id="jiraItemSearchCount" class="jira-picker-count" aria-live="polite"></div>
+                      <div id="jiraItemOptionList" class="jira-picker-options" role="listbox" aria-label="JIRA maddeleri"></div>
+                    </div>
+                    <select id="jiraItemInput" class="jira-native-select" hidden required aria-label="Eforun bağlanacağı JIRA maddesi"><option value="__dummy_jira__">JIRA-YOK — Henüz JIRA maddesi atanmadı</option></select>
+                  </div>
+                  <small>Gerçek JIRA maddesi henüz yoksa geçici “JIRA-YOK” seçeneğiyle kaydedip daha sonra değiştirebilirsiniz.</small>
+                </div>
                 <label class="field field-wide"><span>Açıklama</span><textarea id="descriptionInput" name="description" rows="4" maxlength="120" placeholder="Bugün ne üzerinde çalıştınız?" required></textarea><small><span id="descriptionCount">0</span>/120 karakter</small></label>
               </div>
               <p id="formMessage" class="form-message" role="alert" aria-live="polite"></p>
@@ -139,7 +244,8 @@
             <div class="timesheet-total"><span>Görünen toplam</span><strong id="timesheetTotalHours">0 sa</strong></div>
           </div>
           <div class="timesheet-filters">
-            <label class="filter-control"><span>Görünüm</span><select id="timesheetPeriod"><option value="week">Haftalık</option><option value="month">Aylık</option><option value="custom">Tarih aralığı</option></select></label>
+            <label class="filter-control"><span>Görünüm</span><select id="timesheetPeriod"><option value="week">Haftalık</option><option value="month" selected>Aylık</option><option value="custom">Tarih aralığı</option></select></label>
+            <label class="filter-control"><span>Satır yapısı</span><select id="timesheetGrouping"><option value="jira" selected>JIRA maddesine göre</option><option value="day">Güne göre (birleşik)</option></select></label>
             <div id="timesheetPeriodNavigation" class="period-navigation"><button id="timesheetPrevious" class="icon-button" type="button" aria-label="Önceki dönem">‹</button><label class="filter-control"><span>Referans tarihi</span><input id="timesheetReferenceDate" type="date"></label><button id="timesheetNext" class="icon-button" type="button" aria-label="Sonraki dönem">›</button></div>
             <label id="timesheetStartField" class="filter-control hidden"><span>Başlangıç</span><input id="timesheetStartDate" type="date"></label>
             <label id="timesheetEndField" class="filter-control hidden"><span>Bitiş</span><input id="timesheetEndDate" type="date"></label>
@@ -158,36 +264,163 @@
       </section>
 
       <section id="tasksView" class="tab-view hidden">
-        <div class="tasks-layout">
-          <section class="panel task-form-panel" aria-labelledby="taskFormTitle">
-            <div class="panel-heading"><div><span class="eyebrow">Yapılacak iş</span><h2 id="taskFormTitle">Görev ekle</h2></div></div>
+        <nav class="task-subtabs" aria-label="Görev sayfaları">
+          <button class="task-subtab-button" type="button" data-task-tab="taskCreateView" aria-selected="false">Görev Ekle</button>
+          <button class="task-subtab-button active" type="button" data-task-tab="taskReportView" aria-selected="true">Yapılacak İşler <span id="taskReportCount">0</span></button>
+        </nav>
+        <div class="task-pages">
+          <section id="taskCreateView" class="panel task-subview task-form-panel hidden" aria-labelledby="taskFormTitle">
+            <div class="panel-heading task-form-heading"><div><span class="eyebrow">Yapılacak iş</span><h2 id="taskFormTitle">Görev ekle</h2></div><div class="task-import-tools"><div><label class="button secondary" for="taskPlanImport">Dosyadan aktar</label><input id="taskPlanImport" class="sr-only" type="file" accept=".txt,.tsv,text/plain,text/tab-separated-values"><button id="openTaskPlanPaste" class="button secondary" type="button">Metin yapıştır</button></div><small>Item, Subitem, açıklama, öncelik, yıl ve çeyrek</small></div></div>
             <form id="taskForm" novalidate>
               <input id="taskId" type="hidden">
               <div class="task-form-grid">
-                <label class="field field-wide"><span>Başlık</span><input id="taskTitleInput" type="text" maxlength="120" placeholder="Yapılacak işi yazın" required></label>
-                <label class="field"><span>Teslim tarihi</span><input id="taskDueDateInput" type="date" required></label>
+                <label class="field field-wide"><span>Başlık / alt madde</span><input id="taskTitleInput" type="text" maxlength="300" placeholder="Yapılacak işi yazın" required></label>
+                <label class="field field-wide"><span>Ana görev</span><select id="taskParentTaskInput"><option value="">Ana görev yok — bağımsız görev</option></select><small>Bu kayıt bir alt görevse bağlı olduğu ana görevi seçin.</small></label>
+                <label class="field"><span>Görev tipi</span><select id="taskTypeInput" required><option value="architecture_roadmap" selected>Architecture Roadmap</option><option value="standard">Standart görev</option><option value="meeting_organization">Toplantı organizasyonu</option><option value="management_request">Yönetim talebi</option><option value="other">Diğer</option></select></label>
+                <label class="field"><span>Atanan kişi / kimde bekliyor</span><input id="taskAssigneeInput" type="text" maxlength="120" list="taskAssigneeOptions" placeholder="Kişi adını yazın veya seçin"><datalist id="taskAssigneeOptions"></datalist></label>
+                <label class="field"><span>Öncelik</span><select id="taskPriorityInput"><option value="">Belirtilmedi</option><option value="high">Yüksek</option><option value="medium">Orta</option><option value="low">Düşük</option></select></label>
+                <label class="field"><span>Yıl</span><input id="taskYearInput" type="number" min="2000" max="2100" step="1" inputmode="numeric" placeholder="Örn. 2026"></label>
+                <label class="field"><span>Planlanan çeyrek</span><select id="taskQuarterInput"><option value="">Belirtilmedi</option><option value="Q1">Q1</option><option value="Q2">Q2</option><option value="Q3">Q3</option><option value="Q4">Q4</option></select></label>
+                <label class="field"><span>Teslim tarihi (opsiyonel)</span><input id="taskDueDateInput" type="date"></label>
                 <label class="field"><span>Durum</span><select id="taskStatusInput" required><option value="planned">Planlandı</option><option value="in_progress">Devam ediyor</option><option value="completed">Tamamlandı</option></select></label>
+                <div class="field field-wide"><span>Detaylı açıklama</span><div class="task-editor-toolbar" role="toolbar" aria-label="Açıklama biçimlendirme"><button type="button" data-task-command="bold" aria-label="Kalın"><strong>B</strong></button><button type="button" data-task-command="italic" aria-label="İtalik"><em>I</em></button><button type="button" data-task-command="insertUnorderedList" aria-label="Madde işaretli liste">• Liste</button><button type="button" data-task-command="insertOrderedList" aria-label="Numaralı liste">1. Liste</button><button type="button" data-task-command="removeFormat">Biçimi temizle</button></div><div id="taskDescriptionInput" class="task-html-editor" contenteditable="true" role="textbox" aria-label="Detaylı açıklama" aria-multiline="true" data-placeholder="Metin, liste, bağlantı veya biçimlendirilmiş HTML içeriği yapıştırın..."></div><small>Yapıştırdığınız güvenli biçimlendirme görev kartında korunur.</small></div>
               </div>
               <p id="taskFormMessage" class="form-message" role="alert" aria-live="polite"></p>
               <div class="form-actions"><button class="button primary" type="submit"><span id="taskSubmitLabel">Görevi ekle</span></button><button id="cancelTaskEdit" class="button secondary hidden" type="button">Vazgeç</button></div>
             </form>
           </section>
-          <section class="panel task-list-panel" aria-labelledby="taskListTitle">
-            <div class="panel-heading"><div><span class="eyebrow">Görev planı</span><h2 id="taskListTitle">Yapılacak işler</h2></div><strong id="openTaskCount" class="task-count-badge">0 açık</strong></div>
-            <div id="taskEmptyState" class="empty-state"><div aria-hidden="true">✓</div><h3>Henüz görev yok</h3><p>İlk yapılacak işi soldaki formdan ekleyebilirsiniz.</p></div>
-            <div id="taskList" class="task-list" aria-live="polite"></div>
+          <section id="taskReportView" class="panel task-subview task-list-panel" aria-labelledby="taskListTitle">
+            <div class="panel-heading task-report-heading"><div><span class="eyebrow">Görev raporları</span><h2 id="taskListTitle">Yapılacak işler</h2></div><div class="task-report-tools"><label class="task-type-filter"><span>Görev tipi</span><select id="taskTypeFilter"><option value="" selected>Tüm görev tipleri</option><option value="architecture_roadmap">Architecture Roadmap</option><option value="standard">Standart görev</option><option value="meeting_organization">Toplantı organizasyonu</option><option value="management_request">Yönetim talebi</option><option value="other">Diğer</option></select></label><strong id="openTaskCount" class="task-count-badge">0 açık</strong></div></div>
+            <div id="taskEmptyState" class="empty-state"><div aria-hidden="true">✓</div><h3>Henüz görev yok</h3><p>İlk yapılacak işi “Görev Ekle” sekmesinden oluşturabilirsiniz.</p></div>
+            <div id="taskFilterEmpty" class="empty-state hidden"><div aria-hidden="true">⌕</div><h3>Bu tipte görev yok</h3><p>Farklı bir görev tipi seçerek tekrar deneyin.</p></div>
+            <div id="taskReportTableWrap" class="task-report-scroll hidden">
+              <table class="task-report-table">
+                <thead><tr><th>Görev</th><th class="task-status-column">Durum</th></tr></thead>
+                <tbody id="taskList" aria-live="polite"></tbody>
+              </table>
+            </div>
+          </section>
+          <section id="taskDetailView" class="panel task-subview task-detail-view hidden" aria-labelledby="taskDetailTitle">
+            <div class="panel-heading task-detail-heading"><div><span class="eyebrow">Görev detayı</span><h2 id="taskDetailTitle">Görev</h2></div><div class="task-detail-actions"><button id="backToTaskReport" class="button secondary" type="button">Rapor’a dön</button><button id="addSubtaskButton" class="button secondary" type="button">+ Alt görev ekle</button><button id="reviseTaskButton" class="button primary" type="button">Görevi revize et</button></div></div>
+            <article class="task-detail-content">
+              <div class="task-detail-meta"><span id="taskDetailStatus" class="task-status"></span><span id="taskDetailType" class="task-type"></span><span id="taskDetailPriority" class="task-priority"></span><span id="taskDetailPlan"></span><time id="taskDetailDueDate"></time></div>
+              <p id="taskDetailAssignee" class="task-detail-assignee"></p>
+              <button id="taskDetailParentItem" class="task-detail-parent" type="button"></button>
+              <div id="taskDetailDescription" class="task-detail-description"></div>
+              <section class="task-detail-subtasks" aria-labelledby="taskDetailSubtasksTitle"><div class="task-detail-subtasks-heading"><h3 id="taskDetailSubtasksTitle">Alt görevler</h3><span id="taskDetailSubtaskCount">0</span></div><div id="taskDetailSubtaskList"></div></section>
+            </article>
+          </section>
+        </div>
+      </section>
+
+      <section id="jiraView" class="tab-view hidden">
+        <div class="jira-layout">
+          <section class="panel jira-form-panel" aria-labelledby="jiraFormTitle">
+            <div class="panel-heading jira-form-heading">
+              <div><span class="eyebrow">JIRA tanımı</span><h2 id="jiraFormTitle">JIRA maddesi ekle</h2></div>
+              <label class="button secondary jira-import-button" for="jiraHtmlImport">JIRA HTML içe aktar</label>
+              <input id="jiraHtmlImport" class="sr-only" type="file" accept=".html,.htm,text/html">
+            </div>
+            <form id="jiraForm" novalidate>
+              <input id="jiraId" type="hidden">
+              <div class="jira-form-grid">
+                <label class="field"><span>Issue Type</span><select id="jiraIssueTypeInput"><option>Task</option><option>Sub-task</option><option>Story</option><option>Bug</option><option>Epic</option></select></label>
+                <label class="field"><span>Key</span><input id="jiraNameInput" type="text" maxlength="100" placeholder="Örn. RD-123" required></label>
+                <label class="field field-wide"><span>Summary</span><textarea id="jiraDescriptionInput" rows="2" maxlength="300" placeholder="JIRA maddesinin özeti" required></textarea></label>
+                <label class="field field-wide"><span>JIRA URL</span><input id="jiraUrlInput" type="url" inputmode="url" placeholder="https://jira.example.com/browse/RD-123" required></label>
+                <details class="jira-extra-fields field-wide">
+                  <summary>Diğer JIRA alanları</summary>
+                  <div class="jira-extra-grid">
+                    <label class="field"><span>Assignee</span><input id="jiraAssigneeInput" type="text" maxlength="100"></label>
+                    <label class="field"><span>Reporter</span><input id="jiraReporterInput" type="text" maxlength="100"></label>
+                    <label class="field"><span>Priority</span><select id="jiraPriorityInput"><option value="">Seçin</option><option>Highest</option><option>High</option><option>Medium</option><option>Low</option><option>Lowest</option></select></label>
+                    <label class="field"><span>Status</span><input id="jiraStatusInput" type="text" maxlength="80" placeholder="Open"></label>
+                    <label class="field"><span>Resolution</span><input id="jiraResolutionInput" type="text" maxlength="120" placeholder="Unresolved"></label>
+                    <label class="field"><span>Created</span><input id="jiraCreatedInput" type="text" maxlength="80" placeholder="05/Jan/22 3:13 PM"></label>
+                    <label class="field"><span>Updated</span><input id="jiraUpdatedInput" type="text" maxlength="80" placeholder="03/Aug/26 5:25 PM"></label>
+                    <label class="field"><span>Due date</span><input id="jiraDueDateInput" type="text" maxlength="80" placeholder="29/Apr/27"></label>
+                  </div>
+                </details>
+              </div>
+              <p id="jiraFormMessage" class="form-message" role="alert" aria-live="polite"></p>
+              <div class="form-actions"><button class="button primary" type="submit"><span id="jiraSubmitLabel">JIRA maddesini ekle</span></button><button id="cancelJiraEdit" class="button secondary hidden" type="button">Vazgeç</button></div>
+            </form>
+          </section>
+          <section class="panel jira-list-panel" aria-labelledby="jiraListTitle">
+            <div class="panel-heading jira-list-heading">
+              <div><span class="eyebrow">JIRA issue navigator</span><h2 id="jiraListTitle">JIRA maddeleri</h2></div>
+              <div class="jira-list-tools"><label class="filter-control"><span>Tabloda ara</span><input id="jiraSearchInput" type="search" placeholder="Key, summary, kişi..."></label><strong id="jiraCountBadge" class="task-count-badge">0 madde</strong></div>
+            </div>
+            <div id="jiraEmptyState" class="empty-state"><div aria-hidden="true">⌁</div><h3>Henüz JIRA maddesi yok</h3><p>Eforları bağlamak için ilk JIRA maddesini ekleyin.</p></div>
+            <div id="jiraList" class="jira-table-scroll" aria-live="polite">
+              <table class="jira-issue-table">
+                <thead><tr><th>Issue Type</th><th>Key</th><th>Summary</th><th>Assignee</th><th>Reporter</th><th>Priority</th><th>Status</th><th>Resolution</th><th>Created</th><th>Updated</th><th>Due date</th><th class="jira-actions-column">İşlemler</th></tr></thead>
+                <tbody id="jiraTableBody"></tbody>
+              </table>
+            </div>
           </section>
         </div>
       </section>
     </main>
 
+    <button id="openAiAssistant" class="ai-assistant-launch" type="button" aria-controls="aiAssistantPanel" aria-expanded="false"><span aria-hidden="true">✦</span> AI Asistan</button>
+    <aside id="aiAssistantPanel" class="ai-assistant-panel hidden" role="dialog" aria-modal="false" aria-labelledby="aiAssistantTitle">
+      <header class="ai-assistant-header">
+        <div><span class="eyebrow">Salt okunur</span><h2 id="aiAssistantTitle">Çalışma Asistanı</h2><small id="aiAssistantStatus">Uygulama verileriyle yanıt vermeye hazır</small></div>
+        <button id="closeAiAssistant" class="modal-close" type="button" aria-label="AI asistanını kapat">×</button>
+      </header>
+      <div class="ai-assistant-suggestions" aria-label="Hazır sorular">
+        <button type="button" data-ai-prompt="Bu haftaki eforlarımı kısa bir yönetici özeti olarak hazırla.">Haftayı özetle</button>
+        <button type="button" data-ai-prompt="Geciken, plansız veya riskli görevleri öncelik sırasıyla listele.">Riskli görevler</button>
+        <button type="button" data-ai-prompt="Önümüzdeki 7 gün için görev ve hatırlatmalarıma göre bir öncelik planı hazırla.">7 günlük plan</button>
+        <button type="button" data-ai-prompt="JIRA'sı olmayan eforları ve eksik olabilecek kayıtları kontrol et.">Eksikleri kontrol et</button>
+      </div>
+      <div id="aiAssistantMessages" class="ai-assistant-messages" aria-live="polite">
+        <article class="ai-message assistant"><strong>AI Asistan</strong><p>Görev, JIRA, efor ve hatırlatmalarınız hakkında soru sorabilirsiniz. Bu sürüm verileri yalnızca okur; hiçbir kaydı kendiliğinden değiştirmez.</p></article>
+      </div>
+      <form id="aiAssistantForm" class="ai-assistant-form">
+        <label class="sr-only" for="aiAssistantInput">AI asistana mesaj</label>
+        <textarea id="aiAssistantInput" rows="3" maxlength="1000" placeholder="Örn. Bu haftanın durumunu özetle" required></textarea>
+        <div class="ai-assistant-form-footer"><small><span id="aiAssistantInputCount">0</span>/1000</small><button id="sendAiAssistantMessage" class="button primary" type="submit">Gönder</button></div>
+      </form>
+      <details class="ai-assistant-settings">
+        <summary>Bağlantı ayarları</summary>
+        <div><label class="field"><span>AI servis adresi</span><input id="aiAssistantEndpoint" type="url" placeholder="/api/assistant"></label><button id="saveAiAssistantEndpoint" class="button secondary" type="button">Kaydet</button></div>
+        <small>Yerelde varsayılan adres <code>/api/assistant</code>. API anahtarı tarayıcıya değil sunucudaki <code>.env</code> dosyasına yazılır.</small>
+      </details>
+    </aside>
+
+    <dialog id="taskPlanImportModal" class="effort-edit-modal" aria-labelledby="taskPlanImportTitle">
+      <form id="taskPlanPasteForm" method="dialog" novalidate>
+        <div class="modal-heading"><div><span class="eyebrow">Toplu görev aktarımı</span><h2 id="taskPlanImportTitle">Görev planını yapıştır</h2></div><button id="closeTaskPlanImportModal" class="modal-close" type="button" aria-label="Kapat">×</button></div>
+        <label class="field"><span>Tablo metni</span><textarea id="taskPlanTextInput" rows="14" placeholder="Item&#9;Subitem&#9;Explanations&#9;Priority (High, Medium, Low)&#9;Year&#9;Planned Quarter" required></textarea><small>Excel veya metin tablosundaki başlık satırıyla birlikte tüm içeriği yapıştırın.</small></label>
+        <p id="taskPlanPasteMessage" class="form-message" role="alert" aria-live="polite"></p>
+        <div class="form-actions"><button class="button primary" type="submit">Görevleri içe aktar</button><button id="cancelTaskPlanImport" class="button secondary" type="button">Vazgeç</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="effortEditModal" class="effort-edit-modal" aria-labelledby="effortEditModalTitle">
+      <form id="effortEditModalForm" method="dialog" novalidate>
+        <div class="modal-heading"><div><span class="eyebrow">Timesheet eforu</span><h2 id="effortEditModalTitle">Eforu revize et</h2></div><button id="closeEffortEditModal" class="modal-close" type="button" aria-label="Kapat">×</button></div>
+        <label id="modalEntrySelectField" class="field hidden"><span>Düzenlenecek efor</span><select id="modalEntrySelect"></select></label>
+        <div class="modal-form-grid">
+          <label class="field field-wide"><span>JIRA maddesi</span><select id="modalJiraInput" required></select></label>
+          <label class="field"><span>Tarih</span><input id="modalDateInput" type="date" required></label>
+          <label class="field"><span>Süre (saat)</span><input id="modalHoursInput" type="number" min="0.25" max="24" step="0.25" required></label>
+          <label class="field field-wide"><span>Efor açıklaması</span><textarea id="modalDescriptionInput" rows="5" maxlength="120" required></textarea></label>
+        </div>
+        <p id="effortEditModalMessage" class="form-message" role="alert" aria-live="polite"></p>
+        <div class="form-actions"><button class="button primary" type="submit"><span id="effortEditModalSubmitLabel">Değişiklikleri kaydet</span></button><button id="cancelEffortEditModal" class="button secondary" type="button">Vazgeç</button></div>
+      </form>
+    </dialog>
+
     <template id="entryTemplate">
       <article class="entry-card">
-        <div class="entry-date" aria-hidden="true"><strong></strong><span></span></div>
         <div class="entry-content">
           <div class="entry-title-row"><h3></h3><span class="hours-badge"></span></div>
-          <p></p>
-          <time></time>
+          <p class="entry-jira-summary"></p>
+          <p class="entry-effort-description"></p>
+          <a class="jira-entry-link hidden" target="_blank" rel="noopener noreferrer"></a>
         </div>
         <div class="entry-actions">
           <button class="icon-button edit-button" type="button" aria-label="Kaydı düzenle">Düzenle</button>
@@ -197,11 +430,46 @@
     </template>
 
     <template id="taskTemplate">
-      <article class="task-card">
-        <button class="task-check" type="button" aria-label="Görevi tamamlandı olarak işaretle">✓</button>
-        <div class="task-content"><div class="task-title-row"><h3></h3><span class="task-status"></span></div><time></time></div>
-        <div class="entry-actions"><button class="icon-button task-edit-button" type="button">Düzenle</button><button class="icon-button danger task-delete-button" type="button">Sil</button></div>
-      </article>
+      <tr class="task-report-row">
+        <td><div class="task-tree-cell"><button class="task-tree-toggle" type="button" aria-label="Alt görevleri aç"></button><button class="task-report-title" type="button"></button></div></td>
+        <td class="task-status-column"><span class="task-status"></span></td>
+      </tr>
+    </template>
+
+    <template id="taskTypeGroupTemplate">
+      <tr class="task-type-group-row">
+        <th colspan="2" scope="rowgroup">
+          <button class="task-type-group-toggle" type="button">
+            <span class="task-type-group-chevron" aria-hidden="true">→</span>
+            <span class="task-type-group-name"></span>
+            <span class="task-type-group-total"><strong>0</strong> madde</span>
+            <span class="task-type-priority-counts" aria-label="Öncelik dağılımı">
+              <span class="task-type-priority-count" data-priority="high"><span>Yüksek</span><strong>0</strong></span>
+              <span class="task-type-priority-count" data-priority="medium"><span>Orta</span><strong>0</strong></span>
+              <span class="task-type-priority-count" data-priority="low"><span>Düşük</span><strong>0</strong></span>
+              <span class="task-type-priority-count" data-priority="none"><span>Belirtilmedi</span><strong>0</strong></span>
+            </span>
+            <span class="task-type-group-open">Raporu aç</span>
+          </button>
+        </th>
+      </tr>
+    </template>
+
+    <template id="jiraTemplate">
+      <tr class="jira-issue-row">
+        <td class="jira-issue-type"></td>
+        <td class="jira-issue-key"><a target="_blank" rel="noopener noreferrer"></a></td>
+        <td class="jira-summary"></td>
+        <td class="jira-assignee"></td>
+        <td class="jira-reporter"></td>
+        <td class="jira-priority"></td>
+        <td><span class="jira-status"></span></td>
+        <td class="jira-resolution"></td>
+        <td class="jira-created"></td>
+        <td class="jira-updated"></td>
+        <td class="jira-due-date"></td>
+        <td class="jira-actions-column"><div class="entry-actions"><button class="icon-button jira-edit-button" type="button">Düzenle</button><button class="icon-button danger jira-delete-button" type="button">Sil</button></div></td>
+      </tr>
     </template>
   </body>
 </html>

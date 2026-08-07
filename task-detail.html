@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Görev detaylarını görüntüleyin ve yönetin.">
+    <title>Görev Detayı · Günlük Efor Takibi</title>
+    <link rel="stylesheet" href="styles.css?v=20260807-32">
+    <script src="tasks-store.js?v=20260806-20" defer></script>
+    <script src="task-detail.js?v=20260807-3" defer></script>
+  </head>
+  <body class="task-detail-page">
+    <header class="task-detail-page-header">
+      <div>
+        <span class="eyebrow">Günlük Efor Takibi</span>
+        <h1>Görev detayı</h1>
+        <p>Görevin tüm planlama bilgileri, açıklaması ve alt görevleri.</p>
+      </div>
+      <a id="taskDetailBackLink" class="button task-detail-back-button" href="index.html?view=tasks">← Yapılacak İşler’e dön</a>
+    </header>
+
+    <main class="task-detail-page-main">
+      <section id="taskDetailPageError" class="panel task-detail-page-error hidden" role="alert">
+        <h2>Görev bulunamadı</h2>
+        <p>Bu görev silinmiş olabilir veya bağlantı geçerli değildir.</p>
+        <a class="button primary" href="index.html?view=tasks">Görev raporuna dön</a>
+      </section>
+
+      <article id="taskDetailPageContent" class="panel task-detail-page-card hidden">
+        <header class="task-detail-page-titlebar">
+          <div>
+            <div class="task-detail-page-badges">
+              <span id="detailPageTaskType" class="task-type"></span>
+              <span id="detailPagePriority" class="task-priority"></span>
+              <span id="detailPageStatus" class="task-status"></span>
+            </div>
+            <h2 id="detailPageTitle"></h2>
+          </div>
+        </header>
+
+        <section class="task-detail-page-section task-detail-overview" aria-labelledby="detailPageOverviewTitle">
+          <div class="task-detail-page-section-heading"><span class="eyebrow">Rapor</span><h3 id="detailPageOverviewTitle">Görev bilgileri</h3></div>
+          <div class="task-detail-overview-scroll">
+            <table class="task-detail-overview-table">
+              <thead><tr><th>Tamamlandı</th><th>Görev / Alt Görev</th><th>Bağlı Ana Görev</th><th>Atanan / Kimde Bekliyor</th><th>Öncelik</th><th>Yıl / Çeyrek</th><th>Teslim Tarihi</th><th>Durum</th><th>İşlemler</th></tr></thead>
+              <tbody><tr>
+                <td><span id="detailPageCompleted" class="task-detail-completed"></span></td>
+                <td id="detailPageOverviewTask" class="task-detail-overview-task"></td>
+                <td><a id="detailPageParent" class="task-detail-overview-parent" href="#"></a></td>
+                <td id="detailPageAssignee"></td>
+                <td><span id="detailPagePriorityValue" class="task-priority"></span></td>
+                <td id="detailPagePlan"></td>
+                <td><time id="detailPageDueDate"></time></td>
+                <td><span id="detailPageStatusValue" class="task-status"></span></td>
+                <td><div class="task-detail-page-actions"><a id="detailPageAddSubtask" class="button secondary" href="#">+ Alt görev</a><a id="detailPageRevise" class="button primary" href="#">Revize et</a></div></td>
+              </tr></tbody>
+            </table>
+          </div>
+          <div class="task-detail-page-audit"><span>Oluşturulma: <time id="detailPageCreatedAt"></time></span><span>Son güncelleme: <time id="detailPageUpdatedAt"></time></span></div>
+        </section>
+
+        <section class="task-detail-page-section" aria-labelledby="detailPageDescriptionTitle">
+          <div class="task-detail-page-section-heading"><span class="eyebrow">İçerik</span><h3 id="detailPageDescriptionTitle">Detaylı açıklama</h3></div>
+          <div id="detailPageDescription" class="task-detail-description"></div>
+        </section>
+
+        <section class="task-detail-page-section" aria-labelledby="detailPageSubtasksTitle">
+          <div class="task-detail-page-section-heading"><span class="eyebrow">Hiyerarşi</span><h3 id="detailPageSubtasksTitle">Alt görevler <span id="detailPageSubtaskCount">0</span></h3></div>
+          <div id="detailPageSubtaskList" class="task-detail-page-subtasks"></div>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>
