@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Görev tipine göre detaylı görev raporu.">
+    <title>Görev Tipi Raporu · Günlük Efor Takibi</title>
+    <link rel="stylesheet" href="styles.css?v=20260807-32">
+    <script src="tasks-store.js?v=20260806-20" defer></script>
+    <script src="task-type-report.js?v=20260807-1" defer></script>
+  </head>
+  <body class="task-detail-page task-type-report-page">
+    <header class="task-detail-page-header">
+      <div>
+        <span class="eyebrow">Görev tipi raporu</span>
+        <h1 id="taskTypeReportTitle">Görev raporu</h1>
+        <p id="taskTypeReportSubtitle">Seçili görev tipindeki tüm maddeler ve planlama bilgileri.</p>
+      </div>
+      <a class="button task-detail-back-button" href="index.html?view=tasks">← Görev tiplerine dön</a>
+    </header>
+
+    <main class="task-detail-page-main">
+      <section id="taskTypeReportError" class="panel task-detail-page-error hidden" role="alert">
+        <h2>Görev tipi bulunamadı</h2>
+        <p>Rapor bağlantısı geçerli değil.</p>
+        <a class="button primary" href="index.html?view=tasks">Görev tiplerine dön</a>
+      </section>
+
+      <section id="taskTypeReportContent" class="hidden">
+        <div class="task-type-report-kpis" aria-label="Görev tipi özeti">
+          <article><span>Toplam madde</span><strong id="taskTypeReportTotal">0</strong></article>
+          <article><span>Açık görev</span><strong id="taskTypeReportOpen">0</strong></article>
+          <article><span>Devam eden</span><strong id="taskTypeReportInProgress">0</strong></article>
+          <article><span>Tamamlanan</span><strong id="taskTypeReportCompleted">0</strong></article>
+        </div>
+
+        <section class="panel task-type-report-card" aria-labelledby="taskTypeReportTableTitle">
+          <div class="task-detail-page-section-heading task-type-report-heading"><span class="eyebrow">Detaylı rapor</span><h2 id="taskTypeReportTableTitle">Görevler</h2></div>
+          <div class="task-type-report-scroll">
+            <table class="task-detail-overview-table task-type-report-table">
+              <thead><tr><th>Tamamlandı</th><th>Görev / Alt Görev</th><th>Bağlı Ana Görev</th><th>Atanan / Kimde Bekliyor</th><th>Öncelik</th><th>Yıl / Çeyrek</th><th>Teslim Tarihi</th><th>Durum</th><th>İşlemler</th></tr></thead>
+              <tbody id="taskTypeReportBody"></tbody>
+            </table>
+          </div>
+          <div id="taskTypeReportEmpty" class="empty-state hidden"><div aria-hidden="true">⌕</div><h3>Bu tipte görev yok</h3><p>Bu görev tipine henüz madde eklenmemiş.</p></div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

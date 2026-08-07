@@ -4,19 +4,54 @@
   const $ = (selector) => document.querySelector(selector);
   const form = $("#effortForm");
   const taskForm = $("#taskForm");
+  const jiraForm = $("#jiraForm");
+  const reminderForm = $("#reminderForm");
+  const effortEditModalForm = $("#effortEditModalForm");
   const fields = {
-    id: $("#entryId"), date: $("#dateInput"), project: $("#projectInput"),
-    description: $("#descriptionInput"), hours: $("#hoursInput")
+    id: $("#entryId"), date: $("#dateInput"), description: $("#descriptionInput"),
+    hours: $("#hoursInput"), jiraId: $("#jiraItemInput")
   };
   const taskFields = {
-    id: $("#taskId"), title: $("#taskTitleInput"), dueDate: $("#taskDueDateInput"), status: $("#taskStatusInput")
+    id: $("#taskId"), title: $("#taskTitleInput"), dueDate: $("#taskDueDateInput"),
+    parentTaskId: $("#taskParentTaskInput"), assignee: $("#taskAssigneeInput"), taskType: $("#taskTypeInput"),
+    priority: $("#taskPriorityInput"),
+    year: $("#taskYearInput"), quarter: $("#taskQuarterInput"),
+    status: $("#taskStatusInput"), descriptionHtml: $("#taskDescriptionInput")
+  };
+  const jiraFields = {
+    id: $("#jiraId"), issueType: $("#jiraIssueTypeInput"), name: $("#jiraNameInput"),
+    description: $("#jiraDescriptionInput"), url: $("#jiraUrlInput"), assignee: $("#jiraAssigneeInput"),
+    reporter: $("#jiraReporterInput"), priority: $("#jiraPriorityInput"), status: $("#jiraStatusInput"),
+    resolution: $("#jiraResolutionInput"), jiraCreated: $("#jiraCreatedInput"),
+    jiraUpdated: $("#jiraUpdatedInput"), dueDate: $("#jiraDueDateInput")
+  };
+  const reminderFields = {
+    id: $("#reminderId"), text: $("#reminderTextInput"), remindAt: $("#reminderDateInput"),
+    importance: $("#reminderImportanceInput")
   };
   let entries = [];
   let tasks = [];
+  let jiraItems = [];
   let nextDashboardTask = null;
+  let selectedTaskDetailId = null;
+  const expandedTaskIds = new Set();
+  let modalEffortEntries = [];
+  let modalEffortMode = "edit";
+  let savedTaskEditorRange = null;
+  let aiConversation = [];
+  let aiRequestPending = false;
+
+  const DUMMY_JIRA = Object.freeze({
+    id: "__dummy_jira__",
+    issueType: "Temporary",
+    name: "JIRA-YOK",
+    description: "Henüz JIRA maddesi atanmadı",
+    url: "",
+    priority: "—",
+    status: "Open"
+  });
 
   const dateFormatter = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long", year: "numeric" });
-  const shortMonthFormatter = new Intl.DateTimeFormat("tr-TR", { month: "short" });
   const numberFormatter = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 2 });
   const dateTimeFormatter = new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" });
   const isoToday = () => new Date().toLocaleDateString("en-CA");
@@ -24,6 +59,120 @@
   const formatHours = (value) => `${numberFormatter.format(Number(value) || 0)} sa`;
   const isoFromDate = (date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
   const addDays = (date, days) => { const next = new Date(date); next.setDate(next.getDate() + days); return next; };
+  const getJiraItem = (id) => id === DUMMY_JIRA.id ? DUMMY_JIRA : (id ? window.JiraStore.get(id) : null);
+
+  function normalizeJiraSearch(value) {
+    return String(value || "")
+      .trim()
+      .toLocaleLowerCase("tr-TR")
+      .replaceAll("ı", "i");
+  }
+
+  function jiraMatchesSearch(item, searchTerm) {
+    if (!searchTerm) return true;
+    return [item.issueType, item.name, item.description, item.assignee, item.reporter, item.priority, item.status, item.resolution]
+      .some((value) => normalizeJiraSearch(value).includes(searchTerm));
+  }
+
+  function populateJiraSelect(select, includePrompt = false, searchValue = "", preferredValue = select.value) {
+    const searchTerm = normalizeJiraSearch(searchValue);
+    const allItems = window.JiraStore.list();
+    const matchingItems = allItems.filter((item) => jiraMatchesSearch(item, searchTerm));
+    const selectedItem = preferredValue && preferredValue !== DUMMY_JIRA.id
+      ? allItems.find((item) => item.id === preferredValue)
+      : null;
+    const visibleItems = selectedItem && !matchingItems.some((item) => item.id === selectedItem.id)
+      ? [selectedItem, ...matchingItems]
+      : matchingItems;
+    const options = [];
+    if (includePrompt) {
+      const prompt = document.createElement("option");
+      prompt.value = "";
+      prompt.textContent = "JIRA maddesi seçin";
+      options.push(prompt);
+    }
+    if (!searchTerm || preferredValue === DUMMY_JIRA.id || jiraMatchesSearch(DUMMY_JIRA, searchTerm)) {
+      const dummyOption = document.createElement("option");
+      dummyOption.value = DUMMY_JIRA.id;
+      dummyOption.textContent = `${DUMMY_JIRA.name} — ${DUMMY_JIRA.description}`;
+      options.push(dummyOption);
+    }
+    visibleItems.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      const retainedSelection = searchTerm && item.id === selectedItem?.id && !jiraMatchesSearch(item, searchTerm);
+      option.textContent = `${retainedSelection ? "✓ " : ""}${item.name} — ${item.description}${retainedSelection ? " (seçili)" : ""}`;
+      options.push(option);
+    });
+    select.replaceChildren(...options);
+    const fallbackValue = includePrompt ? "" : (options[0]?.value || "");
+    select.value = options.some((option) => option.value === preferredValue) ? preferredValue : fallbackValue;
+    return { matchCount: matchingItems.length, totalCount: allItems.length, retainedSelection: Boolean(selectedItem && !jiraMatchesSearch(selectedItem, searchTerm)) };
+  }
+
+  function filterEffortJiraOptions(preferredValue = fields.jiraId.value) {
+    const searchValue = $("#jiraItemSearchInput").value;
+    const result = populateJiraSelect(fields.jiraId, false, searchValue, preferredValue);
+    const hasSearch = Boolean(normalizeJiraSearch(searchValue));
+    $("#jiraItemSearchCount").textContent = hasSearch
+      ? `${result.matchCount} / ${result.totalCount} eşleşme${result.retainedSelection ? " · seçili madde korunuyor" : ""}`
+      : `${result.totalCount} JIRA maddesi`;
+    renderEffortJiraOptionList();
+    updateEffortJiraPickerLabel();
+  }
+
+  function updateEffortJiraPickerLabel() {
+    const selectedItem = getJiraItem(fields.jiraId.value);
+    const selectedOption = fields.jiraId.selectedOptions[0];
+    $("#jiraItemPickerValue").textContent = selectedItem
+      ? `${selectedItem.name} — ${selectedItem.description}`
+      : (selectedOption?.textContent || "JIRA maddesi seçin");
+  }
+
+  function renderEffortJiraOptionList() {
+    const list = $("#jiraItemOptionList");
+    const options = [...fields.jiraId.options].filter((option) => option.value);
+    list.replaceChildren();
+    options.forEach((option) => {
+      const item = getJiraItem(option.value);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "jira-picker-option";
+      button.dataset.value = option.value;
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(option.value === fields.jiraId.value));
+
+      const key = document.createElement("span");
+      key.className = "jira-picker-option-key";
+      key.textContent = item?.name || option.textContent;
+      const summary = document.createElement("span");
+      summary.className = "jira-picker-option-summary";
+      summary.textContent = item?.description || "";
+      button.append(key, summary);
+      list.append(button);
+    });
+    if (!options.length) {
+      const empty = document.createElement("div");
+      empty.className = "jira-picker-empty";
+      empty.textContent = "Aramanızla eşleşen JIRA maddesi bulunamadı.";
+      list.append(empty);
+    }
+  }
+
+  function setEffortJiraPickerOpen(open) {
+    const trigger = $("#jiraItemPickerButton");
+    const dropdown = $("#jiraItemPickerDropdown");
+    trigger.setAttribute("aria-expanded", String(open));
+    dropdown.classList.toggle("hidden", !open);
+    if (open) {
+      requestAnimationFrame(() => $("#jiraItemSearchInput").focus());
+      return;
+    }
+    if ($("#jiraItemSearchInput").value) {
+      $("#jiraItemSearchInput").value = "";
+      filterEffortJiraOptions(fields.jiraId.value);
+    }
+  }
 
   function googleCalendarUrl(task) {
     const start = task.dueDate.replaceAll("-", "");
@@ -75,6 +224,7 @@
     const total = entries.reduce((sum, entry) => sum + Number(entry.hours), 0);
 
     $("#dailyTotal").textContent = formatHours(dailyTotal);
+    $(".summary-card.accent").classList.toggle("day-complete", dailyTotal >= 8);
     $("#grandTotal").textContent = formatHours(total);
     $("#entryCount").textContent = String(entries.length);
     $("#selectedDateLabel").textContent = dateFormatter.format(parseDate(dailyDate));
@@ -82,72 +232,930 @@
 
     const list = $("#entryList");
     list.replaceChildren();
+    const groupedByDate = new Map();
     visible.forEach((entry) => {
-      const card = $("#entryTemplate").content.firstElementChild.cloneNode(true);
-      const date = parseDate(entry.date);
-      card.dataset.id = entry.id;
-      card.querySelector(".entry-date strong").textContent = date.getDate();
-      card.querySelector(".entry-date span").textContent = shortMonthFormatter.format(date);
-      card.querySelector("h3").textContent = entry.project;
-      card.querySelector(".hours-badge").textContent = formatHours(entry.hours);
-      card.querySelector("p").textContent = entry.task || entry.description;
-      const time = card.querySelector("time");
-      time.dateTime = entry.date;
-      time.textContent = dateFormatter.format(date);
-      card.querySelector(".edit-button").addEventListener("click", () => startEdit(entry));
-      card.querySelector(".delete-button").addEventListener("click", () => {
-        if (confirm(`“${entry.project}” kaydı silinsin mi?`)) { removeEntry(entry.id); render(); backupAndReport("Silme işlemi Drive’a gönderildi."); }
+      if (!groupedByDate.has(entry.date)) groupedByDate.set(entry.date, []);
+      groupedByDate.get(entry.date).push(entry);
+    });
+    groupedByDate.forEach((dayEntries, dateValue) => {
+      const dayGroup = document.createElement("section");
+      dayGroup.className = "entry-day-group";
+      const heading = document.createElement("header");
+      heading.className = "entry-day-heading";
+      const dateTitle = document.createElement("h3");
+      dateTitle.textContent = dateFormatter.format(parseDate(dateValue));
+      const daySummary = document.createElement("span");
+      const dayTotal = dayEntries.reduce((sum, entry) => sum + Number(entry.hours), 0);
+      const dayComplete = dayTotal >= 8;
+      dayGroup.classList.toggle("day-complete", dayComplete);
+      daySummary.textContent = dayComplete
+        ? `✓ Tamamlandı · ${dayEntries.length} kayıt · ${formatHours(dayTotal)}`
+        : `${dayEntries.length} kayıt · ${numberFormatter.format(dayTotal)} / 8 sa`;
+      heading.append(dateTitle, daySummary);
+      const progress = document.createElement("div");
+      progress.className = "day-progress";
+      const progressValue = document.createElement("span");
+      progressValue.style.width = `${Math.min((dayTotal / 8) * 100, 100)}%`;
+      progress.append(progressValue);
+      const dayItems = document.createElement("div");
+      dayItems.className = "entry-day-items";
+      dayEntries.forEach((entry) => {
+        const card = $("#entryTemplate").content.firstElementChild.cloneNode(true);
+        card.dataset.id = entry.id;
+        const jiraItem = getJiraItem(entry.jiraId);
+        card.querySelector("h3").textContent = jiraItem?.name || entry.project || "Eski efor kaydı";
+        card.querySelector(".hours-badge").textContent = formatHours(entry.hours);
+        card.querySelector(".entry-jira-summary").textContent = jiraItem?.description || "JIRA summary bulunamadı";
+        card.querySelector(".entry-effort-description").textContent = `Efor açıklaması: ${entry.task || entry.description || "—"}`;
+        const jiraLink = card.querySelector(".jira-entry-link");
+        if (jiraItem?.url) {
+          jiraLink.textContent = `${jiraItem.issueType || "Task"} · ${jiraItem.priority || "Öncelik yok"} · JIRA’da aç ↗`;
+          jiraLink.href = jiraItem.url;
+          jiraLink.classList.remove("hidden");
+        }
+        card.querySelector(".edit-button").addEventListener("click", () => startEdit(entry));
+        card.querySelector(".delete-button").addEventListener("click", () => {
+          if (confirm(`“${jiraItem?.name || entry.project}” efor kaydı silinsin mi?`)) { removeEntry(entry.id); render(); backupAndReport("Silme işlemi Drive’a gönderildi."); }
+        });
+        dayItems.append(card);
       });
-      list.append(card);
+      dayGroup.append(heading, progress, dayItems);
+      list.append(dayGroup);
     });
     renderTimesheet();
+    renderHomeDashboard();
   }
 
   function statusLabel(status) {
     return ({ planned: "Planlandı", in_progress: "Devam ediyor", completed: "Tamamlandı" })[status] || status;
   }
 
+  function priorityLabel(priority) {
+    return ({ high: "Yüksek", medium: "Orta", low: "Düşük" })[priority] || "Belirtilmedi";
+  }
+
+  function taskTypeLabel(taskType) {
+    return ({
+      standard: "Standart görev",
+      architecture_roadmap: "Architecture Roadmap",
+      meeting_organization: "Toplantı organizasyonu",
+      management_request: "Yönetim talebi",
+      other: "Diğer"
+    })[taskType] || "Standart görev";
+  }
+
+  function taskPlanLabel(task) {
+    return [task.year, task.quarter].filter(Boolean).join(" · ") || "Plan belirtilmedi";
+  }
+
+  function taskDueDateLabel(task, prefix = "") {
+    return task.dueDate ? `${prefix}${dateFormatter.format(parseDate(task.dueDate))}` : `${prefix}Belirtilmedi`;
+  }
+
+  function getTaskParent(task, source = tasks) {
+    if (task.parentTaskId) return source.find((item) => item.id === task.parentTaskId) || null;
+    if (task.parentItem) return source.find((item) => item.id !== task.id && item.title === task.parentItem) || null;
+    return null;
+  }
+
+  function orderTasksByHierarchy(source) {
+    const byId = new Map(source.map((task) => [task.id, task]));
+    const children = new Map();
+    source.forEach((task) => {
+      const parentId = task.parentTaskId && byId.has(task.parentTaskId) ? task.parentTaskId : "";
+      if (!children.has(parentId)) children.set(parentId, []);
+      children.get(parentId).push(task);
+    });
+    const ordered = [];
+    const visited = new Set();
+    const append = (task, depth) => {
+      if (visited.has(task.id)) return;
+      visited.add(task.id);
+      ordered.push({ task, depth });
+      (children.get(task.id) || []).forEach((child) => append(child, depth + 1));
+    };
+    (children.get("") || []).forEach((task) => append(task, 0));
+    source.forEach((task) => append(task, 0));
+    return ordered;
+  }
+
+  function taskDescendantIds(taskId, source = tasks) {
+    const descendants = new Set();
+    const collect = (parentId) => source.filter((task) => task.parentTaskId === parentId).forEach((child) => {
+      if (descendants.has(child.id)) return;
+      descendants.add(child.id);
+      collect(child.id);
+    });
+    if (taskId) collect(taskId);
+    return descendants;
+  }
+
+  function isTaskVisibleInTree(task, source = tasks) {
+    const visited = new Set();
+    let parent = getTaskParent(task, source);
+    while (parent && !visited.has(parent.id)) {
+      if (!expandedTaskIds.has(parent.id)) return false;
+      visited.add(parent.id);
+      parent = getTaskParent(parent, source);
+    }
+    return true;
+  }
+
+  function tasksForType(source, taskType) {
+    if (!taskType) return source;
+    const includedIds = new Set(source.filter((task) => (task.taskType || "standard") === taskType).map((task) => task.id));
+    source.forEach((task) => {
+      if (!includedIds.has(task.id)) return;
+      const visited = new Set();
+      let parent = getTaskParent(task, source);
+      while (parent && !visited.has(parent.id)) {
+        includedIds.add(parent.id);
+        visited.add(parent.id);
+        parent = getTaskParent(parent, source);
+      }
+    });
+    return source.filter((task) => includedIds.has(task.id));
+  }
+
+  function groupTasksByType(source) {
+    const typeOrder = window.TaskStore.TASK_TYPES || ["standard", "architecture_roadmap", "meeting_organization", "management_request", "other"];
+    const groups = new Map();
+    source.forEach((task) => {
+      const taskType = task.taskType || "standard";
+      if (!groups.has(taskType)) groups.set(taskType, []);
+      groups.get(taskType).push(task);
+    });
+    return Array.from(groups, ([taskType, groupTasks]) => ({
+      taskType,
+      tasks: groupTasks,
+      priorities: {
+        high: groupTasks.filter((task) => task.priority === "high").length,
+        medium: groupTasks.filter((task) => task.priority === "medium").length,
+        low: groupTasks.filter((task) => task.priority === "low").length,
+        none: groupTasks.filter((task) => !["high", "medium", "low"].includes(task.priority)).length
+      }
+    })).sort((a, b) => {
+      const aIndex = typeOrder.indexOf(a.taskType);
+      const bIndex = typeOrder.indexOf(b.taskType);
+      return (aIndex < 0 ? typeOrder.length : aIndex) - (bIndex < 0 ? typeOrder.length : bIndex);
+    });
+  }
+
+  function populateTaskParentOptions(excludedTaskId = "", selectedParentId = "") {
+    const select = taskFields.parentTaskId;
+    const firstOption = document.createElement("option");
+    firstOption.value = "";
+    firstOption.textContent = "Ana görev yok — bağımsız görev";
+    const excluded = taskDescendantIds(excludedTaskId);
+    if (excludedTaskId) excluded.add(excludedTaskId);
+    const options = [firstOption];
+    orderTasksByHierarchy(tasks).forEach(({ task, depth }) => {
+      if (excluded.has(task.id)) return;
+      const option = document.createElement("option");
+      option.value = task.id;
+      option.textContent = `${"— ".repeat(Math.min(depth, 3))}${task.title}`;
+      options.push(option);
+    });
+    select.replaceChildren(...options);
+    select.value = options.some((option) => option.value === selectedParentId) ? selectedParentId : "";
+  }
+
+  function activateMainView(viewId) {
+    document.querySelectorAll(".tab-button").forEach((button) => {
+      const active = button.dataset.tab === viewId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
+  }
+
+  function renderHomeDashboard() {
+    const dashboardEntries = Array.from(readEntries() || []);
+    const dashboardTasks = window.TaskStore.list();
+    const today = parseDate(isoToday());
+    const monday = addDays(today, -((today.getDay() + 6) % 7));
+    const sunday = addDays(monday, 6);
+    const mondayIso = isoFromDate(monday);
+    const sundayIso = isoFromDate(sunday);
+    const weeklyEntries = dashboardEntries.filter((entry) => entry.date >= mondayIso && entry.date <= sundayIso);
+    const weeklyHours = weeklyEntries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0);
+    const plannedTasks = dashboardTasks.filter((task) => task.status === "planned");
+    const inProgressTasks = dashboardTasks.filter((task) => task.status === "in_progress");
+    const completedTasks = dashboardTasks.filter((task) => task.status === "completed");
+
+    $("#homeWeekLabel").textContent = `${dateFormatter.format(monday)} – ${dateFormatter.format(sunday)}`;
+    $("#homeWeeklyHours").textContent = formatHours(weeklyHours);
+    $("#homeWeeklyEntryCount").textContent = String(weeklyEntries.length);
+    $("#homePlannedTasks").textContent = String(plannedTasks.length);
+    $("#homeInProgressTasks").textContent = String(inProgressTasks.length);
+    $("#homeWeeklyGoal").textContent = `40 saatlik hedefin %${Math.round((weeklyHours / 40) * 100)}’si`;
+
+    const dayFormatter = new Intl.DateTimeFormat("tr-TR", { weekday: "short" });
+    const weeklyChart = $("#weeklyEffortChart");
+    weeklyChart.replaceChildren();
+    const dailyValues = Array.from({ length: 7 }, (_, index) => {
+      const date = addDays(monday, index);
+      const iso = isoFromDate(date);
+      return {
+        date,
+        hours: weeklyEntries.filter((entry) => entry.date === iso).reduce((sum, entry) => sum + Number(entry.hours || 0), 0)
+      };
+    });
+    const chartMaximum = Math.max(8, ...dailyValues.map((day) => day.hours));
+    dailyValues.forEach((day) => {
+      const column = document.createElement("div");
+      column.className = "weekly-bar-column";
+      if (isoFromDate(day.date) === isoToday()) column.classList.add("is-today");
+      const value = document.createElement("span");
+      value.className = "weekly-bar-value";
+      value.textContent = day.hours ? `${numberFormatter.format(day.hours)} sa` : "—";
+      const track = document.createElement("div");
+      track.className = "weekly-bar-track";
+      const bar = document.createElement("span");
+      bar.style.height = `${day.hours ? Math.max(7, (day.hours / chartMaximum) * 100) : 0}%`;
+      bar.classList.toggle("day-complete", day.hours >= 8);
+      bar.title = `${dateFormatter.format(day.date)} · ${formatHours(day.hours)}`;
+      track.append(bar);
+      const dayName = document.createElement("strong");
+      dayName.textContent = dayFormatter.format(day.date).replace(".", "");
+      const dayNumber = document.createElement("small");
+      dayNumber.textContent = String(day.date.getDate()).padStart(2, "0");
+      column.append(value, track, dayName, dayNumber);
+      weeklyChart.append(column);
+    });
+
+    const taskChart = $("#taskStatusChart");
+    taskChart.replaceChildren();
+    const taskTotal = dashboardTasks.length;
+    const plannedEnd = taskTotal ? (plannedTasks.length / taskTotal) * 100 : 0;
+    const progressEnd = taskTotal ? plannedEnd + (inProgressTasks.length / taskTotal) * 100 : 0;
+    const donut = document.createElement("div");
+    donut.className = "task-donut";
+    donut.style.background = taskTotal
+      ? `conic-gradient(#f2b84b 0 ${plannedEnd}%, #5146e5 ${plannedEnd}% ${progressEnd}%, #1f9d74 ${progressEnd}% 100%)`
+      : "#edf0f5";
+    donut.setAttribute("aria-hidden", "true");
+    const donutCenter = document.createElement("span");
+    const donutTotal = document.createElement("strong");
+    donutTotal.textContent = String(taskTotal);
+    const donutLabel = document.createElement("small");
+    donutLabel.textContent = "toplam";
+    donutCenter.append(donutTotal, donutLabel);
+    donut.append(donutCenter);
+    const legend = document.createElement("div");
+    legend.className = "task-chart-legend";
+    [
+      ["planned", "Planlandı", plannedTasks.length],
+      ["in_progress", "Devam ediyor", inProgressTasks.length],
+      ["completed", "Tamamlandı", completedTasks.length]
+    ].forEach(([status, label, count]) => {
+      const item = document.createElement("div");
+      item.dataset.status = status;
+      const dot = document.createElement("i");
+      const text = document.createElement("span");
+      text.textContent = label;
+      const total = document.createElement("strong");
+      total.textContent = String(count);
+      item.append(dot, text, total);
+      legend.append(item);
+    });
+    taskChart.append(donut, legend);
+
+    const jiraTotals = new Map();
+    weeklyEntries.forEach((entry) => {
+      const jiraItem = getJiraItem(entry.jiraId);
+      const key = jiraItem?.name || entry.project || "JIRA yok";
+      const summary = jiraItem?.description || "Eski efor kaydı";
+      const current = jiraTotals.get(key) || { key, summary, hours: 0 };
+      current.hours += Number(entry.hours || 0);
+      jiraTotals.set(key, current);
+    });
+    const jiraRows = Array.from(jiraTotals.values()).sort((a, b) => b.hours - a.hours).slice(0, 5);
+    const jiraChart = $("#jiraEffortChart");
+    jiraChart.replaceChildren();
+    if (!jiraRows.length) {
+      const empty = document.createElement("p");
+      empty.className = "dashboard-empty";
+      empty.textContent = "Bu hafta için henüz JIRA eforu girilmedi.";
+      jiraChart.append(empty);
+    } else {
+      const maximumJiraHours = Math.max(...jiraRows.map((row) => row.hours));
+      jiraRows.forEach((row) => {
+        const item = document.createElement("div");
+        item.className = "jira-effort-row";
+        const label = document.createElement("div");
+        const key = document.createElement("strong");
+        key.textContent = row.key;
+        const summary = document.createElement("span");
+        summary.textContent = row.summary;
+        label.append(key, summary);
+        const hours = document.createElement("strong");
+        hours.className = "jira-effort-hours";
+        hours.textContent = formatHours(row.hours);
+        const track = document.createElement("div");
+        track.className = "jira-effort-track";
+        const fill = document.createElement("span");
+        fill.style.width = `${(row.hours / maximumJiraHours) * 100}%`;
+        track.append(fill);
+        item.append(label, hours, track);
+        jiraChart.append(item);
+      });
+    }
+
+    const openTasks = dashboardTasks.filter((task) => task.status !== "completed").slice(0, 5);
+    $("#homeOpenTaskCount").textContent = `${dashboardTasks.filter((task) => task.status !== "completed").length} açık`;
+    const taskList = $("#homePendingTaskList");
+    taskList.replaceChildren();
+    if (!openTasks.length) {
+      const empty = document.createElement("p");
+      empty.className = "dashboard-empty";
+      empty.textContent = "Bekleyen veya devam eden görev bulunmuyor.";
+      taskList.append(empty);
+    } else {
+      openTasks.forEach((task) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "home-task-row";
+        const status = document.createElement("span");
+        status.className = "task-status";
+        status.dataset.status = task.status;
+        status.textContent = statusLabel(task.status);
+        const title = document.createElement("strong");
+        title.textContent = task.title;
+        const dueDate = document.createElement("time");
+        if (task.dueDate) dueDate.dateTime = task.dueDate;
+        dueDate.textContent = task.dueDate ? dateFormatter.format(parseDate(task.dueDate)) : taskPlanLabel(task);
+        button.append(status, title, dueDate);
+        button.addEventListener("click", () => {
+          activateMainView("tasksView");
+          showTaskDetail(task);
+        });
+        taskList.append(button);
+      });
+    }
+    renderReminders();
+  }
+
+  function reminderDateLabel(item) {
+    if (!item.remindAt) return "Hatırlatma zamanı yok";
+    const date = new Date(item.remindAt);
+    const formatted = dateTimeFormatter.format(date);
+    return !item.completed && date.getTime() < Date.now() ? `Gecikti · ${formatted}` : formatted;
+  }
+
+  function resetReminderForm() {
+    reminderForm.reset();
+    reminderFields.id.value = "";
+    reminderFields.importance.value = "normal";
+    $("#reminderSubmitLabel").textContent = "Ekle";
+    $("#cancelReminderEdit").classList.add("hidden");
+    $("#reminderFormMessage").textContent = "";
+    $("#reminderFormMessage").classList.remove("success");
+  }
+
+  function startReminderEdit(item) {
+    reminderFields.id.value = item.id;
+    reminderFields.text.value = item.text;
+    reminderFields.remindAt.value = item.remindAt || "";
+    reminderFields.importance.value = item.importance || "normal";
+    $("#reminderSubmitLabel").textContent = "Güncelle";
+    $("#cancelReminderEdit").classList.remove("hidden");
+    reminderFields.text.focus();
+  }
+
+  function renderReminders() {
+    const reminders = window.ReminderStore.list();
+    const activeCount = reminders.filter((item) => !item.completed).length;
+    $("#reminderOpenCount").textContent = `${activeCount} aktif`;
+    $("#reminderEmptyState").classList.toggle("hidden", reminders.length > 0);
+    const list = $("#reminderList");
+    list.replaceChildren();
+    reminders.forEach((item) => {
+      const row = document.createElement("article");
+      row.className = "reminder-row";
+      row.classList.toggle("is-completed", item.completed);
+      row.classList.toggle("is-important", item.importance === "important");
+      row.classList.toggle("is-overdue", Boolean(item.remindAt) && !item.completed && new Date(item.remindAt).getTime() < Date.now());
+
+      const complete = document.createElement("button");
+      complete.type = "button";
+      complete.className = "reminder-complete-button";
+      complete.textContent = item.completed ? "✓" : "";
+      complete.setAttribute("aria-label", item.completed ? "Hatırlatmayı yeniden aç" : "Hatırlatmayı tamamla");
+      complete.addEventListener("click", () => {
+        window.ReminderStore.update(item.id, { ...item, completed: !item.completed });
+        renderReminders();
+        backupAndReport("Hatırlatma durumu Drive’a gönderildi.");
+      });
+
+      const content = document.createElement("div");
+      content.className = "reminder-row-content";
+      const text = document.createElement("strong");
+      text.textContent = item.text;
+      const meta = document.createElement("div");
+      const importance = document.createElement("span");
+      importance.className = "reminder-importance";
+      importance.dataset.importance = item.importance;
+      importance.textContent = item.importance === "important" ? "Önemli" : "Normal";
+      const time = document.createElement("time");
+      if (item.remindAt) time.dateTime = item.remindAt;
+      time.textContent = reminderDateLabel(item);
+      meta.append(importance, time);
+      content.append(text, meta);
+
+      const actions = document.createElement("div");
+      actions.className = "reminder-row-actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "button secondary";
+      edit.textContent = "Düzenle";
+      edit.addEventListener("click", () => startReminderEdit(item));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "button danger-text";
+      remove.textContent = "Sil";
+      remove.addEventListener("click", () => {
+        if (!confirm(`“${item.text}” notu silinsin mi?`)) return;
+        window.ReminderStore.remove(item.id);
+        if (reminderFields.id.value === item.id) resetReminderForm();
+        renderReminders();
+        backupAndReport("Silinen hatırlatma Drive’a gönderildi.");
+      });
+      actions.append(edit, remove);
+      row.append(complete, content, actions);
+      list.append(row);
+    });
+  }
+
+  function buildAiAssistantContext() {
+    const allEntries = Array.from(readEntries() || []);
+    const allTasks = window.TaskStore.list();
+    const allJiraItems = window.JiraStore.list();
+    const allReminders = window.ReminderStore.list();
+    const today = parseDate(isoToday());
+    const monday = addDays(today, -((today.getDay() + 6) % 7));
+    const sunday = addDays(monday, 6);
+    const mondayIso = isoFromDate(monday);
+    const sundayIso = isoFromDate(sunday);
+    const weeklyEntries = allEntries.filter((entry) => entry.date >= mondayIso && entry.date <= sundayIso);
+    const weeklyHours = weeklyEntries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0);
+    const jiraById = new Map(allJiraItems.map((item) => [item.id, item]));
+    const simplifyEntry = (entry) => {
+      const jira = jiraById.get(entry.jiraId);
+      return {
+        date: entry.date,
+        hours: Number(entry.hours || 0),
+        jiraKey: jira?.name || entry.project || "JIRA-YOK",
+        jiraSummary: jira?.description || "JIRA atanmamış",
+        description: entry.task || entry.description || ""
+      };
+    };
+    return {
+      generatedAt: new Date().toISOString(),
+      today: isoToday(),
+      overview: {
+        weeklyRange: { from: mondayIso, to: sundayIso },
+        weeklyHours,
+        weeklyEntryCount: weeklyEntries.length,
+        totalEffortCount: allEntries.length,
+        taskCounts: {
+          planned: allTasks.filter((task) => task.status === "planned").length,
+          inProgress: allTasks.filter((task) => task.status === "in_progress").length,
+          completed: allTasks.filter((task) => task.status === "completed").length
+        },
+        activeReminderCount: allReminders.filter((item) => !item.completed).length
+      },
+      weeklyEfforts: weeklyEntries.map(simplifyEntry),
+      recentEfforts: allEntries.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 80).map(simplifyEntry),
+      tasks: allTasks.slice(0, 120).map((task) => ({
+        title: task.title,
+        parentItem: task.parentItem || "",
+        type: task.taskType,
+        status: task.status,
+        priority: task.priority,
+        assignee: task.assignee,
+        year: task.year,
+        quarter: task.quarter,
+        dueDate: task.dueDate
+      })),
+      jiraItems: allJiraItems.slice(0, 160).map((item) => ({
+        key: item.name,
+        summary: item.description,
+        type: item.issueType,
+        priority: item.priority,
+        status: item.status,
+        assignee: item.assignee,
+        dueDate: item.dueDate
+      })),
+      reminders: allReminders.slice(0, 100).map((item) => ({
+        text: item.text,
+        remindAt: item.remindAt,
+        importance: item.importance,
+        completed: item.completed
+      })),
+      truncation: {
+        effortsIncluded: Math.min(allEntries.length, 80),
+        tasksIncluded: Math.min(allTasks.length, 120),
+        jiraItemsIncluded: Math.min(allJiraItems.length, 160),
+        remindersIncluded: Math.min(allReminders.length, 100)
+      }
+    };
+  }
+
+  function addAiAssistantMessage(role, text) {
+    const article = document.createElement("article");
+    article.className = `ai-message ${role}`;
+    const label = document.createElement("strong");
+    label.textContent = role === "user" ? "Siz" : "AI Asistan";
+    const content = document.createElement("p");
+    content.textContent = text;
+    article.append(label, content);
+    $("#aiAssistantMessages").append(article);
+    article.scrollIntoView({ behavior: "smooth", block: "end" });
+  }
+
+  function setAiAssistantBusy(busy, statusText) {
+    aiRequestPending = busy;
+    $("#sendAiAssistantMessage").disabled = busy;
+    $("#aiAssistantInput").disabled = busy;
+    $("#aiAssistantStatus").textContent = statusText || (busy ? "Uygulama verileri analiz ediliyor…" : "Uygulama verileriyle yanıt vermeye hazır");
+    $("#aiAssistantPanel").classList.toggle("is-busy", busy);
+  }
+
+  async function askAiAssistant(message) {
+    const question = String(message || "").trim();
+    if (!question || aiRequestPending) return;
+    addAiAssistantMessage("user", question);
+    $("#aiAssistantInput").value = "";
+    $("#aiAssistantInputCount").textContent = "0";
+    setAiAssistantBusy(true);
+    try {
+      const result = await window.AiAssistantClient.ask({
+        message: question,
+        context: buildAiAssistantContext(),
+        history: aiConversation
+      });
+      addAiAssistantMessage("assistant", result.answer);
+      aiConversation.push({ role: "user", text: question }, { role: "assistant", text: result.answer });
+      aiConversation = aiConversation.slice(-8);
+      setAiAssistantBusy(false, `${result.model || "OpenAI"} ile yanıtlandı`);
+    } catch (error) {
+      addAiAssistantMessage("assistant", `Bağlantı hatası: ${error.message}`);
+      setAiAssistantBusy(false, "AI servisine bağlanılamadı");
+    }
+  }
+
+  function setAiAssistantPanel(open) {
+    $("#aiAssistantPanel").classList.toggle("hidden", !open);
+    $("#openAiAssistant").setAttribute("aria-expanded", String(open));
+    if (open) {
+      $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
+      $("#aiAssistantInput").focus();
+    }
+  }
+
+  function activateTaskSubview(viewId) {
+    const activeTabId = viewId === "taskDetailView" ? "taskReportView" : viewId;
+    document.querySelectorAll(".task-subtab-button").forEach((button) => {
+      const active = button.dataset.taskTab === activeTabId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll(".task-subview").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
+  }
+
+  function showTaskDetail(task) {
+    window.location.href = `task-detail.html?id=${encodeURIComponent(task.id)}`;
+  }
+
+  function sanitizeTaskHtml(input) {
+    const template = document.createElement("template");
+    template.innerHTML = String(input || "");
+    const allowedTags = new Set(["P", "DIV", "BR", "STRONG", "B", "EM", "I", "U", "S", "UL", "OL", "LI", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "PRE", "CODE", "A", "TABLE", "THEAD", "TBODY", "TR", "TH", "TD", "HR", "SPAN"]);
+    const blockedTags = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "FORM", "INPUT", "BUTTON", "META", "LINK"]);
+    Array.from(template.content.querySelectorAll("*")).forEach((element) => {
+      if (blockedTags.has(element.tagName)) { element.remove(); return; }
+      if (!allowedTags.has(element.tagName)) { element.replaceWith(...element.childNodes); return; }
+      const safeHref = element.tagName === "A" ? element.getAttribute("href") || "" : "";
+      Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name));
+      if (element.tagName === "A") {
+        try {
+          const url = new URL(safeHref, document.baseURI);
+          if (["http:", "https:", "mailto:"].includes(url.protocol)) {
+            element.href = url.href;
+            element.target = "_blank";
+            element.rel = "noopener noreferrer";
+          }
+        } catch { /* Bağlantı düz metin olarak kalır. */ }
+      }
+    });
+    return template.innerHTML;
+  }
+
+  function taskDescriptionFromText(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    const paragraph = document.createElement("p");
+    paragraph.textContent = text;
+    return paragraph.outerHTML;
+  }
+
+  function quarterEndDate(year, quarter) {
+    const endings = { Q1: "03-31", Q2: "06-30", Q3: "09-30", Q4: "12-31" };
+    return year && endings[quarter] ? `${year}-${endings[quarter]}` : "";
+  }
+
+  function parseTaskPlanText(source) {
+    const lines = String(source || "").replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
+    if (lines.length < 2 || !/^Item\tSubitem\tExplanations\t/i.test(lines[0])) {
+      throw new Error("Dosya Item, Subitem, Explanations, Priority, Year ve Planned Quarter sütunlarını içermelidir.");
+    }
+    const priorityMap = {
+      "1": "high", high: "high", yüksek: "high",
+      "2": "medium", medium: "medium", orta: "medium",
+      "3": "low", low: "low", düşük: "low"
+    };
+    const imported = [];
+    let currentItem = "";
+    lines.slice(1).forEach((line) => {
+      const columns = line.split("\t");
+      while (columns.length < 6) columns.push("");
+      const rawItem = String(columns[0] || "").trim();
+      if (rawItem) currentItem = rawItem;
+      const item = rawItem || currentItem;
+      const subitem = String(columns[1] || "").trim();
+      const explanation = String(columns[2] || "").trim();
+      const rawPriority = String(columns[3] || "").trim().toLocaleLowerCase("tr-TR");
+      const year = /^20\d{2}$/.test(String(columns[4] || "").trim()) ? String(columns[4]).trim() : "";
+      const rawQuarter = String(columns[5] || "").trim().toUpperCase();
+      const quarter = /^Q[1-4]$/.test(rawQuarter) ? rawQuarter : "";
+      const title = subitem || item;
+      if (!title) return;
+      imported.push({
+        title,
+        parentItem: subitem ? item : "",
+        assignee: "",
+        taskType: "architecture_roadmap",
+        priority: priorityMap[rawPriority] || "",
+        year,
+        quarter,
+        dueDate: quarterEndDate(year, quarter),
+        status: "planned",
+        descriptionHtml: taskDescriptionFromText(explanation)
+      });
+    });
+    return imported;
+  }
+
+  function importTaskPlanSource(source) {
+    const importedTasks = parseTaskPlanText(source);
+    if (!importedTasks.length) throw new Error("Dosyada içe aktarılabilecek görev bulunamadı.");
+    const result = window.TaskStore.mergeAll(importedTasks);
+    if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "Görev planı içe aktarılamadı.");
+    const hierarchy = window.TaskStore.ensureHierarchy();
+    const importedTypeByTitle = new Map();
+    importedTasks.forEach((task) => {
+      importedTypeByTitle.set(task.title.toLocaleLowerCase("tr-TR"), task.taskType);
+      if (task.parentItem) importedTypeByTitle.set(task.parentItem.toLocaleLowerCase("tr-TR"), task.taskType);
+    });
+    let typedTasks = 0;
+    window.TaskStore.list().forEach((task) => {
+      const importedType = importedTypeByTitle.get(task.title.toLocaleLowerCase("tr-TR"));
+      if (!importedType || task.taskType === importedType) return;
+      window.TaskStore.update(task.id, { ...task, taskType: importedType });
+      typedTasks += 1;
+    });
+    renderTasks();
+    activateTaskSubview("taskReportView");
+    $("#taskFormMessage").textContent = `${result.value.imported} görev işlendi; ${result.value.created + hierarchy.created} yeni görev eklendi, ${result.value.updated} görev güncellendi, ${hierarchy.linked} alt görev bağlandı ve ${typedTasks} görev tipi güncellendi.`;
+    $("#taskFormMessage").classList.add("success");
+    backupAndReport("İçe aktarılan görev planı Drive’a gönderildi.");
+    return result.value;
+  }
+
+  async function importTaskPlan(file) { return importTaskPlanSource(await file.text()); }
+
+  function applyTaskEditorCommand(command) {
+    const range = savedTaskEditorRange ? savedTaskEditorRange.cloneRange() : document.createRange();
+    if (!savedTaskEditorRange || !taskFields.descriptionHtml.contains(range.commonAncestorContainer) || range.collapsed) {
+      range.selectNodeContents(taskFields.descriptionHtml);
+    }
+    if (range.collapsed) return;
+    const selectedText = range.toString();
+    let replacement;
+    if (command === "bold" || command === "italic") {
+      replacement = document.createElement(command === "bold" ? "strong" : "em");
+      replacement.append(range.extractContents());
+    } else if (command === "insertUnorderedList" || command === "insertOrderedList") {
+      replacement = document.createElement(command === "insertUnorderedList" ? "ul" : "ol");
+      selectedText.split(/\n+/).filter(Boolean).forEach((line) => {
+        const item = document.createElement("li");
+        item.textContent = line;
+        replacement.append(item);
+      });
+      range.deleteContents();
+    } else if (command === "removeFormat") {
+      replacement = document.createTextNode(selectedText);
+      range.deleteContents();
+    } else return;
+    range.insertNode(replacement);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(replacement);
+    selection.addRange(nextRange);
+    savedTaskEditorRange = nextRange.cloneRange();
+  }
+
   function renderTasks() {
     tasks = window.TaskStore.list();
+    populateTaskParentOptions(taskFields.id.value, taskFields.parentTaskId.value);
+    const selectedTaskType = $("#taskTypeFilter").value;
+    const reportTasks = tasksForType(tasks, selectedTaskType);
+    const assigneeOptions = $("#taskAssigneeOptions");
+    assigneeOptions.replaceChildren();
+    Array.from(new Set(tasks.map((task) => task.assignee).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, "tr"))
+      .forEach((assignee) => {
+        const option = document.createElement("option");
+        option.value = assignee;
+        assigneeOptions.append(option);
+      });
     const openTasks = tasks.filter((task) => task.status !== "completed");
     $("#taskTabCount").textContent = String(openTasks.length);
+    $("#taskReportCount").textContent = String(tasks.length);
     $("#openTaskCount").textContent = `${openTasks.length} açık`;
     $("#taskEmptyState").classList.toggle("hidden", tasks.length > 0);
+    $("#taskFilterEmpty").classList.toggle("hidden", tasks.length === 0 || reportTasks.length > 0);
+    $("#taskReportTableWrap").classList.toggle("hidden", reportTasks.length === 0);
 
-    nextDashboardTask = openTasks[0] || null;
+    nextDashboardTask = openTasks.find((task) => task.dueDate) || openTasks[0] || null;
     $("#nextTaskTitle").textContent = nextDashboardTask?.title || "Görev yok";
-    $("#nextTaskDate").textContent = nextDashboardTask ? dateFormatter.format(parseDate(nextDashboardTask.dueDate)) : "Teslim tarihi bulunmuyor";
-    $("#addNextTaskToCalendar").disabled = !nextDashboardTask;
+    $("#nextTaskDate").textContent = nextDashboardTask
+      ? (nextDashboardTask.dueDate ? dateFormatter.format(parseDate(nextDashboardTask.dueDate)) : taskPlanLabel(nextDashboardTask))
+      : "Teslim tarihi bulunmuyor";
+    $("#addNextTaskToCalendar").disabled = !nextDashboardTask?.dueDate;
 
     const list = $("#taskList");
     list.replaceChildren();
-    tasks.forEach((task) => {
-      const card = $("#taskTemplate").content.firstElementChild.cloneNode(true);
-      card.dataset.id = task.id;
-      card.classList.toggle("completed", task.status === "completed");
-      card.querySelector("h3").textContent = task.title;
-      const badge = card.querySelector(".task-status");
-      badge.textContent = statusLabel(task.status);
-      badge.dataset.status = task.status;
-      const time = card.querySelector("time");
-      time.dateTime = task.dueDate;
-      time.textContent = `Teslim: ${dateFormatter.format(parseDate(task.dueDate))}`;
-      card.querySelector(".task-check").classList.toggle("checked", task.status === "completed");
-      card.querySelector(".task-check").addEventListener("click", () => {
-        window.TaskStore.update(task.id, { ...task, status: task.status === "completed" ? "planned" : "completed" });
-        renderTasks();
-        backupAndReport("Görev durumu Drive’a gönderildi.");
+    groupTasksByType(reportTasks).forEach((group) => {
+      const groupRow = $("#taskTypeGroupTemplate").content.firstElementChild.cloneNode(true);
+      const groupToggle = groupRow.querySelector(".task-type-group-toggle");
+      groupRow.dataset.taskType = group.taskType;
+      groupToggle.setAttribute("aria-label", `${taskTypeLabel(group.taskType)} raporunu aç; ${group.tasks.length} madde`);
+      groupToggle.querySelector(".task-type-group-name").textContent = taskTypeLabel(group.taskType);
+      groupToggle.querySelector(".task-type-group-total strong").textContent = String(group.tasks.length);
+      Object.entries(group.priorities).forEach(([priorityName, count]) => {
+        groupToggle.querySelector(`.task-type-priority-count[data-priority="${priorityName}"] strong`).textContent = String(count);
       });
-      card.querySelector(".task-edit-button").addEventListener("click", () => startTaskEdit(task));
-      card.querySelector(".task-delete-button").addEventListener("click", () => {
-        if (confirm(`“${task.title}” görevi silinsin mi?`)) {
-          window.TaskStore.remove(task.id);
-          renderTasks();
-          backupAndReport("Silinen görev Drive’a gönderildi.");
+      groupToggle.addEventListener("click", () => {
+        window.location.href = `task-type-report.html?type=${encodeURIComponent(group.taskType)}`;
+      });
+      list.append(groupRow);
+    });
+    renderHomeDashboard();
+  }
+
+  function renderJiraItems() {
+    jiraItems = window.JiraStore.list();
+    $("#jiraTabCount").textContent = String(jiraItems.length);
+    const searchTerm = $("#jiraSearchInput").value.trim().toLocaleLowerCase("tr-TR");
+    const visibleItems = searchTerm
+      ? jiraItems.filter((item) => [item.issueType, item.name, item.description, item.assignee, item.reporter, item.priority, item.status, item.resolution, item.dueDate]
+        .some((value) => String(value || "").toLocaleLowerCase("tr-TR").includes(searchTerm)))
+      : jiraItems;
+    $("#jiraCountBadge").textContent = searchTerm ? `${visibleItems.length} / ${jiraItems.length} madde` : `${jiraItems.length} madde`;
+    $("#jiraEmptyState").classList.toggle("hidden", jiraItems.length > 0);
+    $("#jiraList").classList.toggle("hidden", jiraItems.length === 0);
+
+    const selectedJiraId = fields.jiraId.value;
+    filterEffortJiraOptions(selectedJiraId);
+
+    const body = $("#jiraTableBody");
+    body.replaceChildren();
+    visibleItems.forEach((item) => {
+      const row = $("#jiraTemplate").content.firstElementChild.cloneNode(true);
+      row.dataset.id = item.id;
+      row.querySelector(".jira-issue-type").textContent = item.issueType || "Task";
+      const link = row.querySelector(".jira-issue-key a");
+      link.textContent = item.name;
+      link.href = item.url;
+      row.querySelector(".jira-summary").textContent = item.description;
+      row.querySelector(".jira-assignee").textContent = item.assignee || "Unassigned";
+      row.querySelector(".jira-reporter").textContent = item.reporter || "—";
+      row.querySelector(".jira-priority").textContent = item.priority || "—";
+      const status = row.querySelector(".jira-status");
+      status.textContent = item.status || "Open";
+      status.dataset.status = String(item.status || "open").toLocaleLowerCase("en-US").replaceAll(" ", "_");
+      row.querySelector(".jira-resolution").textContent = item.resolution || "Unresolved";
+      row.querySelector(".jira-created").textContent = item.jiraCreated || formatJiraTimestamp(item.createdAt);
+      row.querySelector(".jira-updated").textContent = item.jiraUpdated || formatJiraTimestamp(item.updatedAt);
+      row.querySelector(".jira-due-date").textContent = item.dueDate || "—";
+      row.querySelector(".jira-edit-button").addEventListener("click", () => startJiraEdit(item));
+      row.querySelector(".jira-delete-button").addEventListener("click", () => {
+        const linkedCount = readEntries().filter((entry) => entry.jiraId === item.id).length;
+        if (linkedCount) {
+          alert(`Bu JIRA maddesi ${linkedCount} efor kaydına bağlı olduğu için silinemez.`);
+          return;
+        }
+        if (confirm(`“${item.name}” JIRA maddesi silinsin mi?`)) {
+          window.JiraStore.remove(item.id);
+          renderJiraItems();
+          renderTimesheet();
+          backupAndReport("Silinen JIRA maddesi Drive’a gönderildi.");
         }
       });
-      list.append(card);
+      body.append(row);
     });
+  }
+
+  function formatJiraTimestamp(value) {
+    if (!value) return "—";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? String(value) : dateTimeFormatter.format(parsed);
+  }
+
+  function startJiraEdit(item) {
+    jiraFields.id.value = item.id;
+    jiraFields.issueType.value = item.issueType || "Task";
+    jiraFields.name.value = item.name;
+    jiraFields.description.value = item.description;
+    jiraFields.url.value = item.url;
+    jiraFields.assignee.value = item.assignee || "";
+    jiraFields.reporter.value = item.reporter || "";
+    jiraFields.priority.value = item.priority || "";
+    jiraFields.status.value = item.status || "";
+    jiraFields.resolution.value = item.resolution || "";
+    jiraFields.jiraCreated.value = item.jiraCreated || "";
+    jiraFields.jiraUpdated.value = item.jiraUpdated || "";
+    jiraFields.dueDate.value = item.dueDate || "";
+    $("#jiraSubmitLabel").textContent = "Değişiklikleri kaydet";
+    $("#cancelJiraEdit").classList.remove("hidden");
+    jiraFields.name.focus();
+  }
+
+  function resetJiraForm() {
+    jiraForm.reset();
+    jiraFields.id.value = "";
+    jiraFields.issueType.value = "Task";
+    $("#jiraSubmitLabel").textContent = "JIRA maddesini ekle";
+    $("#cancelJiraEdit").classList.add("hidden");
+    $("#jiraFormMessage").textContent = "";
+    $("#jiraFormMessage").classList.remove("success");
+  }
+
+  function jiraCellText(row, className) {
+    return String(row.querySelector(`.${className}`)?.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function parseJiraHtml(source) {
+    const documentFromFile = new DOMParser().parseFromString(source, "text/html");
+    return Array.from(documentFromFile.querySelectorAll("#issuetable tbody tr")).map((row) => {
+      const issueLink = row.querySelector(".issuekey a, a.issue-link");
+      return {
+        issueType: jiraCellText(row, "issuetype") || "Task",
+        name: jiraCellText(row, "issuekey") || issueLink?.dataset.issueKey || "",
+        description: jiraCellText(row, "summary"),
+        url: issueLink?.href || "",
+        assignee: jiraCellText(row, "assignee").replace(/^Unassigned$/i, ""),
+        reporter: jiraCellText(row, "reporter"),
+        priority: jiraCellText(row, "priority"),
+        status: jiraCellText(row, "status"),
+        resolution: jiraCellText(row, "resolution") || "Unresolved",
+        jiraCreated: jiraCellText(row, "created"),
+        jiraUpdated: jiraCellText(row, "updated"),
+        dueDate: jiraCellText(row, "duedate")
+      };
+    }).filter((item) => item.name && item.description && item.url);
+  }
+
+  function relinkMergedJiraEntries(idRemap = {}) {
+    let relinked = 0;
+    readEntries().forEach((entry) => {
+      const canonicalId = idRemap[entry.jiraId];
+      if (!canonicalId) return;
+      const canonical = window.JiraStore.get(canonicalId);
+      const result = getStore().update(entry.id, {
+        ...entry,
+        jiraId: canonicalId,
+        project: canonical?.name || entry.project
+      });
+      if (result?.valid !== false) relinked += 1;
+    });
+    return relinked;
+  }
+
+  async function importJiraHtml(file) {
+    const importedItems = parseJiraHtml(await file.text());
+    if (!importedItems.length) throw new Error("Dosyada #issuetable biçiminde JIRA kaydı bulunamadı.");
+    const result = window.JiraStore.mergeAll(importedItems);
+    if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "JIRA kayıtları içe aktarılamadı.");
+    const relinked = relinkMergedJiraEntries(result.value.idRemap);
+    renderJiraItems();
+    render();
+    $("#jiraFormMessage").textContent = `${result.value.imported} satır işlendi: ${result.value.created} yeni JIRA eklendi, ${result.value.updated} mevcut JIRA güncellendi${result.value.duplicateCount ? `, ${result.value.duplicateCount} mükerrer Key birleştirildi` : ""}. Toplam ${result.value.total} JIRA${relinked ? `; ${relinked} efor bağlantısı korunan kayda taşındı` : ""}.`;
+    $("#jiraFormMessage").classList.add("success");
+    backupAndReport("İçe aktarılan JIRA maddeleri Drive’a gönderildi.");
   }
 
   function getTimesheetRange() {
@@ -178,6 +1186,60 @@
     return cell;
   }
 
+  function loadEffortModalEntry(entryId) {
+    const entry = modalEffortEntries.find((item) => item.id === entryId);
+    if (!entry) return;
+    $("#modalEntrySelect").value = entry.id;
+    $("#modalJiraInput").value = getJiraItem(entry.jiraId)?.id || DUMMY_JIRA.id;
+    $("#modalDateInput").value = entry.date;
+    $("#modalHoursInput").value = entry.hours;
+    $("#modalDescriptionInput").value = entry.task || entry.description || "";
+    $("#effortEditModalMessage").textContent = "";
+  }
+
+  function openEffortEditModal(sourceEntries) {
+    modalEffortMode = "edit";
+    modalEffortEntries = sourceEntries.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+    const entrySelect = $("#modalEntrySelect");
+    entrySelect.replaceChildren();
+    modalEffortEntries.forEach((entry, index) => {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.textContent = `${index + 1}. ${numberFormatter.format(entry.hours)} sa — ${entry.task || entry.description}`;
+      entrySelect.append(option);
+    });
+    $("#modalEntrySelectField").classList.toggle("hidden", modalEffortEntries.length < 2);
+    populateJiraSelect($("#modalJiraInput"));
+    if (!modalEffortEntries.length) return;
+    $("#effortEditModalTitle").textContent = "Eforu revize et";
+    $("#effortEditModalSubmitLabel").textContent = "Değişiklikleri kaydet";
+    loadEffortModalEntry(modalEffortEntries[0].id);
+    $("#effortEditModal").showModal();
+  }
+
+  function openEffortCreateModal(jiraId, date) {
+    modalEffortMode = "create";
+    modalEffortEntries = [];
+    $("#modalEntrySelect").replaceChildren();
+    $("#modalEntrySelectField").classList.add("hidden");
+    populateJiraSelect($("#modalJiraInput"));
+    $("#modalJiraInput").value = getJiraItem(jiraId)?.id || DUMMY_JIRA.id;
+    $("#modalDateInput").value = date;
+    $("#modalHoursInput").value = "";
+    $("#modalDescriptionInput").value = "";
+    $("#effortEditModalTitle").textContent = "Timesheet’e efor ekle";
+    $("#effortEditModalSubmitLabel").textContent = "Eforu kaydet";
+    $("#effortEditModalMessage").textContent = "";
+    $("#effortEditModal").showModal();
+    $("#modalHoursInput").focus();
+  }
+
+  function timesheetGroupKey(entry, jiraItem, grouping) {
+    const hasRealJira = Boolean(jiraItem && jiraItem.id !== DUMMY_JIRA.id);
+    if (!hasRealJira) return `no-jira:${entry.id}`;
+    return grouping === "day" ? "__daily_summary__" : `jira:${jiraItem.id}`;
+  }
+
   function renderTimesheet() {
     const range = getTimesheetRange();
     const table = $("#timesheetTable");
@@ -202,20 +1264,62 @@
     const startIso = isoFromDate(range.start);
     const endIso = isoFromDate(range.end);
     const filtered = readEntries().filter((entry) => entry.date >= startIso && entry.date <= endIso && (includeWeekends || ![0, 6].includes(parseDate(entry.date).getDay())));
+    const grouping = $("#timesheetGrouping").value;
     const groups = new Map();
     filtered.forEach((entry) => {
-      const key = `${entry.project}\u0000${entry.task || entry.description || ""}`;
-      if (!groups.has(key)) groups.set(key, { project: entry.project, task: entry.task || entry.description || "", days: new Map(), total: 0 });
+      const jiraItem = getJiraItem(entry.jiraId);
+      const description = entry.task || entry.description || "";
+      const hasRealJira = Boolean(jiraItem && jiraItem.id !== DUMMY_JIRA.id);
+      const key = timesheetGroupKey(entry, jiraItem, grouping);
+      if (!groups.has(key)) groups.set(key, {
+        key,
+        issueKey: !hasRealJira ? "JIRA-YOK" : (grouping === "day" ? "GÜNLÜK" : jiraItem?.name),
+        issueSummary: !hasRealJira ? (description || "JIRA atanmamış efor") : (grouping === "day" ? "Aynı güne girilen tüm JIRA eforları" : jiraItem?.description),
+        priority: !hasRealJira || grouping === "day" ? "—" : (jiraItem?.priority || "—"),
+        url: !hasRealJira || grouping === "day" ? "" : (jiraItem?.url || ""),
+        jiraId: !hasRealJira || grouping === "day" ? DUMMY_JIRA.id : jiraItem?.id,
+        days: new Map(), counts: new Map(), details: new Map(), entries: [], total: 0
+      });
       const group = groups.get(key);
+      group.entries.push(entry);
       group.days.set(entry.date, (group.days.get(entry.date) || 0) + Number(entry.hours));
+      group.counts.set(entry.date, (group.counts.get(entry.date) || 0) + 1);
+      if (!group.details.has(entry.date)) group.details.set(entry.date, []);
+      group.details.get(entry.date).push(`${description} (${formatHours(entry.hours)})`);
       group.total += Number(entry.hours);
     });
-    const rows = Array.from(groups.values()).sort((a, b) => a.project.localeCompare(b.project, "tr") || a.task.localeCompare(b.task, "tr"));
+    const rows = Array.from(groups.values()).sort((a, b) =>
+      a.issueKey.localeCompare(b.issueKey, "tr", { numeric: true, sensitivity: "base" })
+      || a.issueSummary.localeCompare(b.issueSummary, "tr", { numeric: true, sensitivity: "base" }));
     const dayTotals = new Map(dates.map((date) => [isoFromDate(date), 0]));
     let grandTotal = 0;
+    const sheetHours = (value) => `${numberFormatter.format(Number(value) || 0)}h`;
+
+    const monthRow = document.createElement("tr");
+    monthRow.className = "timesheet-month-row";
+    const keyHeader = tableCell("th", "Key", "sticky-column timesheet-key-column");
+    const issueHeader = tableCell("th", "Issue", "sticky-column timesheet-issue-column");
+    const priorityHeader = tableCell("th", "Priority", "sticky-column timesheet-priority-column");
+    [keyHeader, issueHeader, priorityHeader].forEach((cell) => { cell.rowSpan = 2; });
+    monthRow.append(keyHeader, issueHeader, priorityHeader);
+    const monthGroups = [];
+    dates.forEach((date) => {
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+      const current = monthGroups.at(-1);
+      if (current?.key === key) current.count += 1;
+      else monthGroups.push({ key, count: 1, date });
+    });
+    monthGroups.forEach((group) => {
+      const cell = tableCell("th", new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" }).format(group.date), "month-column");
+      cell.colSpan = group.count;
+      monthRow.append(cell);
+    });
+    const totalHeader = tableCell("th", "Toplam", "total-column");
+    totalHeader.rowSpan = 2;
+    monthRow.append(totalHeader);
 
     const headerRow = document.createElement("tr");
-    headerRow.append(tableCell("th", "Proje", "sticky-column project-column"), tableCell("th", "Açıklama", "sticky-column description-column"));
+    headerRow.className = "timesheet-day-row";
     dates.forEach((date) => {
       const cell = tableCell("th", "", "day-column");
       const day = document.createElement("strong");
@@ -226,31 +1330,83 @@
       if ([0, 6].includes(date.getDay())) cell.classList.add("weekend");
       headerRow.append(cell);
     });
-    headerRow.append(tableCell("th", "Toplam", "total-column"));
-    head.append(headerRow);
+    head.append(monthRow, headerRow);
 
     rows.forEach((row) => {
       const tr = document.createElement("tr");
-      tr.append(tableCell("td", row.project, "sticky-column project-column"), tableCell("td", row.task, "sticky-column description-column"));
+      tr.className = "timesheet-group-row";
+      const keyCell = tableCell("td", "", "sticky-column timesheet-key-column");
+      const keyLabel = row.url ? document.createElement("a") : document.createElement("strong");
+      keyLabel.textContent = row.issueKey;
+      if (row.url) {
+        keyLabel.href = row.url;
+        keyLabel.target = "_blank";
+        keyLabel.rel = "noopener noreferrer";
+      }
+      keyCell.append(keyLabel);
+      const priorityCell = tableCell("td", "", "sticky-column timesheet-priority-column");
+      const priorityBadge = document.createElement("span");
+      priorityBadge.className = "timesheet-priority";
+      priorityBadge.textContent = row.priority;
+      priorityBadge.dataset.priority = String(row.priority).toLocaleLowerCase("en-US");
+      priorityCell.append(priorityBadge);
+      tr.append(keyCell, tableCell("td", row.issueSummary, "sticky-column timesheet-issue-column"), priorityCell);
       dates.forEach((date) => {
         const iso = isoFromDate(date);
         const hours = row.days.get(iso) || 0;
         dayTotals.set(iso, (dayTotals.get(iso) || 0) + hours);
-        const cell = tableCell("td", hours ? numberFormatter.format(hours) : "", "hours-cell");
+        const cell = tableCell("td", "", "hours-cell");
+        const count = row.counts.get(iso) || 0;
+        if (hours) {
+          const effortButton = document.createElement("button");
+          effortButton.type = "button";
+          effortButton.className = "timesheet-effort-button";
+          effortButton.textContent = sheetHours(hours);
+          const entriesForCell = row.entries.filter((entry) => entry.date === iso);
+          effortButton.addEventListener("click", () => openEffortEditModal(entriesForCell));
+          cell.append(effortButton);
+        } else {
+          const addEffortButton = document.createElement("button");
+          addEffortButton.type = "button";
+          addEffortButton.className = "timesheet-empty-effort-button";
+          addEffortButton.textContent = "+";
+          addEffortButton.setAttribute("aria-label", `${row.issueKey} için ${dateFormatter.format(date)} tarihine efor ekle`);
+          addEffortButton.title = `${row.issueKey} · ${dateFormatter.format(date)} · Efor ekle`;
+          addEffortButton.addEventListener("click", () => openEffortCreateModal(row.jiraId, iso));
+          cell.append(addEffortButton);
+        }
+        if (count > 1) {
+          cell.classList.add("grouped-day-cell");
+          const countLabel = document.createElement("small");
+          countLabel.textContent = `${count} kayıt`;
+          cell.append(countLabel);
+          cell.title = row.details.get(iso).join("\n");
+        }
         if ([0, 6].includes(date.getDay())) cell.classList.add("weekend");
         tr.append(cell);
       });
       grandTotal += row.total;
-      tr.append(tableCell("td", formatHours(row.total), "row-total total-column"));
+      tr.append(tableCell("td", sheetHours(row.total), "row-total total-column"));
       body.append(tr);
+    });
+
+    head.querySelectorAll(".day-column").forEach((cell, index) => {
+      const total = dayTotals.get(isoFromDate(dates[index])) || 0;
+      cell.classList.toggle("day-complete", total >= 8);
+      if (total >= 8) cell.title = `Tamamlandı · ${formatHours(total)}`;
     });
 
     const totalRow = document.createElement("tr");
     const label = tableCell("th", `Toplam (${rows.length} satır)`, "sticky-column total-label");
-    label.colSpan = 2;
+    label.colSpan = 3;
     totalRow.append(label);
-    dates.forEach((date) => totalRow.append(tableCell("th", dayTotals.get(isoFromDate(date)) ? numberFormatter.format(dayTotals.get(isoFromDate(date))) : "", "hours-cell")));
-    totalRow.append(tableCell("th", formatHours(grandTotal), "total-column"));
+    dates.forEach((date) => {
+      const total = dayTotals.get(isoFromDate(date)) || 0;
+      const cell = tableCell("th", total ? sheetHours(total) : "", "hours-cell day-total");
+      if (total >= 8) cell.classList.add("day-complete");
+      totalRow.append(cell);
+    });
+    totalRow.append(tableCell("th", sheetHours(grandTotal), "total-column"));
     foot.append(totalRow);
 
     table.classList.toggle("hidden", rows.length === 0);
@@ -261,48 +1417,111 @@
   }
 
   function startTaskEdit(task) {
+    activateTaskSubview("taskCreateView");
     taskFields.id.value = task.id;
+    populateTaskParentOptions(task.id, task.parentTaskId || "");
     taskFields.title.value = task.title;
-    taskFields.dueDate.value = task.dueDate;
+    taskFields.assignee.value = task.assignee || "";
+    taskFields.taskType.value = task.taskType || "architecture_roadmap";
+    taskFields.priority.value = task.priority || "";
+    taskFields.year.value = task.year || "";
+    taskFields.quarter.value = task.quarter || "";
+    taskFields.dueDate.value = task.dueDate || "";
     taskFields.status.value = task.status;
+    taskFields.descriptionHtml.innerHTML = sanitizeTaskHtml(task.descriptionHtml);
+    $("#taskFormTitle").textContent = "Görevi revize et";
     $("#taskSubmitLabel").textContent = "Değişiklikleri kaydet";
     $("#cancelTaskEdit").classList.remove("hidden");
     taskFields.title.focus();
+    taskForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function startSubtaskCreate(parentTask) {
+    resetTaskForm();
+    activateTaskSubview("taskCreateView");
+    populateTaskParentOptions("", parentTask.id);
+    taskFields.parentTaskId.value = parentTask.id;
+    taskFields.assignee.value = parentTask.assignee || "";
+    taskFields.priority.value = parentTask.priority || "";
+    taskFields.year.value = parentTask.year || "";
+    taskFields.quarter.value = parentTask.quarter || "";
+    $("#taskFormTitle").textContent = "Alt görev ekle";
+    $("#taskSubmitLabel").textContent = "Alt görevi ekle";
+    $("#cancelTaskEdit").classList.remove("hidden");
+    taskFields.title.focus();
+    taskForm.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function resetTaskForm() {
     taskForm.reset();
     taskFields.id.value = "";
-    taskFields.dueDate.value = isoToday();
+    populateTaskParentOptions();
+    taskFields.parentTaskId.value = "";
+    taskFields.assignee.value = "";
+    taskFields.taskType.value = "architecture_roadmap";
+    taskFields.priority.value = "";
+    taskFields.year.value = "";
+    taskFields.quarter.value = "";
+    taskFields.dueDate.value = "";
     taskFields.status.value = "planned";
+    taskFields.descriptionHtml.replaceChildren();
+    $("#taskFormTitle").textContent = "Görev ekle";
     $("#taskSubmitLabel").textContent = "Görevi ekle";
     $("#cancelTaskEdit").classList.add("hidden");
     $("#taskFormMessage").textContent = "";
     $("#taskFormMessage").classList.remove("success");
   }
 
+  function applyInitialRoute() {
+    const params = new URLSearchParams(window.location.search);
+    const editTaskId = params.get("editTask");
+    const parentTaskId = params.get("parentTask");
+    if (params.get("view") !== "tasks" && !editTaskId && !parentTaskId) return;
+    activateMainView("tasksView");
+    if (editTaskId) {
+      const task = window.TaskStore.get(editTaskId);
+      if (task) startTaskEdit(task);
+      else activateTaskSubview("taskReportView");
+      return;
+    }
+    if (parentTaskId) {
+      const parentTask = window.TaskStore.get(parentTaskId);
+      if (parentTask) startSubtaskCreate(parentTask);
+      else activateTaskSubview("taskReportView");
+      return;
+    }
+    activateTaskSubview("taskReportView");
+  }
+
   function startEdit(entry) {
     fields.id.value = entry.id;
     fields.date.value = entry.date;
-    fields.project.value = entry.project;
     fields.description.value = entry.task || entry.description || "";
     fields.hours.value = entry.hours;
+    $("#jiraItemSearchInput").value = "";
+    filterEffortJiraOptions(entry.jiraId || DUMMY_JIRA.id);
+    setEffortJiraPickerOpen(false);
     $("#submitLabel").textContent = "Değişiklikleri kaydet";
     $("#cancelEditButton").classList.remove("hidden");
     updateCount();
-    fields.project.focus();
+    $("#jiraItemPickerButton").focus();
     form.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function resetForm() {
+  function resetForm(preferredDate = isoToday()) {
+    if (typeof preferredDate !== "string") preferredDate = isoToday();
     form.reset();
     fields.id.value = "";
-    fields.date.value = isoToday();
+    fields.date.value = preferredDate;
+    $("#jiraItemSearchInput").value = "";
+    filterEffortJiraOptions(DUMMY_JIRA.id);
+    setEffortJiraPickerOpen(false);
     $("#submitLabel").textContent = "Kaydı ekle";
     $("#cancelEditButton").classList.add("hidden");
     $("#formMessage").textContent = "";
     $("#formMessage").classList.remove("success");
     Object.values(fields).forEach((field) => field.removeAttribute("aria-invalid"));
+    $("#jiraItemPickerButton").removeAttribute("aria-invalid");
     updateCount();
   }
 
@@ -320,7 +1539,12 @@
   }
 
   function backupBundle() {
-    return { entries: readEntries(), tasks: window.TaskStore.list() };
+    return {
+      entries: readEntries(),
+      tasks: window.TaskStore.list(),
+      jiraItems: window.JiraStore.list(),
+      reminders: window.ReminderStore.list()
+    };
   }
 
   function setDriveBusy(busy) {
@@ -350,7 +1574,7 @@
 
   async function restoreFromDrive() {
     const backup = await window.DriveSync.restore();
-    if (readEntries().length && !confirm(`Drive yedeğindeki ${backup.entries.length} kayıt mevcut yerel kayıtların yerine yüklensin mi?`)) {
+    if ((readEntries().length || window.TaskStore.list().length || window.JiraStore.list().length || window.ReminderStore.list().length) && !confirm(`Drive yedeğindeki ${backup.entries.length} efor, ${(backup.tasks || []).length} görev, ${(backup.jiraItems || []).length} JIRA maddesi ve ${(backup.reminders || []).length} hatırlatma yerel verilerin yerine yüklensin mi?`)) {
       setDriveStatus("Geri yükleme iptal edildi.");
       return;
     }
@@ -358,11 +1582,17 @@
     if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "Yedek doğrulanamadı.");
     const taskResult = window.TaskStore.replaceAll(backup.tasks || []);
     if (!taskResult.valid) throw new Error(Object.values(taskResult.errors || {}).join(" ") || "Görev yedeği doğrulanamadı.");
+    window.TaskStore.ensureHierarchy();
+    const jiraResult = window.JiraStore.replaceAll(backup.jiraItems || []);
+    if (!jiraResult.valid) throw new Error(Object.values(jiraResult.errors || {}).join(" ") || "JIRA yedeği doğrulanamadı.");
+    const reminderResult = window.ReminderStore.replaceAll(backup.reminders || []);
+    if (!reminderResult.valid) throw new Error(Object.values(reminderResult.errors || {}).join(" ") || "Hatırlatma yedeği doğrulanamadı.");
+    renderJiraItems();
     render();
     renderTasks();
     updateLastBackupTime(backup.file.modifiedTime);
     $("#restorePrompt").classList.add("hidden");
-    setDriveStatus(`${backup.entries.length} kayıt Google Drive’dan geri yüklendi.`);
+    setDriveStatus(`${backup.entries.length} efor ve ${(backup.reminders || []).length} hatırlatma Google Drive’dan geri yüklendi.`);
   }
 
   async function runDriveAction(action) {
@@ -376,17 +1606,28 @@
     event.preventDefault();
     const invalid = Object.values(fields).filter((field) => field !== fields.id && !field.checkValidity());
     Object.values(fields).forEach((field) => field.toggleAttribute("aria-invalid", invalid.includes(field)));
+    $("#jiraItemPickerButton").toggleAttribute("aria-invalid", invalid.includes(fields.jiraId));
     if (invalid.length) {
       $("#formMessage").textContent = "Lütfen zorunlu alanları geçerli bilgilerle doldurun.";
-      invalid[0].focus();
+      if (invalid[0] === fields.jiraId) setEffortJiraPickerOpen(true);
+      else invalid[0].focus();
       return;
     }
     const editing = Boolean(fields.id.value);
+    const savedDate = fields.date.value;
+    const selectedJira = getJiraItem(fields.jiraId.value);
+    if (!selectedJira) {
+      $("#formMessage").textContent = "Efor kaydı için geçerli bir JIRA maddesi seçin.";
+      $("#jiraItemPickerButton").setAttribute("aria-invalid", "true");
+      setEffortJiraPickerOpen(true);
+      return;
+    }
     const result = saveEntry({
       id: fields.id.value || undefined,
       date: fields.date.value,
-      project: fields.project.value.trim(),
+      project: selectedJira.name,
       task: fields.description.value.trim(),
+      jiraId: fields.jiraId.value,
       hours: Number(fields.hours.value),
       notes: ""
     });
@@ -395,7 +1636,7 @@
       $("#formMessage").textContent = messages.join(" ") || "Kayıt kaydedilemedi.";
       return;
     }
-    resetForm();
+    resetForm(savedDate);
     $("#formMessage").textContent = editing ? "Kayıt güncellendi." : "Efor kaydı eklendi.";
     $("#formMessage").classList.add("success");
     render();
@@ -405,10 +1646,20 @@
   taskForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const editing = Boolean(taskFields.id.value);
+    const selectedParent = tasks.find((task) => task.id === taskFields.parentTaskId.value) || null;
+    const creatingSubtask = !editing && Boolean(selectedParent);
     const payload = {
       title: taskFields.title.value.trim(),
+      parentTaskId: selectedParent?.id || "",
+      parentItem: selectedParent?.title || "",
+      assignee: taskFields.assignee.value.trim(),
+      taskType: taskFields.taskType.value,
+      priority: taskFields.priority.value,
+      year: taskFields.year.value,
+      quarter: taskFields.quarter.value,
       dueDate: taskFields.dueDate.value,
-      status: taskFields.status.value
+      status: taskFields.status.value,
+      descriptionHtml: sanitizeTaskHtml(taskFields.descriptionHtml.innerHTML)
     };
     const result = editing ? window.TaskStore.update(taskFields.id.value, payload) : window.TaskStore.create(payload);
     if (!result.valid) {
@@ -416,27 +1667,247 @@
       $("#taskFormMessage").classList.remove("success");
       return;
     }
+    if (creatingSubtask && selectedParent) expandedTaskIds.add(selectedParent.id);
     resetTaskForm();
-    $("#taskFormMessage").textContent = editing ? "Görev güncellendi." : "Görev eklendi.";
+    $("#taskFormMessage").textContent = editing ? "Görev güncellendi." : (creatingSubtask ? "Alt görev eklendi." : "Görev eklendi.");
     $("#taskFormMessage").classList.add("success");
     renderTasks();
+    activateTaskSubview("taskReportView");
     backupAndReport(editing ? "Güncellenen görev Drive’a gönderildi." : "Yeni görev Drive’a gönderildi.");
   });
 
+  reminderForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const editingItem = reminderFields.id.value ? window.ReminderStore.get(reminderFields.id.value) : null;
+    const payload = {
+      text: reminderFields.text.value.trim(),
+      remindAt: reminderFields.remindAt.value,
+      importance: reminderFields.importance.value,
+      completed: editingItem?.completed || false
+    };
+    const result = editingItem
+      ? window.ReminderStore.update(editingItem.id, payload)
+      : window.ReminderStore.create(payload);
+    if (!result.valid) {
+      $("#reminderFormMessage").textContent = Object.values(result.errors || {}).join(" ");
+      $("#reminderFormMessage").classList.remove("success");
+      return;
+    }
+    const message = editingItem ? "Hatırlatma güncellendi." : "Not ve hatırlatma eklendi.";
+    resetReminderForm();
+    $("#reminderFormMessage").textContent = message;
+    $("#reminderFormMessage").classList.add("success");
+    renderReminders();
+    backupAndReport(editingItem ? "Güncellenen hatırlatma Drive’a gönderildi." : "Yeni hatırlatma Drive’a gönderildi.");
+  });
+
+  jiraForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const editing = Boolean(jiraFields.id.value);
+    const payload = {
+      issueType: jiraFields.issueType.value,
+      name: jiraFields.name.value.trim(),
+      description: jiraFields.description.value.trim(),
+      url: jiraFields.url.value.trim(),
+      assignee: jiraFields.assignee.value.trim(),
+      reporter: jiraFields.reporter.value.trim(),
+      priority: jiraFields.priority.value,
+      status: jiraFields.status.value.trim(),
+      resolution: jiraFields.resolution.value.trim(),
+      jiraCreated: jiraFields.jiraCreated.value.trim(),
+      jiraUpdated: jiraFields.jiraUpdated.value.trim(),
+      dueDate: jiraFields.dueDate.value.trim()
+    };
+    const result = editing ? window.JiraStore.update(jiraFields.id.value, payload) : window.JiraStore.create(payload);
+    if (!result.valid) {
+      $("#jiraFormMessage").textContent = Object.values(result.errors || {}).join(" ");
+      $("#jiraFormMessage").classList.remove("success");
+      return;
+    }
+    resetJiraForm();
+    $("#jiraFormMessage").textContent = editing ? "JIRA maddesi güncellendi." : "JIRA maddesi eklendi.";
+    $("#jiraFormMessage").classList.add("success");
+    renderJiraItems();
+    render();
+    backupAndReport(editing ? "Güncellenen JIRA maddesi Drive’a gönderildi." : "Yeni JIRA maddesi Drive’a gönderildi.");
+  });
+
   $("#cancelTaskEdit").addEventListener("click", resetTaskForm);
+  $("#cancelReminderEdit").addEventListener("click", resetReminderForm);
+  $("#openAiAssistant").addEventListener("click", () => setAiAssistantPanel(true));
+  $("#closeAiAssistant").addEventListener("click", () => setAiAssistantPanel(false));
+  $("#aiAssistantForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    askAiAssistant($("#aiAssistantInput").value);
+  });
+  $("#aiAssistantInput").addEventListener("input", (event) => {
+    $("#aiAssistantInputCount").textContent = String(event.target.value.length);
+  });
+  document.querySelectorAll("[data-ai-prompt]").forEach((button) => {
+    button.addEventListener("click", () => askAiAssistant(button.dataset.aiPrompt));
+  });
+  $("#saveAiAssistantEndpoint").addEventListener("click", () => {
+    try {
+      const endpoint = window.AiAssistantClient.setEndpoint($("#aiAssistantEndpoint").value);
+      $("#aiAssistantEndpoint").value = endpoint;
+      $("#aiAssistantStatus").textContent = "AI servis adresi kaydedildi";
+    } catch (error) {
+      $("#aiAssistantStatus").textContent = error.message;
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("#aiAssistantPanel").classList.contains("hidden")) setAiAssistantPanel(false);
+  });
+  const closeTaskPlanImportModal = () => $("#taskPlanImportModal").close();
+  $("#openTaskPlanPaste").addEventListener("click", () => {
+    $("#taskPlanTextInput").value = "";
+    $("#taskPlanPasteMessage").textContent = "";
+    $("#taskPlanImportModal").showModal();
+    $("#taskPlanTextInput").focus();
+  });
+  $("#closeTaskPlanImportModal").addEventListener("click", closeTaskPlanImportModal);
+  $("#cancelTaskPlanImport").addEventListener("click", closeTaskPlanImportModal);
+  $("#taskPlanPasteForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    try {
+      importTaskPlanSource($("#taskPlanTextInput").value);
+      closeTaskPlanImportModal();
+    } catch (error) {
+      $("#taskPlanPasteMessage").textContent = error.message || "Görev planı içe aktarılamadı.";
+    }
+  });
+  $("#backToTaskReport").addEventListener("click", () => activateTaskSubview("taskReportView"));
+  $("#addSubtaskButton").addEventListener("click", () => {
+    const task = selectedTaskDetailId ? window.TaskStore.get(selectedTaskDetailId) : null;
+    if (task) startSubtaskCreate(task);
+  });
+  $("#reviseTaskButton").addEventListener("click", () => {
+    const task = selectedTaskDetailId ? window.TaskStore.get(selectedTaskDetailId) : null;
+    if (task) startTaskEdit(task);
+  });
+  $("#cancelJiraEdit").addEventListener("click", resetJiraForm);
+  $("#jiraItemSearchInput").addEventListener("input", () => filterEffortJiraOptions());
+  $("#jiraItemPickerButton").addEventListener("click", () => {
+    const isOpen = $("#jiraItemPickerButton").getAttribute("aria-expanded") === "true";
+    setEffortJiraPickerOpen(!isOpen);
+  });
+  $("#jiraItemOptionList").addEventListener("click", (event) => {
+    const option = event.target.closest(".jira-picker-option");
+    if (!option) return;
+    fields.jiraId.value = option.dataset.value;
+    $("#jiraItemPickerButton").removeAttribute("aria-invalid");
+    updateEffortJiraPickerLabel();
+    setEffortJiraPickerOpen(false);
+    $("#jiraItemPickerButton").focus();
+  });
+  $("#jiraItemSearchInput").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setEffortJiraPickerOpen(false);
+      $("#jiraItemPickerButton").focus();
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      $("#jiraItemOptionList .jira-picker-option")?.focus();
+    }
+  });
+  $("#jiraItemOptionList").addEventListener("keydown", (event) => {
+    const options = [...$("#jiraItemOptionList").querySelectorAll(".jira-picker-option")];
+    const currentIndex = options.indexOf(event.target.closest(".jira-picker-option"));
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setEffortJiraPickerOpen(false);
+      $("#jiraItemPickerButton").focus();
+    } else if (event.key === "ArrowDown" && currentIndex >= 0) {
+      event.preventDefault();
+      options[Math.min(currentIndex + 1, options.length - 1)]?.focus();
+    } else if (event.key === "ArrowUp" && currentIndex >= 0) {
+      event.preventDefault();
+      if (currentIndex === 0) $("#jiraItemSearchInput").focus();
+      else options[currentIndex - 1]?.focus();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (!$("#jiraItemPicker").contains(event.target)) setEffortJiraPickerOpen(false);
+  });
+  $("#jiraSearchInput").addEventListener("input", renderJiraItems);
+  $("#jiraHtmlImport").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    $("#jiraFormMessage").textContent = "JIRA HTML dosyası okunuyor...";
+    $("#jiraFormMessage").classList.remove("success");
+    try { await importJiraHtml(file); }
+    catch (error) { $("#jiraFormMessage").textContent = error.message || "JIRA HTML dosyası içe aktarılamadı."; }
+    finally { event.target.value = ""; }
+  });
+  $("#taskPlanImport").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    $("#taskFormMessage").textContent = "Görev planı okunuyor...";
+    $("#taskFormMessage").classList.remove("success");
+    try { await importTaskPlan(file); }
+    catch (error) {
+      activateTaskSubview("taskCreateView");
+      $("#taskFormMessage").textContent = error.message || "Görev planı içe aktarılamadı.";
+    } finally { event.target.value = ""; }
+  });
   $("#addNextTaskToCalendar").addEventListener("click", () => {
-    if (nextDashboardTask) window.open(googleCalendarUrl(nextDashboardTask), "_blank", "noopener,noreferrer");
+    if (nextDashboardTask?.dueDate) window.open(googleCalendarUrl(nextDashboardTask), "_blank", "noopener,noreferrer");
   });
 
   document.querySelectorAll(".tab-button").forEach((button) => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".tab-button").forEach((item) => {
-        const active = item === button;
-        item.classList.toggle("active", active);
-        item.setAttribute("aria-selected", String(active));
-      });
-      document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== button.dataset.tab));
-    });
+    button.addEventListener("click", () => activateMainView(button.dataset.tab));
+  });
+
+  document.querySelectorAll("[data-home-target]").forEach((button) => {
+    button.addEventListener("click", () => activateMainView(button.dataset.homeTarget));
+  });
+
+  document.querySelectorAll(".task-subtab-button").forEach((button) => {
+    button.addEventListener("click", () => activateTaskSubview(button.dataset.taskTab));
+  });
+  $("#taskTypeFilter").addEventListener("change", (event) => {
+    renderTasks();
+  });
+
+  $("#modalEntrySelect").addEventListener("change", (event) => loadEffortModalEntry(event.target.value));
+  const closeEffortModal = () => $("#effortEditModal").close();
+  $("#closeEffortEditModal").addEventListener("click", closeEffortModal);
+  $("#cancelEffortEditModal").addEventListener("click", closeEffortModal);
+  effortEditModalForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const modalFields = [$("#modalJiraInput"), $("#modalDateInput"), $("#modalHoursInput"), $("#modalDescriptionInput")];
+    const invalidField = modalFields.find((field) => !field.checkValidity());
+    if (invalidField) {
+      $("#effortEditModalMessage").textContent = "Lütfen tarih, süre ve efor açıklamasını geçerli şekilde doldurun.";
+      invalidField.focus();
+      return;
+    }
+    const jiraItem = getJiraItem($("#modalJiraInput").value);
+    if (!jiraItem) {
+      $("#effortEditModalMessage").textContent = "Geçerli bir JIRA maddesi seçin.";
+      return;
+    }
+    const payload = {
+      date: $("#modalDateInput").value,
+      project: jiraItem.name,
+      jiraId: jiraItem.id,
+      hours: Number($("#modalHoursInput").value),
+      task: $("#modalDescriptionInput").value.trim(),
+      notes: ""
+    };
+    const entry = modalEffortEntries.find((item) => item.id === $("#modalEntrySelect").value) || modalEffortEntries[0];
+    const result = modalEffortMode === "create"
+      ? saveEntry(payload)
+      : (entry ? getStore().update(entry.id, { ...entry, ...payload }) : { valid: false, errors: { id: "Kayıt bulunamadı." } });
+    if (!result.valid) {
+      $("#effortEditModalMessage").textContent = Object.values(result.errors || {}).join(" ");
+      return;
+    }
+    closeEffortModal();
+    render();
+    backupAndReport(modalEffortMode === "create"
+      ? "Timesheet üzerinden eklenen efor Drive’a gönderildi."
+      : "Timesheet üzerinden güncellenen efor Drive’a gönderildi.");
   });
 
   function updateTimesheetControls() {
@@ -448,6 +1919,7 @@
   }
 
   $("#timesheetPeriod").addEventListener("change", updateTimesheetControls);
+  $("#timesheetGrouping").addEventListener("change", renderTimesheet);
   $("#timesheetReferenceDate").addEventListener("change", renderTimesheet);
   $("#timesheetStartDate").addEventListener("change", renderTimesheet);
   $("#timesheetEndDate").addEventListener("change", renderTimesheet);
@@ -469,6 +1941,24 @@
 
   fields.description.addEventListener("input", updateCount);
   fields.date.addEventListener("change", render);
+  document.addEventListener("selectionchange", () => {
+    const selection = window.getSelection();
+    if (selection?.rangeCount && taskFields.descriptionHtml.contains(selection.anchorNode)) {
+      savedTaskEditorRange = selection.getRangeAt(0).cloneRange();
+    }
+  });
+  document.querySelectorAll("[data-task-command]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", () => {
+      if (document.activeElement !== taskFields.descriptionHtml) taskFields.descriptionHtml.focus();
+      if (savedTaskEditorRange) {
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(savedTaskEditorRange);
+      }
+      applyTaskEditorCommand(button.dataset.taskCommand);
+    });
+  });
   $("#filterDateInput").addEventListener("change", render);
   $("#cancelEditButton").addEventListener("click", resetForm);
 
@@ -507,12 +1997,17 @@
     setDriveStatus("Ayarlar’dan Google OAuth Client ID’nizi kaydedin.");
   }
   fields.date.value = isoToday();
-  taskFields.dueDate.value = isoToday();
+  taskFields.dueDate.value = "";
   $("#timesheetReferenceDate").value = isoToday();
   const todayForRange = parseDate(isoToday());
   const rangeMonday = addDays(todayForRange, -((todayForRange.getDay() + 6) % 7));
   $("#timesheetStartDate").value = isoFromDate(rangeMonday);
   $("#timesheetEndDate").value = isoFromDate(addDays(rangeMonday, 6));
+  $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
+  renderJiraItems();
   render();
+  window.TaskStore.ensureHierarchy();
+  window.TaskStore.migrateExistingTasksToArchitectureRoadmap();
   renderTasks();
+  applyInitialRoute();
 })();

@@ -34,18 +34,20 @@ test("zorunlu alanları ve saat sınırlarını doğrular", () => {
   assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "T", hours: 0 }).valid, false);
   assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "T", hours: 24.01 }).valid, false);
   assert.equal(store.validate({ date: "2026-08-05", project: " P ", task: " T ", hours: "1.255" }).value.hours, 1.25);
+  assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "T", hours: 1 }).errors.jiraId.length > 0, true);
+  assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "T", jiraId: " jira-1 ", hours: 1 }).value.jiraId, "jira-1");
 });
 
 test("CRUD akışı veriyi localStorage içinde kalıcı tutar", () => {
   const { store, values } = loadStore();
-  const created = store.create({ date: "2026-08-05", project: "Alpha", task: "Test", hours: 2, notes: " Not " });
+  const created = store.create({ date: "2026-08-05", project: "PROJ-1", task: "Test", jiraId: "jira-1", hours: 2, notes: " Not " });
   assert.equal(created.valid, true);
   assert.equal(store.get("test-id").notes, "Not");
   assert.equal(JSON.parse(values.get(store.STORAGE_KEY)).length, 1);
 
-  const updated = store.update("test-id", { date: "2026-08-05", project: "Beta", task: "Test 2", hours: 3.5 });
+  const updated = store.update("test-id", { date: "2026-08-05", project: "PROJ-2", task: "Test 2", jiraId: "jira-2", hours: 3.5 });
   assert.equal(updated.valid, true);
-  assert.equal(store.get("test-id").project, "Beta");
+  assert.equal(store.get("test-id").project, "PROJ-2");
   assert.equal(store.remove("test-id"), true);
   assert.equal(store.remove("test-id"), false);
   assert.equal(store.list().length, 0);
@@ -79,6 +81,16 @@ test("Drive yedeğini doğrulayıp yerel kayıtların yerine yükler", () => {
   assert.equal(store.list()[0].id, "drive-1");
   assert.equal(store.replaceAll([{ date: "bozuk" }]).valid, false);
   assert.equal(store.list().length, 1);
+});
+
+test("aynı tarihte birden fazla efor kaydını ayrı tutup toplamını hesaplar", () => {
+  const rows = [
+    { id: "same-1", date: "2026-08-06", project: "Alpha", task: "Analiz", hours: 2, notes: "", createdAt: "2026-08-06T08:00:00Z", updatedAt: "2026-08-06T08:00:00Z" },
+    { id: "same-2", date: "2026-08-06", project: "Beta", task: "Test", hours: 3.5, notes: "", createdAt: "2026-08-06T10:00:00Z", updatedAt: "2026-08-06T10:00:00Z" }
+  ];
+  const { store } = loadStore(JSON.stringify(rows));
+  assert.equal(store.list({ date: "2026-08-06" }).length, 2);
+  assert.equal(store.summarize().byDate["2026-08-06"], 5.5);
 });
 
 let failures = 0;

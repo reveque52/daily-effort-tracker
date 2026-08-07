@@ -2,7 +2,12 @@
   "use strict";
 
   const STORAGE_KEY = "daily-effort-tracker.tasks.v1";
+  const ARCHITECTURE_MIGRATION_KEY = "daily-effort-tracker.tasks.architecture-roadmap.v1";
   const STATUSES = ["planned", "in_progress", "completed"];
+  const PRIORITIES = ["", "high", "medium", "low"];
+  const QUARTERS = ["", "Q1", "Q2", "Q3", "Q4"];
+  const TASK_TYPES = ["standard", "architecture_roadmap", "meeting_organization", "management_request", "other"];
+  const MAX_DESCRIPTION_HTML_LENGTH = 50000;
 
   function validDate(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
@@ -14,14 +19,30 @@
   function validate(input) {
     const value = {
       title: String(input?.title || "").trim(),
+      parentItem: String(input?.parentItem || "").trim(),
+      parentTaskId: String(input?.parentTaskId || "").trim(),
+      assignee: String(input?.assignee || "").trim(),
+      taskType: String(input?.taskType || "standard").trim(),
+      priority: String(input?.priority || "").trim(),
+      year: String(input?.year || "").trim(),
+      quarter: String(input?.quarter || "").trim().toUpperCase(),
       dueDate: String(input?.dueDate || "").trim(),
-      status: String(input?.status || "planned")
+      status: String(input?.status || "planned"),
+      descriptionHtml: String(input?.descriptionHtml || "").trim()
     };
     const errors = {};
     if (!value.title) errors.title = "Görev başlığı zorunludur.";
-    else if (value.title.length > 120) errors.title = "Görev başlığı en fazla 120 karakter olabilir.";
-    if (!validDate(value.dueDate)) errors.dueDate = "Geçerli bir teslim tarihi seçin.";
+    else if (value.title.length > 300) errors.title = "Görev başlığı en fazla 300 karakter olabilir.";
+    if (value.parentItem.length > 300) errors.parentItem = "Ana madde en fazla 300 karakter olabilir.";
+    if (value.parentTaskId.length > 120) errors.parentTaskId = "Ana görev bağlantısı geçersiz.";
+    if (value.assignee.length > 120) errors.assignee = "Atanan kişi en fazla 120 karakter olabilir.";
+    if (!TASK_TYPES.includes(value.taskType)) errors.taskType = "Geçerli bir görev tipi seçin.";
+    if (!PRIORITIES.includes(value.priority)) errors.priority = "Geçerli bir öncelik seçin.";
+    if (value.year && !/^(20\d{2}|2100)$/.test(value.year)) errors.year = "Yıl 2000–2100 arasında olmalıdır.";
+    if (!QUARTERS.includes(value.quarter)) errors.quarter = "Geçerli bir çeyrek seçin.";
+    if (value.dueDate && !validDate(value.dueDate)) errors.dueDate = "Geçerli bir teslim tarihi seçin.";
     if (!STATUSES.includes(value.status)) errors.status = "Geçerli bir görev durumu seçin.";
+    if (value.descriptionHtml.length > MAX_DESCRIPTION_HTML_LENGTH) errors.descriptionHtml = "Görev açıklaması en fazla 50.000 karakter olabilir.";
     return { valid: Object.keys(errors).length === 0, errors, value };
   }
 
@@ -39,7 +60,9 @@
     return readAll().slice().sort((a, b) => {
       if (a.status === "completed" && b.status !== "completed") return 1;
       if (a.status !== "completed" && b.status === "completed") return -1;
-      return a.dueDate.localeCompare(b.dueDate) || a.title.localeCompare(b.title, "tr");
+      const aPlan = a.dueDate || `${a.year || "9999"}-${a.quarter || "Q9"}`;
+      const bPlan = b.dueDate || `${b.year || "9999"}-${b.quarter || "Q9"}`;
+      return aPlan.localeCompare(bPlan) || a.title.localeCompare(b.title, "tr");
     });
   }
 
@@ -67,6 +90,7 @@
 
   function remove(id) {
     const rows = readAll();
+    if (rows.some((task) => task.parentTaskId === id)) return false;
     const next = rows.filter((task) => task.id !== id);
     if (next.length === rows.length) return false;
     writeAll(next);
@@ -91,5 +115,86 @@
     return { valid: true, errors: {}, value: normalized };
   }
 
-  global.TaskStore = Object.freeze({ STORAGE_KEY, STATUSES, validate, list, get, create, update, remove, replaceAll });
+  function mergeAll(importedTasks) {
+    if (!Array.isArray(importedTasks)) return { valid: false, errors: { tasks: "Görev içe aktarma verisi geçersiz." } };
+    const rows = readAll();
+    const signature = (task) => [task.title, task.parentItem, task.year, task.quarter]
+      .map((value) => String(value || "").trim().toLocaleLowerCase("tr-TR")).join("|");
+    const bySignature = new Map(rows.map((task, index) => [signature(task), index]));
+    const now = new Date().toISOString();
+    let created = 0;
+    let updated = 0;
+    for (const item of importedTasks) {
+      const result = validate(item);
+      if (!result.valid) return result;
+      const key = signature(result.value);
+      const index = bySignature.get(key);
+      if (index === undefined) {
+        rows.push({ id: item.id || makeId(), ...result.value, createdAt: item.createdAt || now, updatedAt: now });
+        bySignature.set(key, rows.length - 1);
+        created += 1;
+      } else {
+        rows[index] = { ...rows[index], ...result.value, updatedAt: now };
+        updated += 1;
+      }
+    }
+    writeAll(rows);
+    return { valid: true, errors: {}, value: { imported: importedTasks.length, created, updated, total: rows.length } };
+  }
+
+  function ensureHierarchy() {
+    const rows = readAll();
+    const normalizeTitle = (value) => String(value || "").trim().toLocaleLowerCase("tr-TR");
+    const byTitle = new Map();
+    rows.forEach((task) => {
+      const key = normalizeTitle(task.title);
+      if (key && !byTitle.has(key) && !task.parentTaskId) byTitle.set(key, task);
+    });
+    let created = 0;
+    let linked = 0;
+    const now = new Date().toISOString();
+    Array.from(new Set(rows.map((task) => task.parentItem).filter(Boolean))).forEach((parentTitle) => {
+      const key = normalizeTitle(parentTitle);
+      if (byTitle.has(key)) return;
+      const parent = {
+        id: makeId(), title: parentTitle, parentItem: "", parentTaskId: "", assignee: "",
+        taskType: "standard", priority: "", year: "", quarter: "", dueDate: "",
+        status: "planned", descriptionHtml: "", createdAt: now, updatedAt: now
+      };
+      rows.push(parent);
+      byTitle.set(key, parent);
+      created += 1;
+    });
+    rows.forEach((task) => {
+      if (task.parentTaskId || !task.parentItem) return;
+      const parent = byTitle.get(normalizeTitle(task.parentItem));
+      if (parent && parent.id !== task.id) {
+        task.parentTaskId = parent.id;
+        task.updatedAt = now;
+        linked += 1;
+      }
+    });
+    if (created || linked) writeAll(rows);
+    return { created, linked, total: rows.length };
+  }
+
+  function migrateExistingTasksToArchitectureRoadmap() {
+    const rows = readAll();
+    if (localStorage.getItem(ARCHITECTURE_MIGRATION_KEY) === "done") {
+      return { updated: 0, total: rows.length };
+    }
+    const now = new Date().toISOString();
+    let updated = 0;
+    rows.forEach((task) => {
+      if (task.taskType === "architecture_roadmap") return;
+      task.taskType = "architecture_roadmap";
+      task.updatedAt = now;
+      updated += 1;
+    });
+    if (updated) writeAll(rows);
+    localStorage.setItem(ARCHITECTURE_MIGRATION_KEY, "done");
+    return { updated, total: rows.length };
+  }
+
+  global.TaskStore = Object.freeze({ STORAGE_KEY, STATUSES, PRIORITIES, QUARTERS, TASK_TYPES, validate, list, get, create, update, remove, replaceAll, mergeAll, ensureHierarchy, migrateExistingTasksToArchitectureRoadmap });
 })(window);
