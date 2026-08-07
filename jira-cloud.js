@@ -33,6 +33,11 @@
     return request("/health", { method: "GET" });
   }
 
+  function syncUsers(maxResults = 1000) {
+    const params = new URLSearchParams({ maxResults: String(maxResults) });
+    return request(`/users?${params}`, { method: "GET" });
+  }
+
   function syncIssues(jql, maxResults = 100) {
     const params = new URLSearchParams({ jql: String(jql || "").trim(), maxResults: String(maxResults) });
     return request(`/issues?${params}`, { method: "GET" });
@@ -41,6 +46,14 @@
   function getIssue(issueKey) {
     const key = String(issueKey || "").trim().toUpperCase();
     return request(`/issues/${encodeURIComponent(key)}`, { method: "GET" });
+  }
+
+  function transitionIssue(issueKey, targetStatus) {
+    const key = String(issueKey || "").trim().toUpperCase();
+    return request(`/issues/${encodeURIComponent(key)}/transitions`, {
+      method: "POST",
+      body: JSON.stringify({ targetStatus: String(targetStatus || "").trim() })
+    });
   }
 
   function syncWorklogs(from, to) {
@@ -69,5 +82,5 @@
     });
   }
 
-  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, health, syncIssues, getIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
+  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, health, syncUsers, syncIssues, getIssue, transitionIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
 })(window);

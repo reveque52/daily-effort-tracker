@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { createAssistantServer, buildJiraWorklogPayload, mapJiraIssue, mapJiraWorklog, normalizeJiraWorklogRange } = require("../server");
+const { createAssistantServer, buildJiraWorklogPayload, mapJiraIssue, mapJiraUser, mapJiraWorklog, normalizeJiraWorklogRange } = require("../server");
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -27,6 +27,10 @@ function close(server) {
   assert.equal(mapped.description, "Technical Preparations");
   assert.equal(mapped.url, "https://fit-global.atlassian.net/browse/DIP-43");
 
+  const mappedUser = mapJiraUser({ accountId: "account-1", displayName: "Test User", emailAddress: "test@example.com", active: true, accountType: "atlassian", timeZone: "Europe/Istanbul", avatarUrls: { "48x48": "https://avatar.example.com/test.png" } });
+  assert.equal(mappedUser.jiraAccountId, "account-1");
+  assert.equal(mappedUser.avatarUrl, "https://avatar.example.com/test.png");
+
   const mappedWorklog = mapJiraWorklog({
     id: "501", started: "2026-08-07T09:00:00.000+0300", timeSpentSeconds: 5400,
     author: { accountId: "account-1", displayName: "Test User" },
@@ -46,8 +50,16 @@ function close(server) {
     fetchImpl: async (url, options = {}) => {
       upstreamCalls.push({ url, options });
       if (url.endsWith("/rest/api/3/myself")) return Response.json({ accountId: "account-1", displayName: "Test User" });
+      if (url.includes("/rest/api/3/users/search?")) return Response.json([
+        { accountId: "account-1", displayName: "Test User", emailAddress: "test@example.com", active: true, accountType: "atlassian", timeZone: "Europe/Istanbul", avatarUrls: { "48x48": "https://avatar.example.com/test.png" } },
+        { accountId: "account-2", displayName: "Inactive User", active: false, accountType: "atlassian" },
+        { accountId: "app-1", displayName: "Automation", active: true, accountType: "app" }
+      ]);
       if (url.endsWith("/rest/api/3/search/jql")) return Response.json({ issues: [{ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", issuetype: { name: "Task" }, status: { name: "Open" } } }] });
       if (url.includes("/rest/api/3/issue/RD-179?fields=")) return Response.json({ id: "10179", key: "RD-179", fields: { summary: "Version Packaging", issuetype: { name: "Task" }, assignee: { displayName: "Test User" }, reporter: { displayName: "Reporter" }, priority: { name: "Low" }, status: { name: "In Progress" }, resolution: null, created: "2026-01-01T09:00:00.000+0300", updated: "2026-08-07T09:00:00.000+0300", duedate: "2026-12-31" } });
+      if (url.endsWith("/rest/api/3/issue/DIP-43/transitions") && options.method === "POST") return new Response(null, { status: 204 });
+      if (url.endsWith("/rest/api/3/issue/DIP-43/transitions")) return Response.json({ transitions: [{ id: "31", to: { name: "In Progress" } }, { id: "41", to: { name: "Closed" } }] });
+      if (url.includes("/rest/api/3/issue/DIP-43?fields=")) return Response.json({ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", issuetype: { name: "Task" }, status: { name: "In Progress" } } });
       if (url.includes("/rest/api/3/issue/DIP-43/worklog?")) return Response.json({
         startAt: 0,
         maxResults: 100,
@@ -71,6 +83,12 @@ function close(server) {
     assert.equal(health.account.displayName, "Test User");
     assert.equal(health.site, "https://fit-global.atlassian.net");
 
+    const users = await fetch(`${baseUrl}/api/jira/users`).then((response) => response.json());
+    assert.equal(users.items.length, 1);
+    assert.equal(users.items[0].jiraAccountId, "account-1");
+    assert.equal(users.items[0].email, "test@example.com");
+    assert.ok(upstreamCalls.some((call) => call.url.includes("/rest/api/3/users/search?startAt=0&maxResults=100")));
+
     const issues = await fetch(`${baseUrl}/api/jira/issues?jql=${encodeURIComponent("assignee = currentUser()")}`).then((response) => response.json());
     assert.equal(issues.items.length, 1);
     assert.equal(issues.items[0].name, "DIP-43");
@@ -82,6 +100,13 @@ function close(server) {
     assert.equal(singleIssue.item.description, "Version Packaging");
     assert.equal(singleIssue.item.assignee, "Test User");
     assert.equal(singleIssue.item.priority, "Low");
+
+    const transitioned = await fetch(`${baseUrl}/api/jira/issues/DIP-43/transitions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targetStatus: "In Progress" }) }).then((response) => response.json());
+    assert.equal(transitioned.ok, true);
+    assert.equal(transitioned.transitionId, "31");
+    assert.equal(transitioned.item.status, "In Progress");
+    const transitionCall = upstreamCalls.find((call) => call.url.endsWith("/issue/DIP-43/transitions") && call.options.method === "POST");
+    assert.deepEqual(JSON.parse(transitionCall.options.body), { transition: { id: "31" } });
 
     const imported = await fetch(`${baseUrl}/api/jira/worklogs?from=2026-08-01&to=2026-08-31`).then((response) => response.json());
     assert.equal(imported.items.length, 1);
@@ -103,7 +128,7 @@ function close(server) {
 
     const authHeaders = upstreamCalls.map((call) => call.options.headers?.Authorization).filter(Boolean);
     assert.ok(authHeaders.every((value) => value.startsWith("Basic ")));
-    assert.ok(!JSON.stringify({ health, issues, imported, created, updated, deleted }).includes("test-jira-token"));
+    assert.ok(!JSON.stringify({ health, users, issues, transitioned, imported, created, updated, deleted }).includes("test-jira-token"));
   } finally {
     await close(server);
   }

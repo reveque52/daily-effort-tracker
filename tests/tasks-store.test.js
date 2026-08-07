@@ -29,13 +29,14 @@ assert.equal(store.validate({ title: "Hatalı plan", status: "planned", priority
 assert.equal(store.validate({ title: "Hatalı tip", status: "planned", taskType: "unknown" }).valid, false);
 assert.equal(store.validate({ title: "Roadmap işi", status: "planned", taskType: "architecture_roadmap" }).valid, true);
 
-const created = store.create({ title: "Raporu hazırla", parentItem: "Raporlama", assignee: "Selçuk Dere", taskType: "management_request", priority: "high", year: "2026", quarter: "Q3", dueDate: "2026-08-10", status: "planned", descriptionHtml: "<p><strong>Detaylı</strong> açıklama</p>" });
+const created = store.create({ title: "Raporu hazırla", parentItem: "Raporlama", assignee: "Selçuk Dere", assigneeId: "person-1", taskType: "management_request", priority: "high", year: "2026", quarter: "Q3", dueDate: "2026-08-10", status: "planned", descriptionHtml: "<p><strong>Detaylı</strong> açıklama</p>" });
 assert.equal(created.valid, true);
 assert.equal(store.list().length, 1);
 assert.match(store.get(created.value.id).descriptionHtml, /<strong>Detaylı<\/strong>/);
 assert.equal(store.get(created.value.id).parentItem, "Raporlama");
 assert.equal(store.get(created.value.id).priority, "high");
 assert.equal(store.get(created.value.id).assignee, "Selçuk Dere");
+assert.equal(store.get(created.value.id).assigneeId, "person-1");
 assert.equal(store.get(created.value.id).taskType, "management_request");
 
 const updated = store.update(created.value.id, { title: "Raporu hazırla", parentItem: "Raporlama", assignee: "Ayşe", taskType: "meeting_organization", priority: "medium", year: "2026", quarter: "Q3", dueDate: "2026-08-10", status: "completed", descriptionHtml: "<ul><li>Bitti</li></ul>" });

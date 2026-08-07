@@ -154,6 +154,20 @@ function mapJiraIssue(issue, jiraBaseUrl) {
   };
 }
 
+function mapJiraUser(user) {
+  const avatarUrls = user?.avatarUrls || {};
+  return {
+    jiraAccountId: String(user?.accountId || ""),
+    fullName: String(user?.displayName || ""),
+    email: String(user?.emailAddress || ""),
+    avatarUrl: String(avatarUrls["48x48"] || avatarUrls["32x32"] || avatarUrls["24x24"] || ""),
+    active: user?.active !== false,
+    accountType: String(user?.accountType || ""),
+    timeZone: String(user?.timeZone || ""),
+    locale: String(user?.locale || "")
+  };
+}
+
 function jiraDocumentToText(value) {
   if (typeof value === "string") return value.trim();
   const parts = [];
@@ -265,6 +279,67 @@ function createAssistantServer(options = {}) {
         return jsonResponse(response, 200, { ok: true, site: jiraBaseUrl, account: { accountId: account.accountId || "", displayName: account.displayName || jiraEmail } }, corsHeaders);
       } catch (error) {
         return jsonResponse(response, error.status || 500, { error: error.message || "JIRA bağlantısı kurulamadı." }, corsHeaders);
+      }
+    }
+
+    if (requestUrl.pathname === "/api/jira/users") {
+      if (request.method !== "GET") return jsonResponse(response, 405, { error: "Yalnızca GET desteklenir." }, corsHeaders);
+      if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
+      try {
+        const requestedMax = Number(requestUrl.searchParams.get("maxResults") || 1000);
+        const limit = Math.min(Math.max(Number.isFinite(requestedMax) ? Math.trunc(requestedMax) : 1000, 1), 1000);
+        const pageSize = Math.min(limit, 100);
+        const users = [];
+        let startAt = 0;
+        while (users.length < limit) {
+          const params = new URLSearchParams({ startAt: String(startAt), maxResults: String(Math.min(pageSize, limit - users.length)) });
+          const payload = await jiraFetch(`/rest/api/3/users/search?${params.toString()}`);
+          const page = Array.isArray(payload) ? payload : [];
+          users.push(...page);
+          if (page.length < pageSize) break;
+          startAt += page.length;
+        }
+        const items = users
+          .map(mapJiraUser)
+          .filter((user) => user.jiraAccountId && user.fullName && user.active && (!user.accountType || user.accountType === "atlassian"))
+          .sort((a, b) => a.fullName.localeCompare(b.fullName, "tr", { sensitivity: "base" }));
+        return jsonResponse(response, 200, { items, total: items.length, site: jiraBaseUrl }, corsHeaders);
+      } catch (error) {
+        return jsonResponse(response, error.status || 500, { error: error.message || "JIRA kullanıcıları alınamadı." }, corsHeaders);
+      }
+    }
+
+    const jiraTransitionMatch = requestUrl.pathname.match(/^\/api\/jira\/issues\/([^/]+)\/transitions$/);
+    if (jiraTransitionMatch) {
+      if (request.method !== "POST") return jsonResponse(response, 405, { error: "Yalnızca POST desteklenir." }, corsHeaders);
+      if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
+      try {
+        const issueKey = normalizeJiraIssueKey(decodeURIComponent(jiraTransitionMatch[1]));
+        const body = await readJsonBody(request);
+        const targetStatus = String(body.targetStatus || "").trim();
+        if (!targetStatus || targetStatus.length > 80) return jsonResponse(response, 400, { error: "Hedef JIRA statüsü geçersiz." }, corsHeaders);
+        const transitionPayload = await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`);
+        const transition = (transitionPayload.transitions || []).find((item) => String(item?.to?.name || "").trim().toLocaleLowerCase("tr-TR") === targetStatus.toLocaleLowerCase("tr-TR"));
+        if (!transition?.id) {
+          const available = (transitionPayload.transitions || []).map((item) => item?.to?.name).filter(Boolean);
+          throw Object.assign(new Error(`${issueKey} için “${targetStatus}” statüsüne doğrudan geçiş yok.${available.length ? ` Kullanılabilir geçişler: ${available.join(", ")}.` : ""}`), { status: 409 });
+        }
+        await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`, {
+          method: "POST",
+          body: JSON.stringify({ transition: { id: String(transition.id) } })
+        });
+        const fields = ["summary", "issuetype", "assignee", "reporter", "priority", "status", "resolution", "created", "updated", "duedate"];
+        let item = null;
+        let warning = "";
+        try {
+          const issue = await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=${encodeURIComponent(fields.join(","))}`);
+          item = mapJiraIssue(issue, jiraBaseUrl);
+        } catch (_) {
+          warning = "Transition tamamlandı ancak güncel issue ayrıntıları yeniden okunamadı.";
+        }
+        return jsonResponse(response, 200, { ok: true, transitionId: String(transition.id), targetStatus, item, warning }, corsHeaders);
+      } catch (error) {
+        return jsonResponse(response, error.status || 500, { error: error.message || "JIRA statüsü değiştirilemedi." }, corsHeaders);
       }
     }
 
@@ -444,4 +519,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { DEFAULT_MODEL, DEFAULT_JIRA_BASE_URL, SYSTEM_INSTRUCTIONS, extractOutputText, buildOpenAiPayload, buildJiraWorklogPayload, mapJiraIssue, mapJiraWorklog, normalizeJiraWorklogRange, createAssistantServer };
+module.exports = { DEFAULT_MODEL, DEFAULT_JIRA_BASE_URL, SYSTEM_INSTRUCTIONS, extractOutputText, buildOpenAiPayload, buildJiraWorklogPayload, mapJiraIssue, mapJiraUser, mapJiraWorklog, normalizeJiraWorklogRange, createAssistantServer };
