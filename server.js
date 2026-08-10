@@ -3,11 +3,17 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 const DEFAULT_PORT = 8080;
 const DEFAULT_MODEL = "gpt-5.6-sol";
 const DEFAULT_OPENAI_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_JIRA_BASE_URL = "https://fit-global.atlassian.net";
+const DEFAULT_JIRA_OAUTH_SCOPES = "read:jira-work read:jira-user write:jira-work offline_access";
+const JIRA_SESSION_COOKIE = "daily_effort_jira_session";
+const JIRA_OAUTH_STATE_COOKIE = "daily_effort_jira_oauth_state";
+const JIRA_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const JIRA_OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -99,6 +105,57 @@ function createRateLimiter(limit = 20, windowMs = 60000) {
     current.count += 1;
     return current.count <= limit;
   };
+}
+
+function redirectResponse(response, location, headers = {}) {
+  response.writeHead(302, { Location: location, "Cache-Control": "no-store", ...headers });
+  response.end();
+}
+
+function parseCookies(headerValue) {
+  return String(headerValue || "").split(";").reduce((cookies, part) => {
+    const separator = part.indexOf("=");
+    if (separator < 1) return cookies;
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    try { cookies[name] = decodeURIComponent(value); }
+    catch { cookies[name] = value; }
+    return cookies;
+  }, {});
+}
+
+function requestUsesHttps(request) {
+  return String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" || Boolean(request.socket.encrypted);
+}
+
+function jiraSessionCookie(sessionId, request, maxAge = JIRA_SESSION_MAX_AGE_SECONDS) {
+  const secure = requestUsesHttps(request);
+  return [
+    `${JIRA_SESSION_COOKIE}=${encodeURIComponent(sessionId || "")}`,
+    "HttpOnly",
+    "Path=/api/jira",
+    `Max-Age=${Math.max(0, maxAge)}`,
+    secure ? "SameSite=None" : "SameSite=Lax",
+    ...(secure ? ["Secure"] : [])
+  ].join("; ");
+}
+
+function jiraOAuthStateCookie(state, request, maxAge = Math.ceil(JIRA_OAUTH_STATE_MAX_AGE_MS / 1000)) {
+  const secure = requestUsesHttps(request);
+  return [
+    `${JIRA_OAUTH_STATE_COOKIE}=${encodeURIComponent(state || "")}`,
+    "HttpOnly",
+    "Path=/api/jira/oauth/callback",
+    `Max-Age=${Math.max(0, maxAge)}`,
+    "SameSite=Lax",
+    ...(secure ? ["Secure"] : [])
+  ].join("; ");
+}
+
+function appendQueryParameter(urlValue, name, value) {
+  const url = new URL(urlValue);
+  url.searchParams.set(name, value);
+  return url.toString();
 }
 
 function normalizeJiraBaseUrl(value) {
@@ -228,17 +285,89 @@ function createAssistantServer(options = {}) {
   const jiraBaseUrl = normalizeJiraBaseUrl(options.jiraBaseUrl ?? process.env.JIRA_BASE_URL ?? DEFAULT_JIRA_BASE_URL);
   const jiraEmail = String(options.jiraEmail ?? process.env.JIRA_EMAIL ?? "").trim();
   const jiraApiToken = String(options.jiraApiToken ?? process.env.JIRA_API_TOKEN ?? "").trim();
-  const jiraConfigured = Boolean(jiraBaseUrl && jiraEmail && jiraApiToken);
+  const jiraBasicConfigured = Boolean(jiraBaseUrl && jiraEmail && jiraApiToken);
+  const jiraOAuthClientId = String(options.jiraOAuthClientId ?? process.env.JIRA_OAUTH_CLIENT_ID ?? "").trim();
+  const jiraOAuthClientSecret = String(options.jiraOAuthClientSecret ?? process.env.JIRA_OAUTH_CLIENT_SECRET ?? "").trim();
+  const jiraOAuthRedirectUri = String(options.jiraOAuthRedirectUri ?? process.env.JIRA_OAUTH_REDIRECT_URI ?? "").trim();
+  const jiraOAuthScopes = String(options.jiraOAuthScopes ?? process.env.JIRA_OAUTH_SCOPES ?? DEFAULT_JIRA_OAUTH_SCOPES).trim().split(/\s+/).filter(Boolean).join(" ");
+  const jiraOAuthConfigured = Boolean(jiraOAuthClientId && jiraOAuthClientSecret && jiraOAuthRedirectUri);
+  const jiraConfigured = jiraOAuthConfigured || jiraBasicConfigured;
   const allowedOrigins = new Set(String(options.allowedOrigins ?? process.env.ALLOWED_ORIGINS ?? "http://localhost:8080,http://127.0.0.1:8080")
     .split(",").map((value) => value.trim()).filter(Boolean));
   const allowRequest = createRateLimiter(Number(options.rateLimit || process.env.AI_RATE_LIMIT || 20));
+  const jiraSessions = new Map();
+  const jiraOAuthStates = new Map();
 
-  async function jiraFetch(pathname, requestOptions = {}) {
-    if (!jiraConfigured) throw Object.assign(new Error("Sunucuda JIRA_EMAIL ve JIRA_API_TOKEN tanımlı değil."), { status: 503 });
-    const upstream = await fetchImpl(`${jiraBaseUrl}${pathname}`, {
+  function cleanupJiraAuthState() {
+    const now = Date.now();
+    jiraOAuthStates.forEach((value, key) => { if (value.expiresAt <= now) jiraOAuthStates.delete(key); });
+    jiraSessions.forEach((value, key) => { if (value.sessionExpiresAt <= now) jiraSessions.delete(key); });
+  }
+
+  function getJiraSession(request) {
+    cleanupJiraAuthState();
+    const sessionId = parseCookies(request.headers.cookie)[JIRA_SESSION_COOKIE] || "";
+    const session = jiraSessions.get(sessionId) || null;
+    if (session) session.sessionExpiresAt = Date.now() + JIRA_SESSION_MAX_AGE_SECONDS * 1000;
+    return { sessionId, session };
+  }
+
+  function safeJiraReturnTo(value) {
+    try {
+      const returnTo = new URL(String(value || ""));
+      if (allowedOrigins.has(returnTo.origin)) return returnTo.toString();
+    } catch { /* Varsayılan adrese dönülür. */ }
+    const fallbackOrigin = [...allowedOrigins][0] || "http://localhost:8080";
+    return new URL("/", fallbackOrigin).toString();
+  }
+
+  async function atlassianTokenRequest(payload) {
+    const response = await fetchImpl("https://auth.atlassian.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.access_token) {
+      throw Object.assign(new Error(body.error_description || body.error || "Atlassian OAuth token işlemi başarısız."), { status: 502 });
+    }
+    return body;
+  }
+
+  async function refreshJiraOAuthSession(session) {
+    if (session.expiresAt > Date.now() + 60000) return session;
+    if (!session.refreshToken) throw Object.assign(new Error("JIRA oturumunun süresi doldu. Yeniden giriş yapın."), { status: 401 });
+    const token = await atlassianTokenRequest({
+      grant_type: "refresh_token",
+      client_id: jiraOAuthClientId,
+      client_secret: jiraOAuthClientSecret,
+      refresh_token: session.refreshToken
+    });
+    session.accessToken = token.access_token;
+    session.refreshToken = token.refresh_token || session.refreshToken;
+    session.expiresAt = Date.now() + Math.max(60, Number(token.expires_in) || 3600) * 1000;
+    return session;
+  }
+
+  async function jiraFetch(pathname, requestOptions = {}, session = null) {
+    let apiBaseUrl = jiraBaseUrl;
+    let authorization = "";
+    if (session) {
+      await refreshJiraOAuthSession(session);
+      apiBaseUrl = `https://api.atlassian.com/ex/jira/${encodeURIComponent(session.cloudId)}`;
+      authorization = `Bearer ${session.accessToken}`;
+    } else if (jiraOAuthConfigured) {
+      throw Object.assign(new Error("JIRA işlemi için hesabınızla giriş yapın."), { status: 401 });
+    } else if (jiraBasicConfigured) {
+      authorization = `Basic ${Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString("base64")}`;
+    } else {
+      throw Object.assign(new Error("Sunucuda JIRA OAuth veya JIRA_EMAIL/JIRA_API_TOKEN ayarları tanımlı değil."), { status: 503 });
+    }
+
+    const upstream = await fetchImpl(`${apiBaseUrl}${pathname}`, {
       ...requestOptions,
       headers: {
-        "Authorization": `Basic ${Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString("base64")}`,
+        "Authorization": authorization,
         "Accept": "application/json",
         ...(requestOptions.body ? { "Content-Type": "application/json" } : {}),
         ...(requestOptions.headers || {})
@@ -259,7 +388,12 @@ function createAssistantServer(options = {}) {
     try { sameOrigin = Boolean(origin) && new URL(origin).host === request.headers.host; }
     catch { sameOrigin = false; }
     const originAllowed = !origin || sameOrigin || allowedOrigins.has(origin);
-    const corsHeaders = origin && originAllowed ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" } : {};
+    const corsHeaders = origin && originAllowed
+      ? { "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true", "Vary": "Origin" }
+      : {};
+    const jiraSessionState = getJiraSession(request);
+    const requestJiraFetch = (pathname, requestOptions = {}) => jiraFetch(pathname, requestOptions, jiraSessionState.session);
+    const activeJiraBaseUrl = jiraSessionState.session?.siteUrl || jiraBaseUrl;
 
     if (request.method === "OPTIONS" && requestUrl.pathname.startsWith("/api/")) {
       if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
@@ -267,16 +401,106 @@ function createAssistantServer(options = {}) {
       return response.end();
     }
 
+    if (requestUrl.pathname === "/api/jira/oauth/status") {
+      if (request.method !== "GET") return jsonResponse(response, 405, { error: "Yalnızca GET desteklenir." }, corsHeaders);
+      if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
+      const connected = jiraOAuthConfigured ? Boolean(jiraSessionState.session) : jiraBasicConfigured;
+      return jsonResponse(response, 200, {
+        configured: jiraOAuthConfigured,
+        connected,
+        mode: jiraSessionState.session ? "oauth" : (jiraOAuthConfigured ? "oauth" : (jiraBasicConfigured ? "api_token" : "none")),
+        site: activeJiraBaseUrl,
+        account: jiraSessionState.session?.account || (jiraBasicConfigured && !jiraOAuthConfigured ? { displayName: jiraEmail } : null),
+        scopes: jiraOAuthConfigured ? jiraOAuthScopes.split(" ") : []
+      }, corsHeaders);
+    }
+
+    if (requestUrl.pathname === "/api/jira/oauth/start") {
+      if (request.method !== "GET") return jsonResponse(response, 405, { error: "Yalnızca GET desteklenir." }, corsHeaders);
+      if (!jiraOAuthConfigured) return jsonResponse(response, 503, { error: "JIRA OAuth ayarları backend üzerinde tamamlanmamış." }, corsHeaders);
+      const state = crypto.randomBytes(32).toString("base64url");
+      const returnTo = safeJiraReturnTo(requestUrl.searchParams.get("returnTo"));
+      jiraOAuthStates.set(state, { returnTo, expiresAt: Date.now() + JIRA_OAUTH_STATE_MAX_AGE_MS });
+      const authorizeUrl = new URL("https://auth.atlassian.com/authorize");
+      authorizeUrl.search = new URLSearchParams({
+        audience: "api.atlassian.com",
+        client_id: jiraOAuthClientId,
+        scope: jiraOAuthScopes,
+        redirect_uri: jiraOAuthRedirectUri,
+        state,
+        response_type: "code",
+        prompt: "consent"
+      }).toString();
+      return redirectResponse(response, authorizeUrl.toString(), { "Set-Cookie": jiraOAuthStateCookie(state, request) });
+    }
+
+    if (requestUrl.pathname === "/api/jira/oauth/callback") {
+      if (request.method !== "GET") return jsonResponse(response, 405, { error: "Yalnızca GET desteklenir." });
+      const state = String(requestUrl.searchParams.get("state") || "");
+      const stateCookie = parseCookies(request.headers.cookie)[JIRA_OAUTH_STATE_COOKIE] || "";
+      const pending = jiraOAuthStates.get(state);
+      if (pending) jiraOAuthStates.delete(state);
+      const returnTo = pending?.returnTo || safeJiraReturnTo("");
+      const clearStateCookie = jiraOAuthStateCookie("", request, 0);
+      if (!pending || pending.expiresAt <= Date.now() || !stateCookie || stateCookie !== state) return redirectResponse(response, appendQueryParameter(returnTo, "jiraAuthError", "Geçersiz veya süresi dolmuş JIRA giriş isteği."), { "Set-Cookie": clearStateCookie });
+      const oauthError = String(requestUrl.searchParams.get("error_description") || requestUrl.searchParams.get("error") || "").trim();
+      if (oauthError) return redirectResponse(response, appendQueryParameter(returnTo, "jiraAuthError", oauthError), { "Set-Cookie": clearStateCookie });
+      const code = String(requestUrl.searchParams.get("code") || "").trim();
+      if (!code) return redirectResponse(response, appendQueryParameter(returnTo, "jiraAuthError", "Atlassian yetkilendirme kodu alınamadı."), { "Set-Cookie": clearStateCookie });
+      try {
+        const token = await atlassianTokenRequest({
+          grant_type: "authorization_code",
+          client_id: jiraOAuthClientId,
+          client_secret: jiraOAuthClientSecret,
+          code,
+          redirect_uri: jiraOAuthRedirectUri
+        });
+        const resourcesResponse = await fetchImpl("https://api.atlassian.com/oauth/token/accessible-resources", {
+          headers: { "Authorization": `Bearer ${token.access_token}`, "Accept": "application/json" }
+        });
+        const resources = await resourcesResponse.json().catch(() => []);
+        if (!resourcesResponse.ok || !Array.isArray(resources)) throw new Error("Yetkilendirilen JIRA siteleri alınamadı.");
+        const resource = resources.find((item) => {
+          try { return normalizeJiraBaseUrl(item.url) === jiraBaseUrl; }
+          catch { return false; }
+        });
+        if (!resource?.id) throw new Error(`${jiraBaseUrl} sitesi için erişim izni verilmedi.`);
+        const newSessionId = crypto.randomBytes(32).toString("base64url");
+        const session = {
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token || "",
+          expiresAt: Date.now() + Math.max(60, Number(token.expires_in) || 3600) * 1000,
+          sessionExpiresAt: Date.now() + JIRA_SESSION_MAX_AGE_SECONDS * 1000,
+          cloudId: String(resource.id),
+          siteUrl: normalizeJiraBaseUrl(resource.url),
+          account: null
+        };
+        const account = await jiraFetch("/rest/api/3/myself", {}, session);
+        session.account = { accountId: account.accountId || "", displayName: account.displayName || "JIRA kullanıcısı" };
+        jiraSessions.set(newSessionId, session);
+        return redirectResponse(response, appendQueryParameter(returnTo, "jiraAuth", "success"), { "Set-Cookie": [jiraSessionCookie(newSessionId, request), clearStateCookie] });
+      } catch (error) {
+        return redirectResponse(response, appendQueryParameter(returnTo, "jiraAuthError", error.message || "JIRA girişi tamamlanamadı."), { "Set-Cookie": clearStateCookie });
+      }
+    }
+
+    if (requestUrl.pathname === "/api/jira/oauth/logout") {
+      if (request.method !== "POST") return jsonResponse(response, 405, { error: "Yalnızca POST desteklenir." }, corsHeaders);
+      if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
+      if (jiraSessionState.sessionId) jiraSessions.delete(jiraSessionState.sessionId);
+      return jsonResponse(response, 200, { ok: true }, { ...corsHeaders, "Set-Cookie": jiraSessionCookie("", request, 0) });
+    }
+
     if (requestUrl.pathname === "/api/health") {
-      return jsonResponse(response, 200, { ok: true, configured: Boolean(apiKey), model, jiraConfigured, jiraBaseUrl }, corsHeaders);
+      return jsonResponse(response, 200, { ok: true, configured: Boolean(apiKey), model, jiraConfigured, jiraOAuthConfigured, jiraBaseUrl }, corsHeaders);
     }
 
     if (requestUrl.pathname === "/api/jira/health") {
       if (request.method !== "GET") return jsonResponse(response, 405, { error: "Yalnızca GET desteklenir." }, corsHeaders);
       if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
       try {
-        const account = await jiraFetch("/rest/api/3/myself");
-        return jsonResponse(response, 200, { ok: true, site: jiraBaseUrl, account: { accountId: account.accountId || "", displayName: account.displayName || jiraEmail } }, corsHeaders);
+        const account = await requestJiraFetch("/rest/api/3/myself");
+        return jsonResponse(response, 200, { ok: true, site: activeJiraBaseUrl, mode: jiraSessionState.session ? "oauth" : "api_token", account: { accountId: account.accountId || "", displayName: account.displayName || jiraEmail } }, corsHeaders);
       } catch (error) {
         return jsonResponse(response, error.status || 500, { error: error.message || "JIRA bağlantısı kurulamadı." }, corsHeaders);
       }
@@ -293,7 +517,7 @@ function createAssistantServer(options = {}) {
         let startAt = 0;
         while (users.length < limit) {
           const params = new URLSearchParams({ startAt: String(startAt), maxResults: String(Math.min(pageSize, limit - users.length)) });
-          const payload = await jiraFetch(`/rest/api/3/users/search?${params.toString()}`);
+          const payload = await requestJiraFetch(`/rest/api/3/users/search?${params.toString()}`);
           const page = Array.isArray(payload) ? payload : [];
           users.push(...page);
           if (page.length < pageSize) break;
@@ -303,7 +527,7 @@ function createAssistantServer(options = {}) {
           .map(mapJiraUser)
           .filter((user) => user.jiraAccountId && user.fullName && user.active && (!user.accountType || user.accountType === "atlassian"))
           .sort((a, b) => a.fullName.localeCompare(b.fullName, "tr", { sensitivity: "base" }));
-        return jsonResponse(response, 200, { items, total: items.length, site: jiraBaseUrl }, corsHeaders);
+        return jsonResponse(response, 200, { items, total: items.length, site: activeJiraBaseUrl }, corsHeaders);
       } catch (error) {
         return jsonResponse(response, error.status || 500, { error: error.message || "JIRA kullanıcıları alınamadı." }, corsHeaders);
       }
@@ -318,13 +542,13 @@ function createAssistantServer(options = {}) {
         const body = await readJsonBody(request);
         const targetStatus = String(body.targetStatus || "").trim();
         if (!targetStatus || targetStatus.length > 80) return jsonResponse(response, 400, { error: "Hedef JIRA statüsü geçersiz." }, corsHeaders);
-        const transitionPayload = await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`);
+        const transitionPayload = await requestJiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`);
         const transition = (transitionPayload.transitions || []).find((item) => String(item?.to?.name || "").trim().toLocaleLowerCase("tr-TR") === targetStatus.toLocaleLowerCase("tr-TR"));
         if (!transition?.id) {
           const available = (transitionPayload.transitions || []).map((item) => item?.to?.name).filter(Boolean);
           throw Object.assign(new Error(`${issueKey} için “${targetStatus}” statüsüne doğrudan geçiş yok.${available.length ? ` Kullanılabilir geçişler: ${available.join(", ")}.` : ""}`), { status: 409 });
         }
-        await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`, {
+        await requestJiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`, {
           method: "POST",
           body: JSON.stringify({ transition: { id: String(transition.id) } })
         });
@@ -332,8 +556,8 @@ function createAssistantServer(options = {}) {
         let item = null;
         let warning = "";
         try {
-          const issue = await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=${encodeURIComponent(fields.join(","))}`);
-          item = mapJiraIssue(issue, jiraBaseUrl);
+          const issue = await requestJiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=${encodeURIComponent(fields.join(","))}`);
+          item = mapJiraIssue(issue, activeJiraBaseUrl);
         } catch (_) {
           warning = "Transition tamamlandı ancak güncel issue ayrıntıları yeniden okunamadı.";
         }
@@ -350,8 +574,8 @@ function createAssistantServer(options = {}) {
       try {
         const issueKey = normalizeJiraIssueKey(decodeURIComponent(singleJiraIssueMatch[1]));
         const fields = ["summary", "issuetype", "assignee", "reporter", "priority", "status", "resolution", "created", "updated", "duedate"];
-        const issue = await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=${encodeURIComponent(fields.join(","))}`);
-        return jsonResponse(response, 200, { item: mapJiraIssue(issue, jiraBaseUrl) }, corsHeaders);
+        const issue = await requestJiraFetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=${encodeURIComponent(fields.join(","))}`);
+        return jsonResponse(response, 200, { item: mapJiraIssue(issue, activeJiraBaseUrl) }, corsHeaders);
       } catch (error) {
         return jsonResponse(response, error.status || 500, { error: error.message || "JIRA maddesi alınamadı." }, corsHeaders);
       }
@@ -365,7 +589,7 @@ function createAssistantServer(options = {}) {
         if (!jql || jql.length > 1000) return jsonResponse(response, 400, { error: "JQL sorgusu 1–1000 karakter arasında olmalıdır." }, corsHeaders);
         const requestedMax = Number(requestUrl.searchParams.get("maxResults") || 100);
         const maxResults = Math.min(Math.max(Number.isFinite(requestedMax) ? requestedMax : 100, 1), 100);
-        const payload = await jiraFetch("/rest/api/3/search/jql", {
+        const payload = await requestJiraFetch("/rest/api/3/search/jql", {
           method: "POST",
           body: JSON.stringify({
             jql,
@@ -373,7 +597,7 @@ function createAssistantServer(options = {}) {
             fields: ["summary", "issuetype", "assignee", "reporter", "priority", "status", "resolution", "created", "updated", "duedate"]
           })
         });
-        return jsonResponse(response, 200, { items: (payload.issues || []).map((issue) => mapJiraIssue(issue, jiraBaseUrl)), nextPageToken: payload.nextPageToken || "" }, corsHeaders);
+        return jsonResponse(response, 200, { items: (payload.issues || []).map((issue) => mapJiraIssue(issue, activeJiraBaseUrl)), nextPageToken: payload.nextPageToken || "" }, corsHeaders);
       } catch (error) {
         return jsonResponse(response, error.status || 500, { error: error.message || "JIRA maddeleri alınamadı." }, corsHeaders);
       }
@@ -386,13 +610,13 @@ function createAssistantServer(options = {}) {
       if (request.method === "GET" && !worklogId) {
         try {
           const range = normalizeJiraWorklogRange(requestUrl.searchParams.get("from"), requestUrl.searchParams.get("to"));
-          const account = await jiraFetch("/rest/api/3/myself");
+          const account = await requestJiraFetch("/rest/api/3/myself");
           const jql = `worklogAuthor = currentUser() AND worklogDate >= "${range.from}" AND worklogDate <= "${range.to}" ORDER BY updated DESC`;
           const issues = [];
           let nextPageToken = "";
           let issuePageCount = 0;
           do {
-            const searchPayload = await jiraFetch("/rest/api/3/search/jql", {
+            const searchPayload = await requestJiraFetch("/rest/api/3/search/jql", {
               method: "POST",
               body: JSON.stringify({
                 jql,
@@ -421,12 +645,12 @@ function createAssistantServer(options = {}) {
                   startedAfter: String(range.fromMs),
                   startedBefore: String(range.toExclusiveMs)
                 });
-                const payload = await jiraFetch(`/rest/api/3/issue/${encodeURIComponent(issue.key)}/worklog?${params}`);
+                const payload = await requestJiraFetch(`/rest/api/3/issue/${encodeURIComponent(issue.key)}/worklog?${params}`);
                 const worklogs = Array.isArray(payload.worklogs) ? payload.worklogs : [];
                 total = Number(payload.total) || worklogs.length;
                 startAt += worklogs.length;
                 worklogs.forEach((worklog) => {
-                  const mapped = mapJiraWorklog(worklog, issue, jiraBaseUrl);
+                  const mapped = mapJiraWorklog(worklog, issue, activeJiraBaseUrl);
                   if (mapped.authorAccountId === account.accountId && mapped.date >= range.from && mapped.date <= range.to && mapped.worklogId) issueWorklogs.push(mapped);
                 });
                 if (!worklogs.length) break;
@@ -440,7 +664,7 @@ function createAssistantServer(options = {}) {
             .sort((a, b) => a.date.localeCompare(b.date) || a.issueKey.localeCompare(b.issueKey, "en", { numeric: true }));
           return jsonResponse(response, 200, {
             items: uniqueItems,
-            issues: Array.from(new Map(issues.map((issue) => [issue.key, mapJiraIssue(issue, jiraBaseUrl)])).values()),
+            issues: Array.from(new Map(issues.map((issue) => [issue.key, mapJiraIssue(issue, activeJiraBaseUrl)])).values()),
             account: { accountId: account.accountId || "", displayName: account.displayName || jiraEmail },
             from: range.from,
             to: range.to
@@ -456,7 +680,7 @@ function createAssistantServer(options = {}) {
         const payload = request.method === "DELETE" ? null : buildJiraWorklogPayload(body).payload;
         if (request.method !== "POST" && !/^\d+$/.test(worklogId)) return jsonResponse(response, 400, { error: "Worklog kimliği geçersiz." }, corsHeaders);
         const jiraPath = `/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog${worklogId ? `/${encodeURIComponent(worklogId)}` : ""}`;
-        const result = await jiraFetch(jiraPath, {
+        const result = await requestJiraFetch(jiraPath, {
           method: request.method,
           ...(request.method === "DELETE" ? {} : { body: JSON.stringify(payload) })
         });

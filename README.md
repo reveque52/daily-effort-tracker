@@ -28,7 +28,23 @@ Uygulama görüntüleme modunda açılır ve veri değiştiren kontroller kilitl
 
 ## FIT Global JIRA Cloud entegrasyonu
 
-JIRA maddelerini doğrudan senkronize etmek ve eforları worklog olarak göndermek için `.env` dosyasına aşağıdaki değerleri ekleyin:
+### Kullanıcı bazlı “JIRA ile giriş yap” (önerilen)
+
+Her kullanıcının kendi Atlassian hesabıyla çalışması için [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/) üzerinden bir **OAuth 2.0 (3LO) integration** oluşturun. Uygulamanın **Permissions** bölümüne `read:jira-work`, `read:jira-user` ve `write:jira-work` klasik kapsamlarını ekleyin. **Authorization** callback adresi `.env` dosyasındaki adresle birebir aynı olmalıdır.
+
+```dotenv
+JIRA_BASE_URL=https://fit-global.atlassian.net
+JIRA_OAUTH_CLIENT_ID=atlassian_oauth_client_id
+JIRA_OAUTH_CLIENT_SECRET=atlassian_oauth_client_secret
+JIRA_OAUTH_REDIRECT_URI=http://localhost:8080/api/jira/oauth/callback
+JIRA_OAUTH_SCOPES=read:jira-work read:jira-user write:jira-work offline_access
+```
+
+GitHub Pages ile ayrı bir HTTPS backend kullanılıyorsa callback adresi backend alan adında olmalıdır; örneğin `https://backend.example.com/api/jira/oauth/callback`. Pages adresini de `ALLOWED_ORIGINS` listesine ekleyin. Kullanıcı **JIRA Maddeleri → JIRA ile giriş yap** düğmesine bastığında Atlassian onayından sonra kendi hesabıyla uygulamaya döner. Access ve dönen rotating refresh tokenlar tarayıcıya veya Drive yedeğine yazılmaz; yalnızca backend belleğindeki HttpOnly oturumla ilişkilendirilir. Sunucu yeniden başlatılırsa kullanıcı yeniden giriş yapar. Üretimde frontend ve backend’in aynı HTTPS origin altında yayınlanması, tarayıcıların üçüncü taraf çerez kısıtlamalarından kaçınmak için önerilir.
+
+### Tek hesaplı API token yöntemi (geriye dönük)
+
+OAuth ayarları tanımlı değilse JIRA maddelerini senkronize etmek ve eforları worklog olarak göndermek için `.env` dosyasındaki aşağıdaki değerler kullanılabilir:
 
 ```dotenv
 JIRA_BASE_URL=https://fit-global.atlassian.net

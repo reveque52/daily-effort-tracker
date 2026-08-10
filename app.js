@@ -40,6 +40,7 @@
   let savedTaskEditorRange = null;
   let aiConversation = [];
   let aiRequestPending = false;
+  let jiraOAuthState = null;
   let calendarEvents = [];
   const CALENDAR_PROVIDER_KEY = "daily-effort-tracker.calendar-provider";
   let activeCalendarProvider = localStorage.getItem(CALENDAR_PROVIDER_KEY) === "outlook" ? "outlook" : "google";
@@ -173,6 +174,55 @@
     status.classList.toggle("is-success", state === "success");
     status.classList.toggle("is-error", state === "error");
     status.classList.toggle("is-busy", state === "busy");
+  }
+
+  function renderJiraOAuthState(state = jiraOAuthState) {
+    const badge = $("#jiraOAuthBadge");
+    const connectedWithOAuth = Boolean(state?.connected && state?.mode === "oauth");
+    const connectedWithToken = Boolean(state?.connected && state?.mode === "api_token");
+    badge.dataset.state = connectedWithOAuth || connectedWithToken ? "connected" : (state?.configured ? "disconnected" : "unconfigured");
+    badge.textContent = connectedWithOAuth
+      ? (state.account?.displayName || "JIRA bağlı")
+      : (connectedWithToken ? "API token bağlı" : (state?.configured ? "Oturum kapalı" : "OAuth kurulumu gerekli"));
+    $("#connectJiraOAuth").classList.toggle("hidden", connectedWithOAuth);
+    $("#connectJiraOAuth").disabled = !state?.configured;
+    $("#disconnectJiraOAuth").classList.toggle("hidden", !connectedWithOAuth);
+  }
+
+  function consumeJiraOAuthResult() {
+    const url = new URL(window.location.href);
+    const success = url.searchParams.get("jiraAuth") === "success";
+    const error = url.searchParams.get("jiraAuthError");
+    if (!success && !error) return "";
+    url.searchParams.delete("jiraAuth");
+    url.searchParams.delete("jiraAuthError");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    if (error) setJiraCloudStatus(`JIRA girişi tamamlanamadı: ${error}`, "error");
+    else setJiraCloudStatus("JIRA hesabınız başarıyla bağlandı.", "success");
+    return error ? "error" : "success";
+  }
+
+  async function refreshJiraOAuthStatus(announce = false) {
+    try {
+      jiraOAuthState = await window.JiraCloudClient.getOAuthStatus();
+      renderJiraOAuthState();
+      if (announce) {
+        if (jiraOAuthState.connected) {
+          const label = jiraOAuthState.account?.displayName || "JIRA kullanıcısı";
+          setJiraCloudStatus(`${label} hesabı ${jiraOAuthState.site || "JIRA"} ile bağlantılı.`, "success");
+        } else if (jiraOAuthState.configured) {
+          setJiraCloudStatus("JIRA verilerine erişmek için kendi hesabınızla giriş yapın.");
+        } else {
+          setJiraCloudStatus("Backend üzerinde JIRA OAuth Client ID, Client Secret ve callback adresi tanımlanmalı.", "error");
+        }
+      }
+      return jiraOAuthState;
+    } catch (error) {
+      jiraOAuthState = { configured: false, connected: false, mode: "none" };
+      renderJiraOAuthState();
+      if (announce) setJiraCloudStatus(`JIRA oturum durumu alınamadı: ${error.message}`, "error");
+      return jiraOAuthState;
+    }
   }
 
   function setJiraCloudBusy(busy) {
@@ -3392,11 +3442,32 @@
     const task = selectedTaskDetailId ? window.TaskStore.get(selectedTaskDetailId) : null;
     if (task) startTaskEdit(task);
   });
-  $("#saveJiraApiEndpoint").addEventListener("click", () => {
+  $("#connectJiraOAuth").addEventListener("click", () => {
+    try {
+      const endpoint = window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
+      $("#jiraApiEndpoint").value = endpoint;
+      setJiraCloudStatus("Atlassian giriş sayfasına yönlendiriliyorsunuz…", "busy");
+      window.JiraCloudClient.signInWithJira();
+    } catch (error) {
+      setJiraCloudStatus(error.message, "error");
+    }
+  });
+  $("#disconnectJiraOAuth").addEventListener("click", async () => {
+    setJiraCloudStatus("JIRA oturumu kapatılıyor…", "busy");
+    try {
+      await window.JiraCloudClient.signOutFromJira();
+      await refreshJiraOAuthStatus();
+      setJiraCloudStatus("JIRA oturumu kapatıldı.", "success");
+    } catch (error) {
+      setJiraCloudStatus(`JIRA oturumu kapatılamadı: ${error.message}`, "error");
+    }
+  });
+  $("#saveJiraApiEndpoint").addEventListener("click", async () => {
     try {
       const endpoint = window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
       $("#jiraApiEndpoint").value = endpoint;
       setJiraCloudStatus("JIRA backend adresi kaydedildi.", "success");
+      await refreshJiraOAuthStatus();
     } catch (error) {
       setJiraCloudStatus(error.message, "error");
     }
@@ -3723,6 +3794,8 @@
   $("#timesheetEndDate").value = isoFromDate(addDays(rangeMonday, 6));
   $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
   $("#jiraApiEndpoint").value = window.JiraCloudClient.getEndpoint();
+  const jiraOAuthResult = consumeJiraOAuthResult();
+  refreshJiraOAuthStatus(!jiraOAuthResult);
   $("#jiraAutoWorklog").checked = localStorage.getItem(JIRA_AUTO_WORKLOG_KEY) !== "false";
   renderJiraItems();
   render();

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260810-3">
+    <link rel="stylesheet" href="styles.css?v=20260810-4">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="data-store.js?v=20260807-22" defer></script>
     <script src="tasks-store.js?v=20260806-20" defer></script>
@@ -13,12 +13,12 @@
     <script src="jira-store.js?v=20260807-24" defer></script>
     <script src="reminders-store.js?v=20260806-22" defer></script>
     <script src="ai-assistant.js?v=20260806-23" defer></script>
-    <script src="jira-cloud.js?v=20260807-4" defer></script>
+    <script src="jira-cloud.js?v=20260810-1" defer></script>
     <script src="drive-sync.js?v=20260806-22" defer></script>
     <script src="vendor/msal-browser.min.js?v=5.18.0" defer></script>
     <script src="outlook-calendar.js?v=20260807-1" defer></script>
     <script src="google-calendar.js?v=20260810-1" defer></script>
-    <script src="app.js?v=20260810-3" defer></script>
+    <script src="app.js?v=20260810-4" defer></script>
   </head>
   <body>
     <header class="page-header">
@@ -482,6 +482,9 @@
           <div class="jira-cloud-heading">
             <div><span class="eyebrow">Canlı entegrasyon</span><h2 id="jiraCloudTitle">FIT Global JIRA Cloud</h2></div>
             <div class="jira-cloud-actions">
+              <span id="jiraOAuthBadge" class="jira-oauth-badge" data-state="disconnected">Oturum kapalı</span>
+              <button id="connectJiraOAuth" class="button primary" type="button">JIRA ile giriş yap</button>
+              <button id="disconnectJiraOAuth" class="button secondary hidden" type="button">JIRA’dan çıkış</button>
               <button id="testJiraConnection" class="button secondary" type="button">Bağlantıyı test et</button>
               <button id="syncJiraIssues" class="button primary" type="button">JIRA’dan senkronize et</button>
             </div>
@@ -492,7 +495,7 @@
             <button id="saveJiraApiEndpoint" class="button secondary" type="button">Adresi kaydet</button>
             <label class="jira-auto-worklog"><input id="jiraAutoWorklog" type="checkbox" checked><span>Efor kaydından sonra JIRA worklog gönderimi için onay iste</span></label>
           </div>
-          <p id="jiraCloudStatus" class="jira-cloud-status" role="status" aria-live="polite">Bağlantıyı test ederek başlayın. API token yalnızca backend .env dosyasında tutulur.</p>
+          <p id="jiraCloudStatus" class="jira-cloud-status" role="status" aria-live="polite">Kendi hesabınızla çalışmak için JIRA ile giriş yapın. OAuth tokenları yalnızca backend oturumunda tutulur.</p>
         </section>
         <nav class="jira-subtabs" aria-label="JIRA sayfaları">
           <button class="jira-subtab-button active" type="button" data-jira-tab="jiraItemsView" aria-selected="true">JIRA Maddeleri <span id="jiraItemsSubtabCount">0</span></button>
