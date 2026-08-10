@@ -5,9 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Görev detaylarını görüntüleyin ve yönetin.">
     <title>Görev Detayı · Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260811-1">
-    <script src="tasks-store.js?v=20260810-1" defer></script>
-    <script src="task-detail.js?v=20260810-5" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260811-3">
+    <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
+    <script src="tasks-store.js?v=20260811-1" defer></script>
+    <script src="vendor/supabase.js?v=2.112.2" defer></script>
+    <script src="supabase-cloud.js?v=20260811-3" defer></script>
+    <script src="task-detail.js?v=20260811-1" defer></script>
   </head>
   <body class="task-detail-page">
     <header class="task-detail-page-header">
@@ -21,8 +24,8 @@
 
     <main class="task-detail-page-main">
       <section id="taskDetailPageError" class="panel task-detail-page-error hidden" role="alert">
-        <h2>Görev bulunamadı</h2>
-        <p>Bu görev silinmiş olabilir veya bağlantı geçerli değildir.</p>
+        <h2 id="taskDetailPageErrorTitle">Görev bulunamadı</h2>
+        <p id="taskDetailPageErrorMessage">Bu görev silinmiş olabilir veya bağlantı geçerli değildir.</p>
         <a class="button primary" href="index.html?view=tasks">Görev raporuna dön</a>
       </section>
 

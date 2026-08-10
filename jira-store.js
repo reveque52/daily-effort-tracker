@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "daily-effort-tracker.jira-items.v1";
   const normalizeKey = (value) => String(value || "").trim().toLocaleUpperCase("en-US");
+  let fallbackRows = [];
 
   function validate(input) {
     const value = {
@@ -37,13 +38,13 @@
   }
 
   function readAll() {
-    try {
-      const rows = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      return Array.isArray(rows) ? rows : [];
-    } catch { return []; }
+    return global.CloudDataRuntime ? global.CloudDataRuntime.read("jiraItems") : JSON.parse(JSON.stringify(fallbackRows));
   }
 
-  function writeAll(rows) { localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); }
+  function writeAll(rows) {
+    if (global.CloudDataRuntime) global.CloudDataRuntime.write("jiraItems", rows);
+    else fallbackRows = JSON.parse(JSON.stringify(rows));
+  }
   function makeId() { return global.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
   function list() { return readAll().slice().sort((a, b) => a.name.localeCompare(b.name, "tr", { numeric: true, sensitivity: "base" })); }
   function get(id) { return readAll().find((item) => item.id === id) || null; }

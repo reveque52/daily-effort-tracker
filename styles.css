@@ -64,6 +64,7 @@ button { cursor: pointer; }
 .supabase-status { margin: 0; border-radius: 9px; padding: .55rem .65rem; color: var(--muted); background: #f6f7fb; font-size: .72rem; line-height: 1.45; }
 .supabase-status.is-error { color: var(--danger); background: #fff0f2; }
 .supabase-status.is-success { color: #137052; background: #e1f5ed; }
+.supabase-status.is-busy { color: #075ea8; background: #e7f3ff; }
 .supabase-auth-form, .supabase-recovery-form { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
 .supabase-auth-form label, .supabase-recovery-form label { display: grid; gap: .3rem; color: var(--muted); font-size: .68rem; font-weight: 750; }
 .supabase-auth-form input, .supabase-recovery-form input { min-width: 0; border: 1px solid var(--line); border-radius: 9px; padding: .62rem .7rem; color: var(--ink); background: #fff; }
@@ -86,6 +87,16 @@ main { width: min(1240px, calc(100% - 3rem)); margin: -1rem auto 3rem; position:
 .tab-button.active { color: var(--brand-dark); background: #fff; }
 .tab-button span { display: inline-grid; place-items: center; min-width: 19px; height: 19px; margin-left: .3rem; border-radius: 999px; color: inherit; background: rgba(255,255,255,.14); font-size: .68rem; }
 .tab-button.active span { background: var(--brand-soft); }
+.cloud-data-gate { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .75rem; margin-bottom: .8rem; border: 1px solid #c9c5ff; border-radius: 14px; padding: .75rem .9rem; color: var(--ink); background: #f7f6ff; box-shadow: var(--shadow); }
+.cloud-data-gate[data-state="signed_out"] { border-color: #f1d48b; background: #fffaf0; }
+.cloud-data-gate[data-state="error"] { border-color: #efb8bf; background: #fff4f5; }
+.cloud-data-gate-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; color: #fff; background: var(--brand); font-weight: 900; }
+.cloud-data-gate[data-state="signed_out"] .cloud-data-gate-icon { background: #d29b19; }
+.cloud-data-gate[data-state="error"] .cloud-data-gate-icon { background: var(--danger); }
+.cloud-data-gate > div { display: grid; min-width: 0; gap: .12rem; }
+.cloud-data-gate strong { font-size: .78rem; }
+.cloud-data-gate small { color: var(--muted); font-size: .7rem; }
+.cloud-data-locked .tab-view { pointer-events: none; opacity: .48; filter: grayscale(.2); }
 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1rem; }
 .effort-summary-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .summary-card { padding: 1.15rem 1.3rem; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }
@@ -919,6 +930,8 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
   .header-drive-menu .header-menu-popover { right: 0; left: auto; }
   .header-jira-menu .header-menu-popover { right: 0; left: auto; }
   .header-menu-popover { width: calc(100vw - 2rem); max-height: calc(100vh - 8rem); overflow-y: auto; }
+  .cloud-data-gate { grid-template-columns: auto minmax(0, 1fr); }
+  .cloud-data-gate .button { grid-column: 1 / -1; width: 100%; }
   main { width: calc(100% - 1rem); margin-top: -.65rem; }
   .supabase-auth-form, .supabase-recovery-form, .supabase-user-summary { grid-template-columns: 1fr; }
   .supabase-auth-actions, .supabase-recovery-form label { grid-column: 1; }

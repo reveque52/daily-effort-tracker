@@ -7,6 +7,7 @@ const path = require("node:path");
 const root = path.join(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const cloudDataRuntime = fs.readFileSync(path.join(root, "cloud-data-runtime.js"), "utf8");
 const dataStore = fs.readFileSync(path.join(root, "data-store.js"), "utf8");
 const drive = fs.readFileSync(path.join(root, "drive-sync.js"), "utf8");
 const tasks = fs.readFileSync(path.join(root, "tasks-store.js"), "utf8");
@@ -29,6 +30,10 @@ const taskTypeReportApp = fs.readFileSync(path.join(root, "task-type-report.js")
 const deleteEffortBlock = app.slice(app.indexOf("async function deleteEffortEntry"), app.indexOf("\n  function render()", app.indexOf("async function deleteEffortEntry")));
 const effortModalSubmitBlock = app.slice(app.indexOf('effortEditModalForm.addEventListener("submit"'), app.indexOf("\n  function updateTimesheetControls", app.indexOf('effortEditModalForm.addEventListener("submit"')));
 
+assert.doesNotMatch([app, dataStore, tasks, peopleStore, jira, reminders, drive, aiClient, jiraCloudClient, outlookCalendarClient].join("\n"), /localStorage\.(?:getItem|setItem|removeItem)/, "App data and user preferences must not persist in localStorage");
+assert.match(supabaseCloudClient, /async function getUserSettings[\s\S]*async function updateUserSettings[\s\S]*from\("user_settings"\)/, "User preferences must be read from and written to Supabase user_settings");
+assert.match(app, /function queueCloudUserSettings[\s\S]*SupabaseCloud\.updateUserSettings[\s\S]*applyCloudUserSettings\(bundle\.settings/, "Cloud preferences must load automatically and save to Supabase");
+
 const requiredIds = [
   "homeView", "homeWeekLabel", "homeWeeklyHours", "homeWeeklyGoal", "homeWeeklyEntryCount",
   "homePlannedTasks", "homeInProgressTasks", "weeklyEffortChart", "taskStatusChart",
@@ -43,7 +48,7 @@ const requiredIds = [
   "descriptionInput", "filterDateInput", "entryList", "entryTemplate",
   "dailyTotal", "dailyDays", "effortWeekHours", "effortWeekDays", "effortMonthHours", "effortMonthDays", "grandTotal", "effortTotalDays", "entryCount", "formMessage", "lastBackupTime",
   "driveHeaderMenu", "headerDriveMenuLabel", "headerDriveMenuBadge", "driveCompactPanel", "driveCompactTitle", "driveConnectionBadge", "driveSettingsSummary", "driveClientIdPreview", "editDriveSettings", "driveSettingsEditor", "cancelDriveSettings", "skipInitialRestore",
-  "supabaseHeaderMenu", "headerSupabaseMenuLabel", "headerSupabaseMenuBadge", "supabaseConnectionBadge", "supabaseStatus", "supabaseAuthForm", "supabaseEmail", "supabasePassword", "supabaseSignIn", "supabaseSignUp", "supabaseForgotPassword", "supabaseRecoveryForm", "supabaseNewPassword", "supabaseSignedInPanel", "supabaseUserEmail", "supabaseOrganizationName", "supabaseLastSync", "supabasePull", "supabasePush", "supabaseSignOut",
+  "supabaseHeaderMenu", "headerSupabaseMenuLabel", "headerSupabaseMenuBadge", "supabaseConnectionBadge", "supabaseStatus", "supabaseAuthForm", "supabaseEmail", "supabasePassword", "supabaseSignIn", "supabaseSignUp", "supabaseForgotPassword", "supabaseRecoveryForm", "supabaseNewPassword", "supabaseSignedInPanel", "supabaseUserEmail", "supabaseOrganizationName", "supabaseLastSync", "supabasePull", "supabaseSignOut", "cloudDataGate", "cloudDataGateTitle", "cloudDataGateMessage", "openSupabaseFromGate",
   "tasksView", "taskForm", "taskTitleInput", "taskDueDateInput", "taskStatusInput", "taskDescriptionInput", "taskDocumentsInput", "taskDocumentSelectionSummary", "taskDocumentList",
   "taskParentTaskInput", "taskAssigneeInput", "taskTypeInput", "taskPriorityInput", "taskYearInput", "taskQuarterInput", "taskPlanImport",
   "openTaskPlanPaste", "taskPlanImportModal", "taskPlanPasteForm", "taskPlanTextInput", "taskPlanPasteMessage",
@@ -66,15 +71,15 @@ for (const id of requiredIds) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `Eksik DOM sözleşmesi: #${id}`);
 }
 
-for (const id of ["taskDetailPageContent", "detailPageTitle", "detailPageTaskType", "detailPagePriority", "detailPageStatus", "detailPageCompleted", "detailPageOverviewTask", "detailPageParent", "detailPageAssignee", "detailPagePriorityValue", "detailPagePlan", "detailPageDueDate", "detailPageStatusValue", "detailPageDescription", "detailPageDocumentCount", "detailPageDocumentList", "detailPageSubtaskList", "detailPageRevise"]) {
+for (const id of ["taskDetailPageContent", "taskDetailPageErrorTitle", "taskDetailPageErrorMessage", "detailPageTitle", "detailPageTaskType", "detailPagePriority", "detailPageStatus", "detailPageCompleted", "detailPageOverviewTask", "detailPageParent", "detailPageAssignee", "detailPagePriorityValue", "detailPagePlan", "detailPageDueDate", "detailPageStatusValue", "detailPageDescription", "detailPageDocumentCount", "detailPageDocumentList", "detailPageSubtaskList", "detailPageRevise"]) {
   assert.match(taskDetailHtml, new RegExp(`id=["']${id}["']`), `Eksik görev detay sayfası sözleşmesi: #${id}`);
 }
 
-for (const id of ["taskTypeReportTitle", "taskTypeReportBackLink", "taskTypeReportContent", "taskTypeReportTotal", "taskTypeReportOpen", "taskTypeReportInProgress", "taskTypeReportCompleted", "taskTypeReportBody"]) {
+for (const id of ["taskTypeReportTitle", "taskTypeReportBackLink", "taskTypeReportErrorTitle", "taskTypeReportErrorMessage", "taskTypeReportContent", "taskTypeReportTotal", "taskTypeReportOpen", "taskTypeReportInProgress", "taskTypeReportCompleted", "taskTypeReportBody"]) {
   assert.match(taskTypeReportHtml, new RegExp(`id=["']${id}["']`), `Eksik görev tipi raporu sözleşmesi: #${id}`);
 }
 
-assert.ok(html.indexOf('src="data-store.js') < html.indexOf('src="app.js'), "Veri katmanı uygulamadan önce yüklenmeli");
+assert.ok(html.indexOf('src="cloud-data-runtime.js') < html.indexOf('src="data-store.js') && html.indexOf('src="data-store.js') < html.indexOf('src="app.js'), "Bellek tabanlı bulut çalışma katmanı veri mağazalarından önce yüklenmeli");
 assert.ok(html.indexOf('src="vendor/msal-browser.min.js') < html.indexOf('src="outlook-calendar.js') && html.indexOf('src="outlook-calendar.js') < html.indexOf('src="app.js'), "MSAL ve Outlook Takvim istemcileri uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="drive-sync.js') < html.indexOf('src="google-calendar.js') && html.indexOf('src="google-calendar.js') < html.indexOf('src="app.js'), "Drive ayarları ve Google Takvim istemcisi uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="vendor/supabase.js') < html.indexOf('src="supabase-cloud.js') && html.indexOf('src="supabase-cloud.js') < html.indexOf('src="app.js'), "Sabitlenmiş Supabase SDK ve bulut istemcisi uygulamadan önce yüklenmeli");
@@ -82,6 +87,7 @@ assert.match(supabaseCloudClient, /sb_publishable_[A-Za-z0-9_-]+/, "Tarayıcı S
 assert.doesNotMatch(supabaseCloudClient, /service_role|sb_secret_|SUPABASE_SERVICE_ROLE/, "Supabase secret veya service-role anahtarı tarayıcı koduna yazılmamalı");
 assert.match(supabaseCloudClient, /signUp[\s\S]*emailRedirectTo[\s\S]*signInWithPassword[\s\S]*resetPasswordForEmail[\s\S]*updateUser/, "Supabase e-posta kayıt, giriş, doğrulama ve şifre yenileme akışları bulunmalı");
 assert.match(supabaseCloudClient, /organization_members[\s\S]*pullBundle[\s\S]*onConflict:\s*"organization_id,id"[\s\S]*pushBundle/, "Supabase senkronizasyonu organizasyon kapsamında güvenli upsert kullanmalı");
+assert.match(supabaseCloudClient, /async function applyChanges[\s\S]*TABLES\[collection\][\s\S]*\.upsert\(rows[\s\S]*removableIds[\s\S]*\.delete\(\)/, "Bellek değişiklikleri Supabase'e satır bazında eklenip silinebilmeli");
 assert.match(html, /<meta\s+name="viewport"/i, "Mobil viewport tanımı eksik");
 assert.match(css, /@media\s*\(max-width:\s*850px\)/, "Tablet kırılımı eksik");
 assert.match(css, /@media\s*\(max-width:\s*600px\)/, "Mobil kırılımı eksik");
@@ -403,12 +409,15 @@ assert.match(app, /function relinkMergedJiraEntries[\s\S]*idRemap\[entry\.jiraId
 assert.doesNotMatch(app, /pagehide|visibilitychange/, "Drive yedeği yalnızca kullanıcı Kaydet dediğinde gönderilmeli");
 assert.doesNotMatch(app, /APP_EDIT_SESSION_KEY|requireAppEditMode|setAppEditMode|EDIT_ACTION_SELECTOR/, "Veri değiştiren kontroller çalışma modu ile kilitlenmemeli");
 assert.doesNotMatch(css, /body:not\(\.app-edit-mode\)/, "Düzenleme işlemleri CSS ile çalışma moduna göre devre dışı bırakılmamalı");
-assert.match(app, /function markLocalChangePending[\s\S]*LOCAL_CHANGES_PENDING_KEY/, "Yerel değişiklikler buluta gönderilene kadar kalıcı olarak işaretlenmeli");
-assert.match(app, /function saveLocalChangesToCloud[\s\S]*pushToSupabase[\s\S]*localChangesPending\s*=\s*false/, "Supabase menüsü yerel değişiklikleri buluta gönderip bekleyen durumunu temizlemeli");
+assert.match(cloudDataRuntime, /const records = new Map[\s\S]*function write[\s\S]*upserts[\s\S]*deletedIds[\s\S]*function suspend/, "Uygulama verileri yalnızca bellekte tutulup değişiklikler izlenmeli");
+assert.doesNotMatch([dataStore, tasks, peopleStore, jira, reminders].join("\n"), /localStorage\.(?:getItem|setItem)/, "Efor, görev, kişi, JIRA ve hatırlatma mağazaları localStorage kullanmamalı");
 assert.match(app, /supabaseAuthForm[\s\S]*SupabaseCloud\.signIn[\s\S]*supabaseSignUp[\s\S]*SupabaseCloud\.signUp[\s\S]*supabaseForgotPassword[\s\S]*sendPasswordReset/, "Supabase hesap menüsü giriş, kayıt ve e-posta şifre yenilemeye bağlanmalı");
-assert.match(app, /function pullFromSupabase[\s\S]*replaceLocalBundle[\s\S]*function pushToSupabase[\s\S]*pushBundle\(backupBundle\(\)\)/, "Supabase yükleme ve güvenli yerel veri gönderme akışları eksik");
-assert.match(app, /supabasePush"\)\.addEventListener\("click"[\s\S]*runSupabaseAction\(saveLocalChangesToCloud\)/, "Supabase gönder düğmesi yerel değişiklikleri buluta göndermeli");
-assert.match(app, /async function backupAndReport[\s\S]*markLocalChangePending\(\)/, "Otomatik yedek çağrıları yalnızca yerel değişikliği işaretlemeli");
+assert.match(app, /function refreshSupabaseAccount[\s\S]*ensureCloudDataLoaded\(\)[\s\S]*function pullFromSupabase[\s\S]*replaceLocalBundle[\s\S]*setCloudDataGate\("ready"\)/, "Supabase oturumu açıldığında bulut verileri otomatik yüklenmeli");
+assert.match(app, /function queueCloudChange[\s\S]*SupabaseCloud\.applyChanges\(change\)[\s\S]*Tüm değişiklikler Supabase’e kaydedildi/, "Her bellek değişikliği otomatik olarak Supabase'e gönderilmeli");
+assert.match(app, /CloudDataRuntime\.setChangeHandler\(queueCloudChange\)/, "Bulut çalışma katmanı otomatik Supabase kaydına bağlanmalı");
+assert.doesNotMatch(html, /id="supabasePush"|Yerel verileri gönder|Supabase’den yükle/, "Bulut-öncelikli uygulamada manuel yerel veri gönderme akışı bulunmamalı");
+assert.match(taskDetailApp, /initializeTaskDetail[\s\S]*SupabaseCloud\.getSession[\s\S]*SupabaseCloud\.pullBundle[\s\S]*TaskStore\.replaceAll/, "Görev detay sayfası veriyi Supabase'den yüklemeli");
+assert.match(taskTypeReportApp, /initializeTaskTypeReport[\s\S]*SupabaseCloud\.getSession[\s\S]*SupabaseCloud\.pullBundle[\s\S]*TaskStore\.replaceAll/, "Görev tipi raporu veriyi Supabase'den yüklemeli");
 assert.match(drive, /keepalive:\s*Boolean\(options\.keepalive\)/, "Kapanış isteği keepalive kullanmalı");
 
 console.log("✓ frontend DOM/veri katmanı sözleşmesi");

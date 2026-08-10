@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "daily-effort-tracker.people.v1";
   const ROLES = ["member", "leader"];
+  let fallbackRows = [];
 
   function normalizeEmail(value) {
     return String(value || "").trim().toLowerCase();
@@ -48,16 +49,12 @@
   }
 
   function readAll() {
-    try {
-      const rows = JSON.parse(global.localStorage.getItem(STORAGE_KEY) || "[]");
-      return Array.isArray(rows) ? rows : [];
-    } catch (_) {
-      return [];
-    }
+    return global.CloudDataRuntime ? global.CloudDataRuntime.read("people") : JSON.parse(JSON.stringify(fallbackRows));
   }
 
   function writeAll(rows) {
-    global.localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+    if (global.CloudDataRuntime) global.CloudDataRuntime.write("people", rows);
+    else fallbackRows = JSON.parse(JSON.stringify(rows));
   }
 
   function makeId() {

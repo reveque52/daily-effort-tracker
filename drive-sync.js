@@ -10,15 +10,16 @@
   const DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder";
   const MAX_DOCUMENT_SIZE = 100 * 1024 * 1024;
   const MAX_DOCUMENTS_PER_UPLOAD = 10;
-  const CLIENT_ID_KEY = "daily-effort-tracker.google-client-id";
-  const LAST_BACKUP_KEY = "daily-effort-tracker.last-drive-backup";
   let tokenClient;
   let accessToken = "";
+  let clientIdValue = "";
+  let lastBackupTime = "";
+  // LAST_BACKUP_KEY kalıcı tarayıcı anahtarı kaldırıldı; değer Supabase user_settings üzerinden belleğe yüklenir.
 
-  const getClientId = () => localStorage.getItem(CLIENT_ID_KEY) || "";
-  const getLastBackupTime = () => localStorage.getItem(LAST_BACKUP_KEY) || "";
+  const getClientId = () => clientIdValue;
+  const getLastBackupTime = () => lastBackupTime;
   const rememberBackupTime = (value) => {
-    if (value) localStorage.setItem(LAST_BACKUP_KEY, value);
+    lastBackupTime = String(value || "");
   };
 
   function setClientId(value) {
@@ -26,8 +27,7 @@
     if (clientId && !clientId.endsWith(".apps.googleusercontent.com")) {
       throw new Error("Geçerli bir Google OAuth Client ID girin.");
     }
-    if (clientId) localStorage.setItem(CLIENT_ID_KEY, clientId);
-    else localStorage.removeItem(CLIENT_ID_KEY);
+    clientIdValue = clientId;
     tokenClient = undefined;
     accessToken = "";
   }
@@ -258,7 +258,7 @@
   const hasAccessToken = () => Boolean(accessToken);
 
   window.DriveSync = Object.freeze({
-    getClientId, setClientId, getLastBackupTime, hasAccessToken, authorize,
+    getClientId, setClientId, getLastBackupTime, setLastBackupTime: rememberBackupTime, hasAccessToken, authorize,
     getBackupInfo, backup, restore, uploadTaskDocuments
   });
 })();

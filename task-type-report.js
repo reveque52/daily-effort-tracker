@@ -160,5 +160,22 @@
     });
   }
 
-  renderTaskTypeReport();
+  async function initializeTaskTypeReport() {
+    try {
+      const session = await window.SupabaseCloud.getSession();
+      if (!session?.user) throw new Error("Görev raporunu görüntülemek için ana sayfadan Supabase hesabınıza giriş yapın.");
+      const bundle = await window.SupabaseCloud.pullBundle();
+      window.CloudDataRuntime.suspend(() => {
+        const result = window.TaskStore.replaceAll(bundle.tasks || []);
+        if (!result.valid) throw new Error("Supabase görev verileri doğrulanamadı.");
+      });
+      renderTaskTypeReport();
+    } catch (error) {
+      $("#taskTypeReportErrorTitle").textContent = "Supabase verileri açılamadı";
+      $("#taskTypeReportErrorMessage").textContent = error.message;
+      $("#taskTypeReportError").classList.remove("hidden");
+    }
+  }
+
+  initializeTaskTypeReport();
 })();

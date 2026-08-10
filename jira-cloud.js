@@ -1,15 +1,15 @@
 ((global) => {
   "use strict";
 
-  const ENDPOINT_KEY = "daily-effort-tracker.jira-api-endpoint";
   const DEFAULT_ENDPOINT = String(global.location?.hostname || "").endsWith("github.io") ? "supabase:jira-proxy" : "/api/jira";
+  let endpointValue = DEFAULT_ENDPOINT;
 
   function usesSupabase(endpoint = getEndpoint()) {
     return String(endpoint || "").toLowerCase() === "supabase:jira-proxy";
   }
 
   function getEndpoint() {
-    const saved = global.localStorage.getItem(ENDPOINT_KEY) || "";
+    const saved = endpointValue;
     const githubPages = String(global.location?.hostname || "").endsWith("github.io");
     if (githubPages && (!saved || saved.startsWith("/"))) return "supabase:jira-proxy";
     return saved || DEFAULT_ENDPOINT;
@@ -18,11 +18,11 @@
   function setEndpoint(value) {
     const endpoint = String(value || "").trim().replace(/\/$/, "");
     if (!endpoint) {
-      global.localStorage.removeItem(ENDPOINT_KEY);
+      endpointValue = DEFAULT_ENDPOINT;
       return DEFAULT_ENDPOINT;
     }
     if (!usesSupabase(endpoint) && !endpoint.startsWith("/") && !/^https:\/\//i.test(endpoint)) throw new Error("JIRA servis adresi Supabase, HTTPS veya aynı origin üzerinde göreli bir adres olmalıdır.");
-    global.localStorage.setItem(ENDPOINT_KEY, endpoint);
+    endpointValue = endpoint;
     return endpoint;
   }
 
