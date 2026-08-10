@@ -24,7 +24,28 @@ API anahtarı tarayıcı koduna eklenmez ve `.env` dosyası Git tarafından yok 
 
 ## Düzenle ve Kaydet modu
 
-Uygulama görüntüleme modunda açılır ve veri değiştiren kontroller kilitli tutulur. **Düzenle** seçildiğinde efor, görev, kişi, hatırlatma ve JIRA işlemleri yerel tarayıcı verisine kaydedilir; bu işlemler sırasında Drive'a otomatik istek gönderilmez. **Kaydet ve Drive'a gönder** düğmesi tüm güncel veriyi tek yedek halinde Google Drive'a gönderir ve uygulamayı yeniden görüntüleme moduna alır. Drive'a gönderilmemiş yerel değişiklik bilgisi tarayıcı kapatılsa da korunur.
+Uygulama görüntüleme modunda açılır ve veri değiştiren kontroller kilitli tutulur. **Düzenle** seçildiğinde efor, görev, kişi, hatırlatma ve JIRA işlemleri önce yerel tarayıcı verisine kaydedilir. **Kaydet ve Supabase’e gönder** düğmesi tüm güncel veriyi kullanıcının Supabase çalışma alanına gönderir ve uygulamayı yeniden görüntüleme moduna alır. Google Drive menüsü isteğe bağlı, elle alınan ikinci bir yedek olarak korunur. Supabase'e gönderilmemiş yerel değişiklik bilgisi tarayıcı kapatılsa da korunur.
+
+## Supabase hesap, veri ve e-posta kurulumu
+
+Ana menüdeki **Supabase** alanından e-posta ve en az sekiz karakterli şifreyle hesap oluşturulur. E-posta doğrulandıktan sonra her kullanıcı için kişisel bir çalışma alanı otomatik hazırlanır. Efor, görev, kişi, JIRA maddesi ve hatırlatma kayıtları bu çalışma alanında tutulur; tarayıcıda yalnızca publishable key bulunur. Secret/service-role anahtarı veya SMTP parolası frontend koduna ve GitHub deposuna yazılmaz.
+
+İlk kullanımda:
+
+1. **Hesap oluştur** ile kayıt olun ve gelen doğrulama bağlantısını açın.
+2. Uygulamaya dönüp giriş yapın. Supabase boşsa mevcut yerel kayıt sayısı menüde gösterilir.
+3. **Yerel verileri gönder** ile bu tarayıcıdaki verileri ilk kez aktarın. Supabase’de daha önce veri varsa işlemden önce onay sorulur.
+4. Başka bir cihazda **Supabase’den yükle** ile bulut sürümünü yerel tarayıcıya alın.
+
+### Doğrulama ve şifre e-postaları
+
+Kayıt doğrulama ve **Şifremi unuttum** akışları uygulamada aktiftir. Supabase'in varsayılan e-posta hizmeti yalnızca proje ekip üyelerine test gönderimi ve düşük hız limiti için uygundur. Gerçek kullanıcılara gönderim için Supabase Dashboard'da **Authentication → Emails → SMTP Settings** bölümünden özel SMTP açılmalıdır. Sağlayıcınızdan alınan şu değerleri girin:
+
+- Host ve port
+- SMTP kullanıcı adı ve parola
+- Gönderen e-posta adresi ve görünen ad
+
+**Authentication → URL Configuration** bölümünde Site URL ile Redirect URLs listesine hem `http://localhost:8080/` hem de kullanılan tam GitHub Pages adresini ekleyin. SMTP parolasını `.env`, HTML veya JavaScript dosyasına koymayın; yalnızca Supabase Dashboard'daki şifreli SMTP alanına girin.
 
 ## FIT Global JIRA Cloud entegrasyonu
 
