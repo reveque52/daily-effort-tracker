@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260808-1">
+    <link rel="stylesheet" href="styles.css?v=20260810-3">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="data-store.js?v=20260807-22" defer></script>
     <script src="tasks-store.js?v=20260806-20" defer></script>
@@ -17,7 +17,8 @@
     <script src="drive-sync.js?v=20260806-22" defer></script>
     <script src="vendor/msal-browser.min.js?v=5.18.0" defer></script>
     <script src="outlook-calendar.js?v=20260807-1" defer></script>
-    <script src="app.js?v=20260808-1" defer></script>
+    <script src="google-calendar.js?v=20260810-1" defer></script>
+    <script src="app.js?v=20260810-3" defer></script>
   </head>
   <body>
     <header class="page-header">
@@ -33,137 +34,176 @@
     </header>
 
     <main>
-      <nav class="app-tabs" aria-label="Uygulama bölümleri">
-        <button class="tab-button active" type="button" data-tab="homeView" aria-selected="true">Ana Sayfa</button>
-        <button class="tab-button" type="button" data-tab="effortsView" aria-selected="false">Eforlar</button>
-        <button class="tab-button" type="button" data-tab="timesheetView" aria-selected="false">Timesheet</button>
-        <button class="tab-button" type="button" data-tab="tasksView" aria-selected="false">Görevler <span id="taskTabCount">0</span></button>
-        <button class="tab-button" type="button" data-tab="peopleView" aria-selected="false">Kişiler <span id="peopleTabCount">0</span></button>
-        <button class="tab-button" type="button" data-tab="organizationView" aria-selected="false">Organizasyon</button>
-        <button class="tab-button" type="button" data-tab="jiraView" aria-selected="false">JIRA Maddeleri <span id="jiraTabCount">0</span></button>
-      </nav>
+      <div class="main-menu-bar">
+        <nav class="app-tabs" aria-label="Uygulama bölümleri">
+          <button class="tab-button active" type="button" data-tab="homeView" aria-selected="true">Ana Sayfa</button>
+          <button class="tab-button" type="button" data-tab="effortsView" aria-selected="false">Eforlar</button>
+          <button class="tab-button" type="button" data-tab="timesheetView" aria-selected="false">Timesheet</button>
+          <button class="tab-button" type="button" data-tab="tasksView" aria-selected="false">Görevler <span id="taskTabCount">0</span></button>
+          <button class="tab-button" type="button" data-tab="peopleView" aria-selected="false">Kişiler <span id="peopleTabCount">0</span></button>
+          <button class="tab-button" type="button" data-tab="organizationView" aria-selected="false">Organizasyon</button>
+          <button class="tab-button" type="button" data-tab="jiraView" aria-selected="false">JIRA Maddeleri <span id="jiraTabCount">0</span></button>
+        </nav>
 
-      <section id="appEditToolbar" class="app-edit-toolbar" aria-label="Uygulama düzenleme modu">
-        <div class="app-edit-status"><span id="appEditModeDot" aria-hidden="true"></span><div><strong id="appEditModeLabel">Görüntüleme modu</strong><p id="appEditModeStatus" role="status" aria-live="polite">Değişiklik yapmak için Düzenle’ye basın.</p></div></div>
-        <div class="app-edit-actions"><button id="enterAppEditMode" class="button secondary" type="button">Düzenle</button><button id="saveAppChanges" class="button primary" type="button" disabled>Kaydet ve Drive’a gönder</button></div>
-      </section>
-
-      <nav class="drive-toolbar" aria-label="Google Drive araçları">
-        <div class="drive-toolbar-status">
-          <span class="sync-dot" aria-hidden="true"></span>
-          <div>
-            <strong>Google Drive</strong>
-            <p id="driveStatus" aria-live="polite">Drive bağlantısı bekleniyor.</p>
-          </div>
-        </div>
-        <div class="last-backup">
-          <span>Drive’daki son sürüm</span>
-          <strong id="lastBackupTime">Henüz yedeklenmedi</strong>
-        </div>
-        <div class="drive-toolbar-actions">
-          <details class="drive-settings">
-            <summary class="button secondary">Ayarlar</summary>
-            <div class="drive-settings-popover">
-              <label class="drive-client-field">
-                <span>Google OAuth Client ID</span>
-                <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
-              </label>
-              <button id="saveDriveSettings" class="button primary" type="button">Ayarı kaydet</button>
-              <div class="drive-settings-actions">
-                <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan yükle</button>
-                <button id="backupToDrive" class="button primary" type="button">Şimdi yedekle</button>
-              </div>
+        <nav class="header-utility-nav" aria-label="Uygulama ve yedekleme menüleri">
+          <details id="appEditMenu" class="header-menu header-mode-menu">
+            <summary>
+              <span class="header-menu-icon header-mode-icon" aria-hidden="true">✎</span>
+              <span class="header-menu-copy"><small>Çalışma modu</small><strong id="headerEditModeLabel">Görüntüleme</strong></span>
+              <span id="headerUnsavedBadge" class="header-menu-badge hidden">Kaydedilmedi</span>
+            </summary>
+            <div class="header-menu-popover">
+              <section id="appEditToolbar" class="app-edit-toolbar" aria-label="Uygulama düzenleme modu">
+                <div class="app-edit-status"><span id="appEditModeDot" aria-hidden="true"></span><div><strong id="appEditModeLabel">Görüntüleme modu</strong><p id="appEditModeStatus" role="status" aria-live="polite">Değişiklik yapmak için Düzenle’ye basın.</p></div></div>
+                <div class="app-edit-actions"><button id="enterAppEditMode" class="button secondary" type="button">Düzenle</button><button id="saveAppChanges" class="button primary" type="button" disabled>Kaydet ve Drive’a gönder</button></div>
+              </section>
             </div>
           </details>
-        </div>
-      </nav>
 
-      <section id="restorePrompt" class="restore-prompt hidden" aria-labelledby="restorePromptTitle">
-        <div class="restore-prompt-icon" aria-hidden="true">↻</div>
-        <div>
-          <h2 id="restorePromptTitle">Drive yedeğini yükleyerek başla</h2>
-          <p>En güncel efor, görev, kişi, JIRA ve hatırlatma kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
-        </div>
-        <div class="restore-prompt-actions">
-          <button id="initialRestoreButton" class="button primary" type="button">Drive’dan geri yükle</button>
-          <button id="skipInitialRestore" class="button secondary" type="button">Şimdilik geç</button>
-        </div>
-      </section>
+          <details id="driveHeaderMenu" class="header-menu header-drive-menu">
+            <summary>
+              <span class="header-menu-icon" aria-hidden="true">☁</span>
+              <span class="header-menu-copy"><small>Yedekleme</small><strong id="headerDriveMenuLabel">Google Drive</strong></span>
+              <span id="headerDriveMenuBadge" class="header-menu-badge hidden">Yedek yükle</span>
+            </summary>
+            <div class="header-menu-popover drive-header-popover">
+              <nav class="drive-toolbar" aria-label="Google Drive araçları">
+                <div class="drive-toolbar-status">
+                  <span class="sync-dot" aria-hidden="true"></span>
+                  <div>
+                    <strong>Google Drive</strong>
+                    <p id="driveStatus" aria-live="polite">Drive bağlantısı bekleniyor.</p>
+                  </div>
+                </div>
+                <div class="last-backup">
+                  <span>Drive’daki son sürüm</span>
+                  <strong id="lastBackupTime">Henüz yedeklenmedi</strong>
+                </div>
+                <div class="drive-toolbar-actions">
+                  <details class="drive-settings">
+                    <summary class="button secondary">Ayarlar</summary>
+                    <div class="drive-settings-popover">
+                      <label class="drive-client-field">
+                        <span>Google OAuth Client ID</span>
+                        <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
+                      </label>
+                      <button id="saveDriveSettings" class="button primary" type="button">Ayarı kaydet</button>
+                      <div class="drive-settings-actions">
+                        <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan yükle</button>
+                        <button id="backupToDrive" class="button primary" type="button">Şimdi yedekle</button>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </nav>
+
+              <section id="restorePrompt" class="restore-prompt hidden" aria-labelledby="restorePromptTitle">
+                <div class="restore-prompt-icon" aria-hidden="true">↻</div>
+                <div>
+                  <h2 id="restorePromptTitle">Drive yedeğini yükleyerek başla</h2>
+                  <p>En güncel efor, görev, kişi, JIRA ve hatırlatma kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
+                </div>
+                <div class="restore-prompt-actions">
+                  <button id="initialRestoreButton" class="button primary" type="button">Drive’dan geri yükle</button>
+                  <button id="skipInitialRestore" class="button secondary" type="button">Şimdilik geç</button>
+                </div>
+              </section>
+            </div>
+          </details>
+        </nav>
+      </div>
 
       <section id="homeView" class="tab-view">
-        <header class="home-intro">
-          <div>
-            <span class="eyebrow">Güncel durum</span>
-            <h2>Çalışma özeti</h2>
-            <p id="homeWeekLabel">Bu haftanın görev ve efor görünümü</p>
-          </div>
-          <button class="button primary" type="button" data-home-target="timesheetView">+ Efor ekle</button>
-        </header>
-
-        <section class="panel home-quick-reminder" aria-labelledby="reminderPanelTitle">
-          <div class="panel-heading reminder-panel-heading">
-            <div><span class="eyebrow">Hızlı erişim</span><h2 id="reminderPanelTitle">Önemli Notlar ve Hatırlatmalar</h2></div>
-            <div class="reminder-panel-actions">
-              <strong id="reminderOpenCount" class="task-count-badge">0 aktif</strong>
-              <button id="openReminderModal" class="button primary" type="button">+ Ekle</button>
+        <section class="home-summary-panel" aria-labelledby="homeSummaryTitle">
+          <header class="home-intro">
+            <div>
+              <span class="eyebrow">Güncel durum</span>
+              <h2 id="homeSummaryTitle">Çalışma özeti</h2>
+              <p id="homeWeekLabel">Bu haftanın görev ve efor görünümü</p>
             </div>
-          </div>
-          <div id="reminderTickerWindow" class="reminder-ticker-window">
-            <div id="reminderEmptyState" class="dashboard-empty">Henüz önemli bir not veya hatırlatma eklenmedi.</div>
-            <div id="reminderList" class="reminder-list" aria-live="polite"></div>
+          </header>
+
+          <div class="home-kpi-grid" aria-label="Haftalık özet">
+            <button class="home-kpi-card home-kpi-primary" type="button" data-home-target="effortsView">
+              <span>Bu haftaki efor</span>
+              <strong id="homeWeeklyHours">0 sa</strong>
+              <small id="homeWeeklyGoal">40 saatlik hedefin %0’ı</small>
+            </button>
+            <button class="home-kpi-card" type="button" data-home-target="effortsView">
+              <span>Haftalık kayıt</span>
+              <strong id="homeWeeklyEntryCount">0</strong>
+              <small>Girilen efor kaydı</small>
+            </button>
+            <button class="home-kpi-card" type="button" data-home-target="tasksView">
+              <span>Bekleyen görev</span>
+              <strong id="homePlannedTasks">0</strong>
+              <small>Henüz başlanmadı</small>
+            </button>
+            <button class="home-kpi-card" type="button" data-home-target="tasksView">
+              <span>Devam eden görev</span>
+              <strong id="homeInProgressTasks">0</strong>
+              <small>Aktif çalışma</small>
+            </button>
           </div>
         </section>
 
-        <section class="panel outlook-calendar-dashboard" aria-labelledby="outlookCalendarTitle">
-          <div class="panel-heading outlook-calendar-heading">
-            <div><span class="eyebrow">Microsoft 365</span><h2 id="outlookCalendarTitle">Outlook Takvim</h2></div>
-            <div class="outlook-calendar-actions">
-              <span id="outlookCalendarConnection" class="outlook-connection-badge" data-state="disconnected">Bağlı değil</span>
-              <button id="connectOutlookCalendar" class="button primary" type="button">Outlook’a bağlan</button>
-              <button id="refreshOutlookCalendar" class="button secondary" type="button" disabled>Yenile</button>
-              <button id="disconnectOutlookCalendar" class="button secondary hidden" type="button">Çıkış</button>
-            </div>
-          </div>
-          <div class="outlook-calendar-toolbar">
-            <label class="filter-control"><span>Görünüm</span><select id="outlookCalendarRange"><option value="7">7 gün</option><option value="14" selected>14 gün</option><option value="30">30 gün</option></select></label>
-            <strong id="outlookCalendarPeriod">Bugünden itibaren 14 gün</strong>
-            <details id="outlookCalendarSettings" class="outlook-calendar-settings">
-              <summary>Bağlantı ayarları</summary>
-              <div class="outlook-settings-grid">
-                <label class="field"><span>Application (client) ID</span><input id="outlookClientId" type="text" placeholder="00000000-0000-0000-0000-000000000000"></label>
-                <label class="field"><span>Directory (tenant) ID</span><input id="outlookTenantId" type="text" placeholder="organizations"></label>
-                <button id="saveOutlookSettings" class="button secondary" type="button">Ayarları kaydet</button>
+        <div class="home-top-widgets">
+          <section class="panel outlook-calendar-dashboard" aria-labelledby="outlookCalendarTitle">
+            <div class="panel-heading outlook-calendar-heading">
+              <div>
+                <span class="eyebrow">Ajanda</span>
+                <h2 id="outlookCalendarTitle">Takvim</h2>
+                <div class="calendar-provider-switch" role="group" aria-label="Takvim sağlayıcısı">
+                  <button id="showGoogleCalendar" class="calendar-provider-button" type="button" data-calendar-provider="google" aria-pressed="false">Google Takvim</button>
+                  <button id="showOutlookCalendar" class="calendar-provider-button" type="button" data-calendar-provider="outlook" aria-pressed="false">Outlook</button>
+                </div>
               </div>
-              <small>Entra ID’de Single-page application Redirect URI olarak <code id="outlookRedirectUri"></code> adresini ekleyin. Client secret gerekmez.</small>
-            </details>
-          </div>
-          <p id="outlookCalendarStatus" class="outlook-calendar-status" role="status" aria-live="polite">Outlook takviminizi görmek için bağlantı ayarlarını kaydedin.</p>
-          <div id="outlookCalendarEmpty" class="dashboard-empty">Bu tarih aralığında Outlook etkinliği bulunmuyor.</div>
-          <div id="outlookCalendarList" class="outlook-calendar-list" aria-live="polite"></div>
-        </section>
+              <div class="outlook-calendar-actions">
+                <span id="outlookCalendarConnection" class="outlook-connection-badge" data-state="disconnected">Bağlı değil</span>
+                <button id="connectOutlookCalendar" class="button primary" type="button">Takvime bağlan</button>
+                <button id="refreshOutlookCalendar" class="button secondary" type="button" disabled>Yenile</button>
+                <button id="disconnectOutlookCalendar" class="button secondary hidden" type="button">Bağlantıyı kes</button>
+              </div>
+            </div>
+            <div class="outlook-calendar-toolbar">
+              <label class="filter-control"><span>Görünüm</span><select id="outlookCalendarRange"><option value="7">7 gün</option><option value="14" selected>14 gün</option><option value="30">30 gün</option></select></label>
+              <strong id="outlookCalendarPeriod">Bugünden itibaren 14 gün</strong>
+              <details id="outlookCalendarSettings" class="outlook-calendar-settings">
+                <summary>Outlook bağlantı ayarları</summary>
+                <div class="outlook-settings-grid">
+                  <label class="field"><span>Application (client) ID</span><input id="outlookClientId" type="text" placeholder="00000000-0000-0000-0000-000000000000"></label>
+                  <label class="field"><span>Directory (tenant) ID</span><input id="outlookTenantId" type="text" placeholder="organizations"></label>
+                  <button id="saveOutlookSettings" class="button secondary" type="button">Ayarları kaydet</button>
+                </div>
+                <small>Entra ID’de Single-page application Redirect URI olarak <code id="outlookRedirectUri"></code> adresini ekleyin. Client secret gerekmez.</small>
+              </details>
+              <details id="googleCalendarSettings" class="outlook-calendar-settings hidden">
+                <summary>Google bağlantı bilgisi</summary>
+                <div class="google-calendar-settings-copy">
+                  <strong id="googleCalendarClientState">Google OAuth Client ID kontrol ediliyor…</strong>
+                  <small>Google Takvim, ana menüdeki Google Drive ayarlarında kayıtlı OAuth Client ID’yi kullanır. Google Cloud projenizde Calendar API etkin olmalıdır.</small>
+                </div>
+              </details>
+            </div>
+            <p id="outlookCalendarStatus" class="outlook-calendar-status" role="status" aria-live="polite">Takvim sağlayıcınızı seçip hesabınızla bağlanın.</p>
+            <div id="outlookCalendarEmpty" class="dashboard-empty">Bu tarih aralığında etkinlik bulunmuyor.</div>
+            <div id="outlookCalendarList" class="outlook-calendar-list" aria-live="polite"></div>
+          </section>
 
-        <section class="home-kpi-grid" aria-label="Haftalık özet">
-          <article class="home-kpi-card home-kpi-primary">
-            <span>Bu haftaki efor</span>
-            <strong id="homeWeeklyHours">0 sa</strong>
-            <small id="homeWeeklyGoal">40 saatlik hedefin %0’ı</small>
-          </article>
-          <article class="home-kpi-card">
-            <span>Haftalık kayıt</span>
-            <strong id="homeWeeklyEntryCount">0</strong>
-            <small>Girilen efor kaydı</small>
-          </article>
-          <article class="home-kpi-card">
-            <span>Bekleyen görev</span>
-            <strong id="homePlannedTasks">0</strong>
-            <small>Henüz başlanmadı</small>
-          </article>
-          <article class="home-kpi-card">
-            <span>Devam eden görev</span>
-            <strong id="homeInProgressTasks">0</strong>
-            <small>Aktif çalışma</small>
-          </article>
-        </section>
+          <section class="panel home-quick-reminder" aria-labelledby="reminderPanelTitle">
+            <div class="panel-heading reminder-panel-heading">
+              <div><span class="eyebrow">Hızlı erişim</span><h2 id="reminderPanelTitle">Önemli Notlar ve Hatırlatmalar</h2></div>
+              <div class="reminder-panel-actions">
+                <strong id="reminderOpenCount" class="task-count-badge">0 aktif</strong>
+                <button id="openReminderModal" class="button primary" type="button">+ Ekle</button>
+              </div>
+            </div>
+            <div id="reminderTickerWindow" class="reminder-ticker-window">
+              <div id="reminderEmptyState" class="dashboard-empty">Henüz önemli bir not veya hatırlatma eklenmedi.</div>
+              <div id="reminderList" class="reminder-list" aria-live="polite"></div>
+            </div>
+          </section>
+        </div>
 
         <div class="home-dashboard-grid">
           <section class="panel dashboard-panel weekly-chart-panel" aria-labelledby="weeklyEffortTitle">
@@ -482,7 +522,7 @@
                   <summary>Kolonlar</summary>
                   <div class="jira-column-popover">
                     <strong>Gösterilecek kolonlar</strong>
-                    <small>Başlıkları sürükleyerek sıralayın; kenarlarından tutarak genişliği değiştirin.</small>
+                    <small>Kolonlar her açılışta içeriğe otomatik sığar; başlıkları sürükleyerek sıralayabilir veya kenarlarından tutarak genişliği değiştirebilirsiniz.</small>
                     <div id="jiraColumnOptions" class="jira-column-options"></div>
                     <div class="jira-column-actions"><button id="autoFitJiraColumns" class="button secondary" type="button">İçeriğe sığdır</button><button id="resetJiraColumns" class="button secondary" type="button">Sıfırla</button></div>
                   </div>
@@ -490,7 +530,7 @@
                 <strong id="jiraCountBadge" class="task-count-badge">0 madde</strong>
               </div>
             </div>
-            <p id="jiraColumnStatus" class="jira-column-status" role="status" aria-live="polite">Kolon başlıklarını sürükleyebilir ve genişliklerini değiştirebilirsiniz.</p>
+            <p id="jiraColumnStatus" class="jira-column-status" role="status" aria-live="polite">Kolonlar içeriğe otomatik sığdırılır; başlıkları sürükleyebilir ve genişliklerini değiştirebilirsiniz.</p>
             <div id="jiraEmptyState" class="empty-state"><div aria-hidden="true">⌁</div><h3>Henüz JIRA maddesi yok</h3><p>Eforları bağlamak için ilk JIRA maddesini ekleyin.</p></div>
             <div id="jiraList" class="jira-table-scroll" aria-live="polite">
               <table id="jiraIssueTable" class="jira-issue-table">

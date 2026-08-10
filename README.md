@@ -50,9 +50,21 @@ Timesheet ekranındaki **JIRA eforlarını getir** düğmesi, seçili tarih aral
 
 GitHub Pages yalnızca statik frontend'i barındırır. Pages üzerinden canlı JIRA bağlantısı için `server.js` ayrıca güvenli bir Node.js barındırma ortamına kurulmalı ve ekrandaki **JIRA backend adresi** bu HTTPS servisine yönlendirilmelidir.
 
-## Outlook Takvim entegrasyonu
+## Google ve Outlook Takvim entegrasyonu
 
-Ana sayfadaki Outlook Takvim alanı, Microsoft Graph üzerinden oturum açan kullanıcının yaklaşan etkinliklerini salt okunur olarak gösterir. Uygulama yalnızca `Calendars.ReadBasic` iznini ister; istemci sırrı kullanılmaz ve takvim verileri yerel kayıtlara kopyalanmaz.
+Ana sayfadaki Takvim alanında **Google Takvim** veya **Outlook** seçilebilir. Etkinlikler yalnızca görüntülenir; yerel kayıtlara ya da Drive yedeğine kopyalanmaz. Google için `calendar.events.readonly`, Outlook için `Calendars.ReadBasic` izni kullanılır ve tarayıcı kodunda client secret tutulmaz.
+
+### Google Takvim
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) üzerinden kullandığınız projede **Google Calendar API** hizmetini etkinleştirin.
+2. Mevcut **Web application** OAuth Client ID’nizin **Authorized JavaScript origins** listesine yerel adresi (`http://localhost:8080`) ve GitHub Pages adresinizi ekleyin.
+3. OAuth izin ekranı test modundaysa Google hesabınızı test kullanıcısı olarak ekleyin.
+4. OAuth Client ID’yi uygulamadaki **Google Drive → Ayarlar** alanına kaydedin. Takvim aynı Client ID’yi kullanır ancak ayrıca yalnızca takvim etkinliklerini okuma izni ister.
+5. Ana sayfada **Google Takvim** seçiliyken **Google’a bağlan** düğmesine basın ve izni onaylayın.
+
+Google erişim belirteci yalnızca açık sayfada bellekte tutulur. Sayfa yenilendiğinde güvenlik gereği Google Takvim’e yeniden bağlanmanız istenebilir; Drive bağlantısının izni iptal edilmez.
+
+### Outlook
 
 1. [Microsoft Entra yönetim merkezinde](https://entra.microsoft.com/) **App registrations → New registration** ile bir uygulama oluşturun.
 2. **Authentication → Add a platform → Single-page application** bölümünde uygulamadaki Outlook ayarlarında gösterilen yönlendirme adresini aynen ekleyin. Yerel kullanım için bu adres genellikle `http://localhost:8080/`, GitHub Pages için ise tam Pages adresidir.
