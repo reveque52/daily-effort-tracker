@@ -51,8 +51,11 @@
   let jiraRequestTransitionPending = false;
   const APP_EDIT_SESSION_KEY = "daily-effort-tracker.edit-mode";
   const APP_DIRTY_KEY = "daily-effort-tracker.drive-dirty";
+  const SUPABASE_LAST_SYNC_KEY = "daily-effort-tracker.supabase-last-sync";
   let appEditMode = sessionStorage.getItem(APP_EDIT_SESSION_KEY) === "true";
   let appEditDirty = localStorage.getItem(APP_DIRTY_KEY) === "true";
+  let supabaseSession = null;
+  let supabaseBusy = false;
   const JIRA_AUTO_WORKLOG_KEY = "daily-effort-tracker.jira-auto-worklog";
   const JIRA_TABLE_LAYOUT_KEY = "daily-effort-tracker.jira-table-layout";
   let jiraAutoFitFrame = 0;
@@ -897,14 +900,18 @@
       ["in_progress", "Devam ediyor", inProgressTasks.length],
       ["completed", "Tamamlandı", completedTasks.length]
     ].forEach(([status, label, count]) => {
-      const item = document.createElement("div");
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "task-chart-legend-item";
       item.dataset.status = status;
+      item.setAttribute("aria-label", `${label}: ${count} görev. Bu görevleri aç`);
       const dot = document.createElement("i");
       const text = document.createElement("span");
       text.textContent = label;
       const total = document.createElement("strong");
       total.textContent = String(count);
       item.append(dot, text, total);
+      item.addEventListener("click", () => openTasksByStatus(status));
       legend.append(item);
     });
     taskChart.append(donut, legend);
@@ -1465,6 +1472,15 @@
       button.setAttribute("aria-selected", String(active));
     });
     document.querySelectorAll(".task-subview").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
+  }
+
+  function openTasksByStatus(status) {
+    if (!["planned", "in_progress", "completed"].includes(status)) return;
+    $("#taskTypeFilter").value = "";
+    $("#taskStatusFilter").value = status;
+    renderTasks();
+    activateMainView("tasksView");
+    activateTaskSubview("taskReportView");
   }
 
   function showTaskDetail(task) {
@@ -2045,7 +2061,11 @@
     tasks = window.TaskStore.list();
     populateTaskParentOptions(taskFields.id.value, taskFields.parentTaskId.value);
     const selectedTaskType = $("#taskTypeFilter").value;
-    const reportTasks = tasksForType(tasks, selectedTaskType);
+    const selectedTaskStatus = $("#taskStatusFilter").value;
+    const typeFilteredTasks = tasksForType(tasks, selectedTaskType);
+    const reportTasks = selectedTaskStatus
+      ? typeFilteredTasks.filter((task) => task.status === selectedTaskStatus)
+      : typeFilteredTasks;
     populateTaskAssigneeOptions(taskFields.assignee.value);
     const openTasks = tasks.filter((task) => task.status !== "completed");
     $("#taskTabCount").textContent = String(openTasks.length);
@@ -2076,7 +2096,9 @@
         groupToggle.querySelector(`.task-type-priority-count[data-priority="${priorityName}"] strong`).textContent = String(count);
       });
       groupToggle.addEventListener("click", () => {
-        window.location.href = `task-type-report.html?type=${encodeURIComponent(group.taskType)}`;
+        const params = new URLSearchParams({ type: group.taskType });
+        if (selectedTaskStatus) params.set("status", selectedTaskStatus);
+        window.location.href = `task-type-report.html?${params}`;
       });
       list.append(groupRow);
     });
@@ -2979,6 +3001,11 @@
     const params = new URLSearchParams(window.location.search);
     const editTaskId = params.get("editTask");
     const parentTaskId = params.get("parentTask");
+    const taskStatus = params.get("taskStatus") || "";
+    if (["planned", "in_progress", "completed"].includes(taskStatus)) {
+      $("#taskStatusFilter").value = taskStatus;
+      renderTasks();
+    }
     if (params.get("view") !== "tasks" && !editTaskId && !parentTaskId) return;
     activateMainView("tasksView");
     if (editTaskId) {
@@ -3078,6 +3105,148 @@
     };
   }
 
+  function bundleRecordCount(bundle = backupBundle()) {
+    return ["entries", "tasks", "people", "jiraItems", "reminders"]
+      .reduce((total, key) => total + (Array.isArray(bundle[key]) ? bundle[key].length : 0), 0);
+  }
+
+  function setSupabaseStatus(message, state = "neutral") {
+    const status = $("#supabaseStatus");
+    status.textContent = message;
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-success", state === "success");
+    $("#supabaseConnectionBadge").dataset.state = state === "error" ? "error" : (supabaseSession ? "signed-in" : "signed-out");
+    $("#supabaseHeaderMenu").classList.toggle("is-error", state === "error");
+  }
+
+  function setSupabaseBusy(busy) {
+    supabaseBusy = Boolean(busy);
+    ["#supabaseEmail", "#supabasePassword", "#supabaseSignIn", "#supabaseSignUp", "#supabaseForgotPassword", "#supabaseNewPassword", "#supabasePull", "#supabasePush", "#supabaseSignOut"]
+      .forEach((selector) => { const element = $(selector); if (element) element.disabled = supabaseBusy; });
+    $("#supabaseHeaderMenu").classList.toggle("is-busy", supabaseBusy);
+  }
+
+  function updateSupabaseLastSync(value) {
+    const syncValue = value || localStorage.getItem(SUPABASE_LAST_SYNC_KEY);
+    $("#supabaseLastSync").textContent = syncValue
+      ? `Son Supabase senkronizasyonu: ${dateTimeFormatter.format(new Date(syncValue))}`
+      : "Henüz Supabase senkronizasyonu yapılmadı.";
+  }
+
+  async function refreshSupabaseAccount(session = supabaseSession) {
+    supabaseSession = session || null;
+    const signedIn = Boolean(supabaseSession?.user);
+    $("#supabaseAuthForm").classList.toggle("hidden", signedIn);
+    $("#supabaseSignedInPanel").classList.toggle("hidden", !signedIn);
+    $("#supabaseHeaderMenu").classList.toggle("is-connected", signedIn);
+    $("#headerSupabaseMenuBadge").classList.add("hidden");
+    $("#supabaseConnectionBadge").dataset.state = signedIn ? "signed-in" : "signed-out";
+    $("#supabaseConnectionBadge").textContent = signedIn ? "Bağlı" : "Bağlı değil";
+    $("#headerSupabaseMenuLabel").textContent = signedIn ? "Supabase bağlı" : "Giriş gerekli";
+    updateSupabaseLastSync();
+
+    if (!signedIn) {
+      $("#supabaseUserEmail").textContent = "-";
+      $("#supabaseOrganizationName").textContent = "-";
+      setSupabaseStatus("Verilerinizi cihazlar arasında kullanmak için giriş yapın.");
+      return;
+    }
+
+    $("#supabaseUserEmail").textContent = supabaseSession.user.email || "Supabase kullanıcısı";
+    try {
+      const summary = await window.SupabaseCloud.getRemoteSummary();
+      $("#supabaseOrganizationName").textContent = summary.context.organizationName;
+      const localCount = bundleRecordCount();
+      if (!summary.total && localCount) {
+        setSupabaseStatus(`Supabase boş. Bu cihazdaki ${localCount} kayıt ilk aktarım için hazır.`, "success");
+      } else if (summary.total) {
+        setSupabaseStatus(`Supabase’de ${summary.total} kayıt bulundu. Yükle veya yerel değişikliklerinizi gönder.`, "success");
+        if (summary.lastModifiedAt) updateSupabaseLastSync(summary.lastModifiedAt);
+      } else {
+        setSupabaseStatus("Hesabınız hazır. İlk kaydınız Kaydet ile Supabase’e gönderilecek.", "success");
+      }
+    } catch (error) {
+      setSupabaseStatus(`Supabase çalışma alanı alınamadı: ${error.message}`, "error");
+    }
+  }
+
+  function replaceLocalBundle(bundle) {
+    const entryResult = getStore().replaceAll(bundle.entries || []);
+    if (!entryResult.valid) throw new Error(Object.values(entryResult.errors || {}).join(" ") || "Efor verileri doğrulanamadı.");
+    const taskResult = window.TaskStore.replaceAll(bundle.tasks || []);
+    if (!taskResult.valid) throw new Error(Object.values(taskResult.errors || {}).join(" ") || "Görev verileri doğrulanamadı.");
+    const peopleResult = window.PeopleStore.replaceAll(bundle.people || []);
+    if (!peopleResult.valid) throw new Error(Object.values(peopleResult.errors || {}).join(" ") || "Kişi verileri doğrulanamadı.");
+    const jiraResult = window.JiraStore.replaceAll(bundle.jiraItems || []);
+    if (!jiraResult.valid) throw new Error(Object.values(jiraResult.errors || {}).join(" ") || "JIRA verileri doğrulanamadı.");
+    const reminderResult = window.ReminderStore.replaceAll(bundle.reminders || []);
+    if (!reminderResult.valid) throw new Error(Object.values(reminderResult.errors || {}).join(" ") || "Hatırlatma verileri doğrulanamadı.");
+    window.TaskStore.ensureHierarchy();
+    renderJiraItems();
+    render();
+    renderPeople();
+    renderTasks();
+  }
+
+  async function pullFromSupabase() {
+    const localCount = bundleRecordCount();
+    if (localCount && !confirm(`Supabase’deki veriler bu cihazdaki ${localCount} yerel kaydın yerine yüklensin mi?`)) return false;
+    setSupabaseStatus("Supabase verileri yükleniyor…");
+    const bundle = await window.SupabaseCloud.pullBundle();
+    replaceLocalBundle(bundle);
+    const syncedAt = bundle.lastModifiedAt || new Date().toISOString();
+    localStorage.setItem(SUPABASE_LAST_SYNC_KEY, syncedAt);
+    appEditDirty = false;
+    localStorage.removeItem(APP_DIRTY_KEY);
+    updateAppEditModeUi();
+    updateSupabaseLastSync(syncedAt);
+    setSupabaseStatus(`${bundleRecordCount(bundle)} kayıt Supabase’den bu cihaza yüklendi.`, "success");
+    return true;
+  }
+
+  async function pushToSupabase({ confirmOverwrite = true } = {}) {
+    const summary = await window.SupabaseCloud.getRemoteSummary();
+    const localCount = bundleRecordCount();
+    if (confirmOverwrite && summary.total && !confirm(`Bu cihazdaki ${localCount} kayıt Supabase’deki ${summary.total} kaydın güncel sürümü olarak kaydedilsin mi?`)) return false;
+    setSupabaseStatus("Yerel veriler Supabase’e gönderiliyor…");
+    const result = await window.SupabaseCloud.pushBundle(backupBundle());
+    localStorage.setItem(SUPABASE_LAST_SYNC_KEY, result.syncedAt);
+    updateSupabaseLastSync(result.syncedAt);
+    setSupabaseStatus(`${result.saved} kayıt Supabase’e kaydedildi${result.removed ? `, ${result.removed} eski kayıt kaldırıldı` : ""}${result.skipped ? `, başka kullanıcıya ait ${result.skipped} kayıt değiştirilmedi` : ""}.`, "success");
+    return true;
+  }
+
+  async function saveAppChangesToCloud() {
+    if (!supabaseSession?.user) {
+      $("#supabaseHeaderMenu").open = true;
+      setSupabaseStatus("Kaydetmek için önce Supabase hesabınıza giriş yapın.", "error");
+      return false;
+    }
+    try {
+      const saved = await pushToSupabase({ confirmOverwrite: false });
+      if (!saved) return false;
+      appEditDirty = false;
+      localStorage.removeItem(APP_DIRTY_KEY);
+      setAppEditMode(false);
+      $("#appEditMenu").open = false;
+      return true;
+    } catch (error) {
+      setSupabaseStatus(`Supabase kaydı yapılamadı: ${error.message}`, "error");
+      updateAppEditModeUi();
+      return false;
+    }
+  }
+
+  async function runSupabaseAction(action) {
+    if (supabaseBusy) return;
+    setSupabaseBusy(true);
+    try { return await action(); }
+    catch (error) {
+      setSupabaseStatus(error.message || "Supabase işlemi tamamlanamadı.", "error");
+      return false;
+    } finally { setSupabaseBusy(false); updateAppEditModeUi(); }
+  }
+
   const EDIT_ACTION_SELECTOR = [
     "[data-task-tab=\"taskCreateView\"]", "#openReminderModal", "#addTimesheetEffort", "#syncJiraIssues", "#syncJiraWorklogs", "#syncJiraUsers",
     ".edit-button", ".delete-button", ".jira-edit-button", ".jira-delete-button", ".reminder-complete-button",
@@ -3090,8 +3259,8 @@
     document.body.classList.toggle("app-has-unsaved-changes", appEditDirty);
     $("#appEditModeLabel").textContent = appEditMode ? "Düzenleme modu" : "Görüntüleme modu";
     $("#appEditModeStatus").textContent = appEditDirty
-      ? (appEditMode ? "Yerel değişiklikler Drive’a gönderilmeyi bekliyor." : "Drive’a gönderilmemiş yerel değişiklikler var.")
-      : (appEditMode ? "Değişiklik yapabilirsiniz. Kaydet yalnızca Drive’a gönderir." : "Değişiklik yapmak için Düzenle’ye basın.");
+      ? (appEditMode ? "Yerel değişiklikler Supabase’e gönderilmeyi bekliyor." : "Supabase’e gönderilmemiş yerel değişiklikler var.")
+      : (appEditMode ? "Değişiklik yapabilirsiniz. Kaydet verileri Supabase’e gönderir." : "Değişiklik yapmak için Düzenle’ye basın.");
     $("#enterAppEditMode").textContent = appEditMode ? "Düzenleme açık" : "Düzenle";
     $("#enterAppEditMode").disabled = appEditMode;
     $("#saveAppChanges").disabled = !appEditDirty;
@@ -3128,7 +3297,7 @@
     appEditDirty = true;
     localStorage.setItem(APP_DIRTY_KEY, "true");
     updateAppEditModeUi();
-    setDriveStatus("Değişiklik yerel olarak kaydedildi. Drive’a göndermek için Kaydet’e basın.");
+    setSupabaseStatus("Değişiklik yerel olarak kaydedildi. Supabase’e göndermek için Kaydet’e basın.");
   }
 
   async function saveAppChangesToDrive(message = "Değişiklikler Google Drive’a kaydedildi.") {
@@ -3151,7 +3320,7 @@
   }
 
   function setDriveBusy(busy) {
-    ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive", "#initialRestoreButton", "#saveAppChanges"].forEach((selector) => {
+    ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive", "#initialRestoreButton"].forEach((selector) => {
       $(selector).disabled = busy;
     });
     $("#driveHeaderMenu").classList.toggle("is-busy", busy);
@@ -3593,6 +3762,9 @@
   $("#taskTypeFilter").addEventListener("change", (event) => {
     renderTasks();
   });
+  $("#taskStatusFilter").addEventListener("change", () => {
+    renderTasks();
+  });
 
   $("#modalEntrySelect").addEventListener("change", (event) => loadEffortModalEntry(event.target.value));
   const closeEffortModal = () => $("#effortEditModal").close();
@@ -3734,7 +3906,52 @@
     setAppEditMode(true);
     $("#appEditMenu").open = false;
   });
-  $("#saveAppChanges").addEventListener("click", () => runDriveAction(() => saveAppChangesToDrive()));
+  $("#saveAppChanges").addEventListener("click", () => runSupabaseAction(saveAppChangesToCloud));
+
+  $("#supabaseAuthForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    runSupabaseAction(async () => {
+      const result = await window.SupabaseCloud.signIn($("#supabaseEmail").value, $("#supabasePassword").value);
+      await refreshSupabaseAccount(result.session);
+      setSupabaseStatus("Supabase hesabınıza giriş yapıldı.", "success");
+    });
+  });
+
+  $("#supabaseSignUp").addEventListener("click", () => runSupabaseAction(async () => {
+    if (!$("#supabaseAuthForm").reportValidity()) return;
+    const result = await window.SupabaseCloud.signUp($("#supabaseEmail").value, $("#supabasePassword").value);
+    if (result.session) {
+      await refreshSupabaseAccount(result.session);
+      setSupabaseStatus("Hesabınız oluşturuldu ve Supabase’e bağlandı.", "success");
+    } else {
+      $("#headerSupabaseMenuBadge").classList.remove("hidden");
+      setSupabaseStatus("Doğrulama e-postası gönderildi. E-postadaki bağlantıya tıklayıp bu sayfaya dönün.", "success");
+    }
+  }));
+
+  $("#supabaseForgotPassword").addEventListener("click", () => runSupabaseAction(async () => {
+    const emailInput = $("#supabaseEmail");
+    if (!emailInput.reportValidity()) return;
+    await window.SupabaseCloud.sendPasswordReset(emailInput.value);
+    setSupabaseStatus("Şifre yenileme bağlantısı e-posta adresinize gönderildi.", "success");
+  }));
+
+  $("#supabaseRecoveryForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    runSupabaseAction(async () => {
+      await window.SupabaseCloud.updatePassword($("#supabaseNewPassword").value);
+      $("#supabaseRecoveryForm").classList.add("hidden");
+      $("#supabaseNewPassword").value = "";
+      setSupabaseStatus("Şifreniz güncellendi.", "success");
+    });
+  });
+
+  $("#supabasePull").addEventListener("click", () => runSupabaseAction(pullFromSupabase));
+  $("#supabasePush").addEventListener("click", () => runSupabaseAction(() => pushToSupabase({ confirmOverwrite: true })));
+  $("#supabaseSignOut").addEventListener("click", () => runSupabaseAction(async () => {
+    await window.SupabaseCloud.signOut();
+    await refreshSupabaseAccount(null);
+  }));
 
   document.addEventListener("click", (event) => {
     if (appEditMode || !event.target.closest(EDIT_ACTION_SELECTOR)) return;
@@ -3774,6 +3991,23 @@
       if (!menu.contains(event.target)) menu.open = false;
     });
   });
+
+  try {
+    window.SupabaseCloud.onAuthStateChange((event, session) => {
+      supabaseSession = session || null;
+      if (event === "PASSWORD_RECOVERY") {
+        $("#supabaseHeaderMenu").open = true;
+        $("#supabaseRecoveryForm").classList.remove("hidden");
+        setSupabaseStatus("Yeni şifrenizi belirleyin.", "success");
+      }
+      refreshSupabaseAccount(session);
+    });
+    window.SupabaseCloud.getSession()
+      .then((session) => refreshSupabaseAccount(session))
+      .catch((error) => setSupabaseStatus(`Supabase oturumu alınamadı: ${error.message}`, "error"));
+  } catch (error) {
+    setSupabaseStatus(`Supabase başlatılamadı: ${error.message}`, "error");
+  }
 
   $("#todayLabel").textContent = dateFormatter.format(new Date());
   $("#googleClientId").value = window.DriveSync?.getClientId() || "";

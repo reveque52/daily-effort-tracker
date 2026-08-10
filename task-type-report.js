@@ -40,8 +40,10 @@
     return ordered;
   }
 
-  function detailUrl(taskId, taskType) {
-    return `task-detail.html?id=${encodeURIComponent(taskId)}&fromType=${encodeURIComponent(taskType)}`;
+  function detailUrl(taskId, taskType, status = "") {
+    const params = new URLSearchParams({ id: taskId, fromType: taskType });
+    if (status) params.set("fromStatus", status);
+    return `task-detail.html?${params}`;
   }
 
   function createCell(text, className = "") {
@@ -52,23 +54,30 @@
   }
 
   function renderTaskTypeReport() {
-    const taskType = new URLSearchParams(window.location.search).get("type") || "";
+    const params = new URLSearchParams(window.location.search);
+    const taskType = params.get("type") || "";
+    const requestedStatus = params.get("status") || "";
+    const selectedStatus = ["planned", "in_progress", "completed"].includes(requestedStatus) ? requestedStatus : "";
     if (!window.TaskStore.TASK_TYPES.includes(taskType)) {
       $("#taskTypeReportError").classList.remove("hidden");
       return;
     }
 
     const allTasks = window.TaskStore.list();
-    const reportTasks = allTasks.filter((task) => (task.taskType || "standard") === taskType);
+    const typeTasks = allTasks.filter((task) => (task.taskType || "standard") === taskType);
+    const reportTasks = selectedStatus ? typeTasks.filter((task) => task.status === selectedStatus) : typeTasks;
     const typeLabel = taskTypeLabel(taskType);
     document.title = `${typeLabel} · Görev Tipi Raporu`;
     $("#taskTypeReportTitle").textContent = typeLabel;
-    $("#taskTypeReportSubtitle").textContent = `${reportTasks.length} madde için detaylı görev raporu`;
+    $("#taskTypeReportSubtitle").textContent = selectedStatus
+      ? `${statusLabel(selectedStatus)} durumundaki ${reportTasks.length} madde için detaylı görev raporu`
+      : `${reportTasks.length} madde için detaylı görev raporu`;
+    if (selectedStatus) $("#taskTypeReportBackLink").href = `index.html?view=tasks&taskStatus=${encodeURIComponent(selectedStatus)}`;
     $("#taskTypeReportContent").classList.remove("hidden");
-    $("#taskTypeReportTotal").textContent = String(reportTasks.length);
-    $("#taskTypeReportOpen").textContent = String(reportTasks.filter((task) => task.status !== "completed").length);
-    $("#taskTypeReportInProgress").textContent = String(reportTasks.filter((task) => task.status === "in_progress").length);
-    $("#taskTypeReportCompleted").textContent = String(reportTasks.filter((task) => task.status === "completed").length);
+    $("#taskTypeReportTotal").textContent = String(typeTasks.length);
+    $("#taskTypeReportOpen").textContent = String(typeTasks.filter((task) => task.status !== "completed").length);
+    $("#taskTypeReportInProgress").textContent = String(typeTasks.filter((task) => task.status === "in_progress").length);
+    $("#taskTypeReportCompleted").textContent = String(typeTasks.filter((task) => task.status === "completed").length);
     $("#taskTypeReportEmpty").classList.toggle("hidden", reportTasks.length > 0);
     $(".task-type-report-scroll").classList.toggle("hidden", reportTasks.length === 0);
 
@@ -87,7 +96,7 @@
       const taskCell = document.createElement("td");
       const taskLink = document.createElement("a");
       taskLink.className = "task-type-report-task-link";
-      taskLink.href = detailUrl(task.id, taskType);
+      taskLink.href = detailUrl(task.id, taskType, selectedStatus);
       taskLink.style.paddingLeft = `${Math.min(depth, 4) * 1.05}rem`;
       taskLink.textContent = `${depth ? "↳ " : ""}${task.title}`;
       taskCell.append(taskLink);
@@ -97,7 +106,7 @@
       if (parent) {
         const parentLink = document.createElement("a");
         parentLink.className = "task-type-report-parent-link";
-        parentLink.href = detailUrl(parent.id, taskType);
+        parentLink.href = detailUrl(parent.id, taskType, selectedStatus);
         parentLink.textContent = parent.title;
         parentCell.append(parentLink);
       } else parentCell.textContent = "—";
@@ -127,11 +136,11 @@
       actions.className = "task-type-report-actions";
       const detailLink = document.createElement("a");
       detailLink.className = "button secondary";
-      detailLink.href = detailUrl(task.id, taskType);
+      detailLink.href = detailUrl(task.id, taskType, selectedStatus);
       detailLink.textContent = "Detay";
       const reviseLink = document.createElement("a");
       reviseLink.className = "button primary";
-      reviseLink.href = `index.html?view=tasks&editTask=${encodeURIComponent(task.id)}`;
+      reviseLink.href = `index.html?view=tasks&editTask=${encodeURIComponent(task.id)}${selectedStatus ? `&taskStatus=${encodeURIComponent(selectedStatus)}` : ""}`;
       reviseLink.textContent = "Revize";
       actions.append(detailLink, reviseLink);
       actionsCell.append(actions);

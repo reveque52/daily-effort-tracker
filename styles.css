@@ -45,6 +45,9 @@ button { cursor: pointer; }
 .header-drive-menu.is-error .header-menu-icon { color: #fff; background: var(--danger); }
 .header-drive-menu.needs-restore .header-menu-icon { color: #fff; background: #d29b19; }
 .header-drive-menu.is-busy .header-menu-icon { color: #fff; background: #075ea8; }
+.header-supabase-menu.is-connected .header-menu-icon { color: #fff; background: #1f9d74; }
+.header-supabase-menu.is-error .header-menu-icon { color: #fff; background: var(--danger); }
+.header-supabase-menu.is-busy .header-menu-icon { color: #fff; background: #075ea8; }
 .app-edit-mode .header-mode-icon { color: #fff; background: #756af0; }
 .app-has-unsaved-changes .header-mode-icon { color: #fff; background: #d29b19; }
 .header-menu-popover { position: absolute; z-index: 60; top: calc(100% + .6rem); right: 0; width: min(590px, calc(100vw - 2rem)); overflow: visible; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: #fff; box-shadow: 0 24px 65px rgba(24,22,57,.28); }
@@ -53,6 +56,30 @@ button { cursor: pointer; }
 .header-menu-popover .app-edit-toolbar { margin: 0; border: 0; box-shadow: none; }
 .header-menu-popover .drive-toolbar { margin: 0; border: 0; box-shadow: none; }
 .header-menu-popover .restore-prompt { margin: 0 .8rem .8rem; box-shadow: none; }
+.supabase-header-popover { width: min(540px, calc(100vw - 2rem)); }
+.supabase-account-panel { display: grid; gap: .85rem; padding: 1rem; }
+.supabase-account-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.supabase-account-heading h2 { margin: .15rem 0 0; font-size: 1rem; }
+.supabase-connection-badge { flex: 0 0 auto; padding: .3rem .55rem; border-radius: 999px; color: #765414; background: #fff1cc; font-size: .67rem; font-weight: 850; }
+.supabase-connection-badge[data-state="signed-in"] { color: #137052; background: #e1f5ed; }
+.supabase-connection-badge[data-state="error"] { color: var(--danger); background: #fff0f2; }
+.supabase-status { margin: 0; border-radius: 9px; padding: .55rem .65rem; color: var(--muted); background: #f6f7fb; font-size: .72rem; line-height: 1.45; }
+.supabase-status.is-error { color: var(--danger); background: #fff0f2; }
+.supabase-status.is-success { color: #137052; background: #e1f5ed; }
+.supabase-auth-form, .supabase-recovery-form { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+.supabase-auth-form label, .supabase-recovery-form label { display: grid; gap: .3rem; color: var(--muted); font-size: .68rem; font-weight: 750; }
+.supabase-auth-form input, .supabase-recovery-form input { min-width: 0; border: 1px solid var(--line); border-radius: 9px; padding: .62rem .7rem; color: var(--ink); background: #fff; }
+.supabase-auth-actions, .supabase-sync-actions { display: flex; grid-column: 1 / -1; align-items: center; flex-wrap: wrap; gap: .45rem; }
+.supabase-auth-actions .button, .supabase-sync-actions .button, .supabase-recovery-form .button { padding: .55rem .7rem; font-size: .7rem; }
+.button.link-button { padding-inline: .45rem; color: var(--brand); background: transparent; }
+.button.link-button:hover { background: var(--brand-soft); }
+.supabase-recovery-form label { grid-column: 1 / -1; }
+.supabase-signed-in-panel { display: grid; gap: .75rem; }
+.supabase-user-summary { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+.supabase-user-summary > div { display: grid; min-width: 0; gap: .15rem; border: 1px solid var(--line); border-radius: 10px; padding: .6rem .7rem; }
+.supabase-user-summary small { color: var(--muted); font-size: .62rem; }
+.supabase-user-summary strong { overflow: hidden; font-size: .74rem; text-overflow: ellipsis; white-space: nowrap; }
+#supabaseLastSync { margin: 0; color: var(--muted); font-size: .7rem; }
 
 main { width: min(1240px, calc(100% - 3rem)); margin: -1rem auto 3rem; position: relative; }
 .main-menu-bar { position: relative; z-index: 25; display: flex; align-items: stretch; justify-content: space-between; gap: .45rem; margin-bottom: .7rem; }
@@ -136,7 +163,9 @@ body:not(.app-edit-mode) .jira-request-card { cursor: default; }
 .task-donut strong { font-size: 1.75rem; line-height: 1; }
 .task-donut small { margin-top: .2rem; color: var(--muted); font-size: .65rem; }
 .task-chart-legend { display: grid; gap: .7rem; min-width: 130px; }
-.task-chart-legend > div { display: grid; grid-template-columns: 9px 1fr auto; align-items: center; gap: .5rem; }
+.task-chart-legend-item { display: grid; grid-template-columns: 9px 1fr auto; align-items: center; gap: .5rem; width: 100%; border: 0; border-radius: 8px; padding: .38rem .45rem; color: inherit; background: transparent; text-align: left; cursor: pointer; transition: background .15s ease, transform .15s ease; }
+.task-chart-legend-item:hover { background: #f3f2ff; transform: translateX(2px); }
+.task-chart-legend-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .task-chart-legend i { width: 9px; height: 9px; border-radius: 50%; background: #f2b84b; }
 .task-chart-legend [data-status="in_progress"] i { background: var(--brand); }
 .task-chart-legend [data-status="completed"] i { background: #1f9d74; }
@@ -878,11 +907,14 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
   .header-menu > summary { width: 100%; min-width: 0; grid-template-columns: auto minmax(0, 1fr); padding: .52rem .6rem; }
   .header-menu-badge { position: absolute; top: -.3rem; right: -.3rem; width: 11px; height: 11px; overflow: hidden; padding: 0; border: 2px solid #fff; color: transparent; font-size: 0; }
   .header-mode-menu .header-menu-popover { right: auto; left: 0; }
+  .header-supabase-menu .header-menu-popover { right: 0; left: auto; }
   .header-drive-menu .header-menu-popover { right: 0; left: auto; }
   .header-menu-popover { width: calc(100vw - 2rem); max-height: calc(100vh - 8rem); overflow-y: auto; }
   main { width: calc(100% - 1rem); margin-top: -.65rem; }
   .app-edit-toolbar { align-items: stretch; flex-direction: column; }
   .app-edit-actions { display: grid; grid-template-columns: 1fr 1.6fr; }
+  .supabase-auth-form, .supabase-recovery-form, .supabase-user-summary { grid-template-columns: 1fr; }
+  .supabase-auth-actions, .supabase-recovery-form label { grid-column: 1; }
   .home-summary-panel { padding: 1rem; }
   .home-intro { align-items: stretch; flex-direction: column; }
   .home-kpi-grid { gap: .5rem; }

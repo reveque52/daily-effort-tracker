@@ -57,6 +57,8 @@
     const params = new URLSearchParams(window.location.search);
     const taskId = params.get("id") || "";
     const fromType = params.get("fromType") || "";
+    const requestedStatus = params.get("fromStatus") || "";
+    const fromStatus = ["planned", "in_progress", "completed"].includes(requestedStatus) ? requestedStatus : "";
     const task = window.TaskStore.get(taskId);
     if (!task) {
       $("#taskDetailPageError").classList.remove("hidden");
@@ -68,7 +70,7 @@
     const subtasks = tasks.filter((item) => item.parentTaskId === task.id);
     document.title = `${task.title} · Görev Detayı`;
     if (window.TaskStore.TASK_TYPES.includes(fromType)) {
-      $("#taskDetailBackLink").href = `task-type-report.html?type=${encodeURIComponent(fromType)}`;
+      $("#taskDetailBackLink").href = `task-type-report.html?type=${encodeURIComponent(fromType)}${fromStatus ? `&status=${encodeURIComponent(fromStatus)}` : ""}`;
       $("#taskDetailBackLink").textContent = `← ${taskTypeLabel(fromType)} raporuna dön`;
     }
     $("#taskDetailPageContent").classList.remove("hidden");

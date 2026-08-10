@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260810-4">
+    <link rel="stylesheet" href="styles.css?v=20260810-6">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="data-store.js?v=20260807-22" defer></script>
     <script src="tasks-store.js?v=20260806-20" defer></script>
@@ -18,7 +18,9 @@
     <script src="vendor/msal-browser.min.js?v=5.18.0" defer></script>
     <script src="outlook-calendar.js?v=20260807-1" defer></script>
     <script src="google-calendar.js?v=20260810-1" defer></script>
-    <script src="app.js?v=20260810-4" defer></script>
+    <script src="vendor/supabase.js?v=2.112.2" defer></script>
+    <script src="supabase-cloud.js?v=20260810-1" defer></script>
+    <script src="app.js?v=20260810-6" defer></script>
   </head>
   <body>
     <header class="page-header">
@@ -55,7 +57,56 @@
             <div class="header-menu-popover">
               <section id="appEditToolbar" class="app-edit-toolbar" aria-label="Uygulama düzenleme modu">
                 <div class="app-edit-status"><span id="appEditModeDot" aria-hidden="true"></span><div><strong id="appEditModeLabel">Görüntüleme modu</strong><p id="appEditModeStatus" role="status" aria-live="polite">Değişiklik yapmak için Düzenle’ye basın.</p></div></div>
-                <div class="app-edit-actions"><button id="enterAppEditMode" class="button secondary" type="button">Düzenle</button><button id="saveAppChanges" class="button primary" type="button" disabled>Kaydet ve Drive’a gönder</button></div>
+                <div class="app-edit-actions"><button id="enterAppEditMode" class="button secondary" type="button">Düzenle</button><button id="saveAppChanges" class="button primary" type="button" disabled>Kaydet ve Supabase’e gönder</button></div>
+              </section>
+            </div>
+          </details>
+
+          <details id="supabaseHeaderMenu" class="header-menu header-supabase-menu">
+            <summary>
+              <span class="header-menu-icon" aria-hidden="true">S</span>
+              <span class="header-menu-copy"><small>Bulut hesabı</small><strong id="headerSupabaseMenuLabel">Giriş gerekli</strong></span>
+              <span id="headerSupabaseMenuBadge" class="header-menu-badge hidden">Doğrula</span>
+            </summary>
+            <div class="header-menu-popover supabase-header-popover">
+              <section class="supabase-account-panel" aria-labelledby="supabaseAccountTitle">
+                <div class="supabase-account-heading">
+                  <div>
+                    <span class="eyebrow">Supabase</span>
+                    <h2 id="supabaseAccountTitle">Hesap ve bulut kayıtları</h2>
+                  </div>
+                  <span id="supabaseConnectionBadge" class="supabase-connection-badge" data-state="signed-out">Bağlı değil</span>
+                </div>
+
+                <p id="supabaseStatus" class="supabase-status" role="status" aria-live="polite">Verilerinizi cihazlar arasında kullanmak için giriş yapın.</p>
+
+                <form id="supabaseAuthForm" class="supabase-auth-form">
+                  <label><span>E-posta</span><input id="supabaseEmail" type="email" autocomplete="email" required placeholder="adiniz@firma.com"></label>
+                  <label><span>Şifre</span><input id="supabasePassword" type="password" autocomplete="current-password" minlength="8" required placeholder="En az 8 karakter"></label>
+                  <div class="supabase-auth-actions">
+                    <button id="supabaseSignIn" class="button primary" type="submit">Giriş yap</button>
+                    <button id="supabaseSignUp" class="button secondary" type="button">Hesap oluştur</button>
+                    <button id="supabaseForgotPassword" class="button link-button" type="button">Şifremi unuttum</button>
+                  </div>
+                </form>
+
+                <form id="supabaseRecoveryForm" class="supabase-recovery-form hidden">
+                  <label><span>Yeni şifre</span><input id="supabaseNewPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="En az 8 karakter"></label>
+                  <button class="button primary" type="submit">Yeni şifreyi kaydet</button>
+                </form>
+
+                <div id="supabaseSignedInPanel" class="supabase-signed-in-panel hidden">
+                  <div class="supabase-user-summary">
+                    <div><small>Hesap</small><strong id="supabaseUserEmail">-</strong></div>
+                    <div><small>Çalışma alanı</small><strong id="supabaseOrganizationName">-</strong></div>
+                  </div>
+                  <p id="supabaseLastSync">Henüz Supabase senkronizasyonu yapılmadı.</p>
+                  <div class="supabase-sync-actions">
+                    <button id="supabasePull" class="button secondary" type="button">Supabase’den yükle</button>
+                    <button id="supabasePush" class="button primary" type="button">Yerel verileri gönder</button>
+                    <button id="supabaseSignOut" class="button link-button" type="button">Çıkış yap</button>
+                  </div>
+                </div>
               </section>
             </div>
           </details>
@@ -389,7 +440,7 @@
             </form>
           </section>
           <section id="taskReportView" class="panel task-subview task-list-panel" aria-labelledby="taskListTitle">
-            <div class="panel-heading task-report-heading"><div><span class="eyebrow">Görev raporları</span><h2 id="taskListTitle">Yapılacak işler</h2></div><div class="task-report-tools"><label class="task-type-filter"><span>Görev tipi</span><select id="taskTypeFilter"><option value="" selected>Tüm görev tipleri</option><option value="architecture_roadmap">Architecture Roadmap</option><option value="standard">Standart görev</option><option value="meeting_organization">Toplantı organizasyonu</option><option value="management_request">Yönetim talebi</option><option value="other">Diğer</option></select></label><strong id="openTaskCount" class="task-count-badge">0 açık</strong></div></div>
+            <div class="panel-heading task-report-heading"><div><span class="eyebrow">Görev raporları</span><h2 id="taskListTitle">Yapılacak işler</h2></div><div class="task-report-tools"><label class="task-type-filter"><span>Görev tipi</span><select id="taskTypeFilter"><option value="" selected>Tüm görev tipleri</option><option value="architecture_roadmap">Architecture Roadmap</option><option value="standard">Standart görev</option><option value="meeting_organization">Toplantı organizasyonu</option><option value="management_request">Yönetim talebi</option><option value="other">Diğer</option></select></label><label class="task-type-filter"><span>Durum</span><select id="taskStatusFilter"><option value="" selected>Tüm durumlar</option><option value="planned">Planlandı</option><option value="in_progress">Devam ediyor</option><option value="completed">Tamamlandı</option></select></label><strong id="openTaskCount" class="task-count-badge">0 açık</strong></div></div>
             <div id="taskEmptyState" class="empty-state"><div aria-hidden="true">✓</div><h3>Henüz görev yok</h3><p>İlk yapılacak işi “Görev Ekle” sekmesinden oluşturabilirsiniz.</p></div>
             <div id="taskFilterEmpty" class="empty-state hidden"><div aria-hidden="true">⌕</div><h3>Bu tipte görev yok</h3><p>Farklı bir görev tipi seçerek tekrar deneyin.</p></div>
             <div id="taskReportTableWrap" class="task-report-scroll hidden">

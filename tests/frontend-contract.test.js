@@ -17,6 +17,7 @@ const aiClient = fs.readFileSync(path.join(root, "ai-assistant.js"), "utf8");
 const jiraCloudClient = fs.readFileSync(path.join(root, "jira-cloud.js"), "utf8");
 const outlookCalendarClient = fs.readFileSync(path.join(root, "outlook-calendar.js"), "utf8");
 const googleCalendarClient = fs.readFileSync(path.join(root, "google-calendar.js"), "utf8");
+const supabaseCloudClient = fs.readFileSync(path.join(root, "supabase-cloud.js"), "utf8");
 const aiServer = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 const taskDetailHtml = fs.readFileSync(path.join(root, "task-detail.html"), "utf8");
@@ -40,11 +41,12 @@ const requiredIds = [
   "descriptionInput", "filterDateInput", "entryList", "entryTemplate",
   "dailyTotal", "dailyDays", "effortWeekHours", "effortWeekDays", "effortMonthHours", "effortMonthDays", "grandTotal", "effortTotalDays", "entryCount", "formMessage", "lastBackupTime", "appEditMenu", "headerEditModeLabel", "headerUnsavedBadge", "appEditToolbar", "appEditModeDot", "appEditModeLabel", "appEditModeStatus", "enterAppEditMode", "saveAppChanges",
   "driveHeaderMenu", "headerDriveMenuLabel", "headerDriveMenuBadge", "restorePrompt", "initialRestoreButton", "skipInitialRestore",
+  "supabaseHeaderMenu", "headerSupabaseMenuLabel", "headerSupabaseMenuBadge", "supabaseConnectionBadge", "supabaseStatus", "supabaseAuthForm", "supabaseEmail", "supabasePassword", "supabaseSignIn", "supabaseSignUp", "supabaseForgotPassword", "supabaseRecoveryForm", "supabaseNewPassword", "supabaseSignedInPanel", "supabaseUserEmail", "supabaseOrganizationName", "supabaseLastSync", "supabasePull", "supabasePush", "supabaseSignOut",
   "tasksView", "taskForm", "taskTitleInput", "taskDueDateInput", "taskStatusInput", "taskDescriptionInput",
   "taskParentTaskInput", "taskAssigneeInput", "taskTypeInput", "taskPriorityInput", "taskYearInput", "taskQuarterInput", "taskPlanImport",
   "openTaskPlanPaste", "taskPlanImportModal", "taskPlanPasteForm", "taskPlanTextInput", "taskPlanPasteMessage",
   "taskList", "taskTemplate", "taskTypeGroupTemplate", "taskCreateView", "taskReportView", "taskDetailView", "taskDetailTitle",
-  "taskDetailDescription", "taskDetailParentItem", "taskDetailAssignee", "taskDetailType", "taskDetailPriority", "taskDetailPlan", "taskDetailSubtaskList", "taskDetailSubtaskCount", "addSubtaskButton", "taskTypeFilter", "taskFilterEmpty", "reviseTaskButton", "backToTaskReport", "taskReportCount", "taskReportTableWrap", "addNextTaskToCalendar", "addNextTaskToOutlookCalendar",
+  "taskDetailDescription", "taskDetailParentItem", "taskDetailAssignee", "taskDetailType", "taskDetailPriority", "taskDetailPlan", "taskDetailSubtaskList", "taskDetailSubtaskCount", "addSubtaskButton", "taskTypeFilter", "taskStatusFilter", "taskFilterEmpty", "reviseTaskButton", "backToTaskReport", "taskReportCount", "taskReportTableWrap", "addNextTaskToCalendar", "addNextTaskToOutlookCalendar",
   "timesheetView", "timesheetPeriod", "timesheetReferenceDate", "timesheetStartDate",
   "timesheetEndDate", "includeWeekends", "addTimesheetEffort", "syncJiraWorklogs", "timesheetJiraSyncStatus", "timesheetTable", "timesheetTotalHours",
   "timesheetGrouping",
@@ -66,17 +68,27 @@ for (const id of ["taskDetailPageContent", "detailPageTitle", "detailPageTaskTyp
   assert.match(taskDetailHtml, new RegExp(`id=["']${id}["']`), `Eksik görev detay sayfası sözleşmesi: #${id}`);
 }
 
-for (const id of ["taskTypeReportTitle", "taskTypeReportContent", "taskTypeReportTotal", "taskTypeReportOpen", "taskTypeReportInProgress", "taskTypeReportCompleted", "taskTypeReportBody"]) {
+for (const id of ["taskTypeReportTitle", "taskTypeReportBackLink", "taskTypeReportContent", "taskTypeReportTotal", "taskTypeReportOpen", "taskTypeReportInProgress", "taskTypeReportCompleted", "taskTypeReportBody"]) {
   assert.match(taskTypeReportHtml, new RegExp(`id=["']${id}["']`), `Eksik görev tipi raporu sözleşmesi: #${id}`);
 }
 
 assert.ok(html.indexOf('src="data-store.js') < html.indexOf('src="app.js'), "Veri katmanı uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="vendor/msal-browser.min.js') < html.indexOf('src="outlook-calendar.js') && html.indexOf('src="outlook-calendar.js') < html.indexOf('src="app.js'), "MSAL ve Outlook Takvim istemcileri uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="drive-sync.js') < html.indexOf('src="google-calendar.js') && html.indexOf('src="google-calendar.js') < html.indexOf('src="app.js'), "Drive ayarları ve Google Takvim istemcisi uygulamadan önce yüklenmeli");
+assert.ok(html.indexOf('src="vendor/supabase.js') < html.indexOf('src="supabase-cloud.js') && html.indexOf('src="supabase-cloud.js') < html.indexOf('src="app.js'), "Sabitlenmiş Supabase SDK ve bulut istemcisi uygulamadan önce yüklenmeli");
+assert.match(supabaseCloudClient, /sb_publishable_[A-Za-z0-9_-]+/, "Tarayıcı Supabase bağlantısı modern publishable key kullanmalı");
+assert.doesNotMatch(supabaseCloudClient, /service_role|sb_secret_|SUPABASE_SERVICE_ROLE/, "Supabase secret veya service-role anahtarı tarayıcı koduna yazılmamalı");
+assert.match(supabaseCloudClient, /signUp[\s\S]*emailRedirectTo[\s\S]*signInWithPassword[\s\S]*resetPasswordForEmail[\s\S]*updateUser/, "Supabase e-posta kayıt, giriş, doğrulama ve şifre yenileme akışları bulunmalı");
+assert.match(supabaseCloudClient, /organization_members[\s\S]*pullBundle[\s\S]*onConflict:\s*"organization_id,id"[\s\S]*pushBundle/, "Supabase senkronizasyonu organizasyon kapsamında güvenli upsert kullanmalı");
 assert.match(html, /<meta\s+name="viewport"/i, "Mobil viewport tanımı eksik");
 assert.match(css, /@media\s*\(max-width:\s*850px\)/, "Tablet kırılımı eksik");
 assert.match(css, /@media\s*\(max-width:\s*600px\)/, "Mobil kırılımı eksik");
 assert.match(html, /class="tab-button active"[^>]*data-tab="homeView"/, "Ana Sayfa varsayılan sekme olmalı");
+assert.match(app, /function openTasksByStatus[\s\S]*taskStatusFilter[\s\S]*activateMainView\("tasksView"\)/, "Ana sayfa görev durumları ilgili durum filtresiyle görev raporunu açmalı");
+assert.match(app, /task-chart-legend-item[\s\S]*openTasksByStatus\(status\)/, "Görev durumu açıklama satırları tıklanabilir olmalı");
+assert.match(app, /selectedTaskStatus[\s\S]*task\.status === selectedTaskStatus[\s\S]*params\.set\("status", selectedTaskStatus\)/, "Görev raporu durum filtresini görev tipi detayına taşımalı");
+assert.match(taskTypeReportApp, /selectedStatus[\s\S]*task\.status === selectedStatus/, "Görev tipi raporu seçili durum filtresini uygulamalı");
+assert.match(taskTypeReportApp, /fromStatus[\s\S]*detailUrl\(task\.id, taskType, selectedStatus\)/, "Görev tipi raporu durum filtresini görev detayına taşımalı");
 assert.match(html, /id="effortsView"\s+class="tab-view hidden"/, "Eforlar sekmesi ilk açılışta gizli olmalı");
 assert.match(app, /function renderHomeDashboard/, "Ana Sayfa veri render fonksiyonu eksik");
 assert.match(app, /function buildAiAssistantContext[\s\S]*weeklyEfforts[\s\S]*tasks:[\s\S]*jiraItems:[\s\S]*reminders:/, "AI asistanı uygulama bağlamını güvenli ve sınırlı biçimde hazırlamalı");
@@ -200,7 +212,7 @@ assert.match(html, /id="taskReportView" class="panel task-subview task-list-pane
 assert.match(html, /id="taskTypeFilter"[\s\S]*value="" selected[\s\S]*value="architecture_roadmap"/, "Görev raporu tüm görev tipi gruplarıyla açılmalı");
 assert.match(html, /taskTypeGroupTemplate[\s\S]*task-type-group-total[\s\S]*data-priority="high"[\s\S]*data-priority="medium"[\s\S]*data-priority="low"[\s\S]*data-priority="none"/, "Görev tipi grup satırı toplam ve öncelik sayaçlarını içermeli");
 assert.match(app, /function groupTasksByType[\s\S]*priorities:[\s\S]*high:[\s\S]*medium:[\s\S]*low:[\s\S]*none:/, "Görevler tip bazında toplam ve öncelik sayılarına göre gruplanmalı");
-assert.match(app, /task-type-group-toggle[\s\S]*task-type-report\.html\?type=[\s\S]*encodeURIComponent\(group\.taskType\)/, "Görev tipi başlığı ayrı rapor sayfasına yönlenmeli");
+assert.match(app, /task-type-group-toggle[\s\S]*new URLSearchParams\(\{ type: group\.taskType \}\)[\s\S]*task-type-report\.html\?\$\{params\}/, "Görev tipi başlığı ayrı rapor sayfasına yönlenmeli");
 assert.match(css, /task-type-priority-count\[data-priority="high"\][\s\S]*task-type-priority-count\[data-priority="medium"\][\s\S]*task-type-priority-count\[data-priority="low"\]/, "Öncelik sayaçları farklı renklerle gösterilmeli");
 assert.match(app, /migrateExistingTasksToArchitectureRoadmap\(\)/, "Mevcut görevler Architecture Roadmap tipine dönüştürülmeli");
 assert.match(html, /task-report-table[\s\S]*<thead><tr><th>Görev<\/th><th class="task-status-column">Durum<\/th><\/tr><\/thead>/, "Yapılacak İşler raporunda yalnızca Görev ve Durum başlıkları olmalı");
@@ -300,7 +312,7 @@ assert.match(taskDetailHtml, /id="detailPageAddSubtask"/, "Alt görev ekleme se�
 assert.match(app, /parentTask[\s\S]*startSubtaskCreate/, "Görev detayından alt görev ekleme rotası bağlanmalı");
 assert.match(taskDetailApp, /detailPageSubtaskList[\s\S]*taskUrl\(subtask\.id\)/, "Ayrı görev detay sayfasında alt görev bağlantıları eksik");
 assert.match(taskTypeReportApp, /function orderTasksByHierarchy[\s\S]*parentTaskId[\s\S]*depth/, "Görev tipi raporunda ana görev-alt görev sırası korunmalı");
-assert.match(taskTypeReportApp, /task-detail\.html\?id=[\s\S]*fromType/, "Görev tipi raporundaki maddeler tekil görev detayına bağlanmalı");
+assert.match(taskTypeReportApp, /function detailUrl[\s\S]*new URLSearchParams\(\{ id: taskId, fromType: taskType \}\)[\s\S]*task-detail\.html\?\$\{params\}/, "Görev tipi raporundaki maddeler tekil görev detayına bağlanmalı");
 assert.match(app, /function tasksForType[\s\S]*includedIds/, "Görev tipi filtresinde hiyerarşik bağlam korunmalı");
 assert.match(app, /taskTypeFilter[\s\S]*tasksForType[\s\S]*renderTasks/, "Görev tipi filtresi rapora bağlanmalı");
 assert.match(app, /taskType:\s*"architecture_roadmap"/, "Yapıştırılan görev planı Architecture Roadmap olarak işaretlenmeli");
@@ -368,7 +380,11 @@ assert.match(app, /function relinkMergedJiraEntries[\s\S]*idRemap\[entry\.jiraId
 assert.doesNotMatch(app, /pagehide|visibilitychange/, "Drive yedeği yalnızca kullanıcı Kaydet dediğinde gönderilmeli");
 assert.match(html, /id="appEditToolbar"[\s\S]*id="enterAppEditMode"[\s\S]*id="saveAppChanges"/, "Uygulama Düzenle ve Kaydet araç çubuğunu içermeli");
 assert.match(app, /APP_EDIT_SESSION_KEY[\s\S]*function updateAppEditModeUi[\s\S]*function requireAppEditMode/, "Düzenleme modu oturum boyunca korunmalı ve değişiklik işlemlerini kilitlemeli");
-assert.match(app, /function markAppDirty[\s\S]*APP_DIRTY_KEY[\s\S]*function saveAppChangesToDrive[\s\S]*DriveSync\.backup[\s\S]*setAppEditMode\(false\)/, "Yerel değişiklikler yalnızca Kaydet ile Drive'a gönderilip düzenleme modunu kapatmalı");
+assert.match(app, /function markAppDirty[\s\S]*APP_DIRTY_KEY/, "Yerel değişiklikler buluta gönderilene kadar kalıcı olarak işaretlenmeli");
+assert.match(app, /function saveAppChangesToCloud[\s\S]*pushToSupabase[\s\S]*setAppEditMode\(false\)/, "Kaydet yerel değişiklikleri Supabase'e gönderip düzenleme modunu kapatmalı");
+assert.match(app, /supabaseAuthForm[\s\S]*SupabaseCloud\.signIn[\s\S]*supabaseSignUp[\s\S]*SupabaseCloud\.signUp[\s\S]*supabaseForgotPassword[\s\S]*sendPasswordReset/, "Supabase hesap menüsü giriş, kayıt ve e-posta şifre yenilemeye bağlanmalı");
+assert.match(app, /function pullFromSupabase[\s\S]*replaceLocalBundle[\s\S]*function pushToSupabase[\s\S]*pushBundle\(backupBundle\(\)\)/, "Supabase yükleme ve güvenli yerel veri gönderme akışları eksik");
+assert.match(app, /saveAppChanges"\)\.addEventListener\("click"[\s\S]*runSupabaseAction\(saveAppChangesToCloud\)/, "Ana Kaydet düğmesi Supabase'e göndermeli");
 assert.match(app, /async function backupAndReport[\s\S]*markAppDirty\(\)/, "Eski otomatik yedek çağrıları artık yalnızca yerel değişikliği işaretlemeli");
 assert.match(app, /document\.addEventListener\("click"[\s\S]*EDIT_ACTION_SELECTOR[\s\S]*requireAppEditMode/, "Veri değiştiren kontroller görüntüleme modunda engellenmeli");
 assert.match(drive, /keepalive:\s*Boolean\(options\.keepalive\)/, "Kapanış isteği keepalive kullanmalı");
