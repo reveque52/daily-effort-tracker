@@ -22,6 +22,7 @@
       parentItem: String(input?.parentItem || "").trim(),
       parentTaskId: String(input?.parentTaskId || "").trim(),
       assignee: String(input?.assignee || "").trim(),
+      assigneeId: String(input?.assigneeId || "").trim(),
       taskType: String(input?.taskType || "standard").trim(),
       priority: String(input?.priority || "").trim(),
       year: String(input?.year || "").trim(),
@@ -36,6 +37,7 @@
     if (value.parentItem.length > 300) errors.parentItem = "Ana madde en fazla 300 karakter olabilir.";
     if (value.parentTaskId.length > 120) errors.parentTaskId = "Ana görev bağlantısı geçersiz.";
     if (value.assignee.length > 120) errors.assignee = "Atanan kişi en fazla 120 karakter olabilir.";
+    if (value.assigneeId.length > 120) errors.assigneeId = "Atanan kişi bağlantısı geçersiz.";
     if (!TASK_TYPES.includes(value.taskType)) errors.taskType = "Geçerli bir görev tipi seçin.";
     if (!PRIORITIES.includes(value.priority)) errors.priority = "Geçerli bir öncelik seçin.";
     if (value.year && !/^(20\d{2}|2100)$/.test(value.year)) errors.year = "Yıl 2000–2100 arasında olmalıdır.";
@@ -157,7 +159,7 @@
       const key = normalizeTitle(parentTitle);
       if (byTitle.has(key)) return;
       const parent = {
-        id: makeId(), title: parentTitle, parentItem: "", parentTaskId: "", assignee: "",
+        id: makeId(), title: parentTitle, parentItem: "", parentTaskId: "", assignee: "", assigneeId: "",
         taskType: "standard", priority: "", year: "", quarter: "", dueDate: "",
         status: "planned", descriptionHtml: "", createdAt: now, updatedAt: now
       };

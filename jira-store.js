@@ -6,6 +6,7 @@
 
   function validate(input) {
     const value = {
+      jiraIssueId: String(input?.jiraIssueId || "").trim(),
       issueType: String(input?.issueType || "Task").trim(),
       name: String(input?.name || "").trim(),
       description: String(input?.description || "").trim(),
@@ -24,7 +25,7 @@
     else if (value.name.length > 100) errors.name = "JIRA madde adı en fazla 100 karakter olabilir.";
     if (!value.description) errors.description = "JIRA açıklaması zorunludur.";
     else if (value.description.length > 300) errors.description = "JIRA açıklaması en fazla 300 karakter olabilir.";
-    const optionalLimits = { issueType: 60, assignee: 100, reporter: 100, priority: 40, status: 80, resolution: 120, jiraCreated: 80, jiraUpdated: 80, dueDate: 80 };
+    const optionalLimits = { jiraIssueId: 80, issueType: 60, assignee: 100, reporter: 100, priority: 40, status: 80, resolution: 120, jiraCreated: 80, jiraUpdated: 80, dueDate: 80 };
     Object.entries(optionalLimits).forEach(([field, limit]) => {
       if (value[field].length > limit) errors[field] = `${field} alanı en fazla ${limit} karakter olabilir.`;
     });

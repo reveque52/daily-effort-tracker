@@ -4,6 +4,7 @@
   const $ = (selector) => document.querySelector(selector);
   const form = $("#effortForm");
   const taskForm = $("#taskForm");
+  const personForm = $("#personForm");
   const jiraForm = $("#jiraForm");
   const reminderForm = $("#reminderForm");
   const effortEditModalForm = $("#effortEditModalForm");
@@ -18,19 +19,18 @@
     year: $("#taskYearInput"), quarter: $("#taskQuarterInput"),
     status: $("#taskStatusInput"), descriptionHtml: $("#taskDescriptionInput")
   };
-  const jiraFields = {
-    id: $("#jiraId"), issueType: $("#jiraIssueTypeInput"), name: $("#jiraNameInput"),
-    description: $("#jiraDescriptionInput"), url: $("#jiraUrlInput"), assignee: $("#jiraAssigneeInput"),
-    reporter: $("#jiraReporterInput"), priority: $("#jiraPriorityInput"), status: $("#jiraStatusInput"),
-    resolution: $("#jiraResolutionInput"), jiraCreated: $("#jiraCreatedInput"),
-    jiraUpdated: $("#jiraUpdatedInput"), dueDate: $("#jiraDueDateInput")
+  const personFields = {
+    id: $("#personId"), fullName: $("#personFullNameInput"), email: $("#personEmailInput"),
+    title: $("#personTitleInput"), role: $("#personRoleInput"), managerId: $("#personManagerInput")
   };
+  const jiraFields = { name: $("#jiraNameInput") };
   const reminderFields = {
     id: $("#reminderId"), text: $("#reminderTextInput"), remindAt: $("#reminderDateInput"),
     importance: $("#reminderImportanceInput")
   };
   let entries = [];
   let tasks = [];
+  let people = [];
   let jiraItems = [];
   let nextDashboardTask = null;
   let selectedTaskDetailId = null;
@@ -40,6 +40,47 @@
   let savedTaskEditorRange = null;
   let aiConversation = [];
   let aiRequestPending = false;
+  let outlookCalendarEvents = [];
+  const selectedJiraRequestStatuses = new Set();
+  const knownJiraRequestStatuses = new Set();
+  const knownJiraRequestStatusLabels = new Map();
+  let draggedJiraRequestId = "";
+  let jiraRequestTransitionPending = false;
+  const APP_EDIT_SESSION_KEY = "daily-effort-tracker.edit-mode";
+  const APP_DIRTY_KEY = "daily-effort-tracker.drive-dirty";
+  let appEditMode = sessionStorage.getItem(APP_EDIT_SESSION_KEY) === "true";
+  let appEditDirty = localStorage.getItem(APP_DIRTY_KEY) === "true";
+  const JIRA_AUTO_WORKLOG_KEY = "daily-effort-tracker.jira-auto-worklog";
+  const JIRA_TABLE_LAYOUT_KEY = "daily-effort-tracker.jira-table-layout";
+  const JIRA_TABLE_COLUMNS = Object.freeze([
+    { id: "issueType", label: "Issue Type", min: 76, max: 170 },
+    { id: "key", label: "Key", min: 72, max: 140 },
+    { id: "summary", label: "Summary", min: 150, max: 420 },
+    { id: "assignee", label: "Assignee", min: 95, max: 230 },
+    { id: "reporter", label: "Reporter", min: 95, max: 230 },
+    { id: "priority", label: "Priority", min: 70, max: 140 },
+    { id: "status", label: "Status", min: 85, max: 180 },
+    { id: "resolution", label: "Resolution", min: 90, max: 180 },
+    { id: "created", label: "Created", min: 110, max: 190 },
+    { id: "updated", label: "Updated", min: 110, max: 190 },
+    { id: "dueDate", label: "Due date", min: 90, max: 160 },
+    { id: "actions", label: "İşlemler", min: 125, max: 190 }
+  ]);
+
+  function loadJiraTableLayout() {
+    const defaultOrder = JIRA_TABLE_COLUMNS.map((column) => column.id);
+    try {
+      const saved = JSON.parse(localStorage.getItem(JIRA_TABLE_LAYOUT_KEY) || "{}");
+      const savedOrder = Array.isArray(saved.order) ? saved.order.filter((id) => defaultOrder.includes(id)) : [];
+      const order = [...savedOrder, ...defaultOrder.filter((id) => !savedOrder.includes(id))];
+      const visible = Array.isArray(saved.visible) ? saved.visible.filter((id) => defaultOrder.includes(id)) : defaultOrder;
+      return { order, visible: visible.length ? visible : ["key"], widths: saved.widths || {}, autoFit: saved.autoFit !== false };
+    } catch (_) {
+      return { order: defaultOrder, visible: defaultOrder, widths: {}, autoFit: true };
+    }
+  }
+
+  let jiraTableLayout = loadJiraTableLayout();
 
   const DUMMY_JIRA = Object.freeze({
     id: "__dummy_jira__",
@@ -57,6 +98,8 @@
   const isoToday = () => new Date().toLocaleDateString("en-CA");
   const parseDate = (value) => new Date(`${value}T12:00:00`);
   const formatHours = (value) => `${numberFormatter.format(Number(value) || 0)} sa`;
+  const formatRoundedHours = (value) => `${Math.round(Number(value) || 0)} sa`;
+  const formatEffortDays = (hours) => `${numberFormatter.format((Number(hours) || 0) / 8)} gün`;
   const isoFromDate = (date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
   const addDays = (date, days) => { const next = new Date(date); next.setDate(next.getDate() + days); return next; };
   const getJiraItem = (id) => id === DUMMY_JIRA.id ? DUMMY_JIRA : (id ? window.JiraStore.get(id) : null);
@@ -119,6 +162,212 @@
       : `${result.totalCount} JIRA maddesi`;
     renderEffortJiraOptionList();
     updateEffortJiraPickerLabel();
+  }
+
+  function setJiraCloudStatus(message, state = "") {
+    const status = $("#jiraCloudStatus");
+    status.textContent = message;
+    status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-busy", state === "busy");
+  }
+
+  function setJiraCloudBusy(busy) {
+    ["#testJiraConnection", "#syncJiraIssues", "#saveJiraApiEndpoint"].forEach((selector) => { $(selector).disabled = busy; });
+  }
+
+  async function testJiraCloudConnection() {
+    setJiraCloudBusy(true);
+    setJiraCloudStatus("FIT Global JIRA bağlantısı test ediliyor…", "busy");
+    try {
+      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
+      const result = await window.JiraCloudClient.health();
+      setJiraCloudStatus(`${result.account?.displayName || "JIRA kullanıcısı"} olarak ${result.site} bağlantısı başarılı.`, "success");
+      return true;
+    } catch (error) {
+      setJiraCloudStatus(`JIRA bağlantısı kurulamadı: ${error.message}`, "error");
+      return false;
+    } finally {
+      setJiraCloudBusy(false);
+    }
+  }
+
+  async function syncJiraCloudIssues() {
+    setJiraCloudBusy(true);
+    setJiraCloudStatus("JIRA maddeleri JQL ile alınıyor…", "busy");
+    try {
+      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
+      const response = await window.JiraCloudClient.syncIssues($("#jiraSyncJql").value);
+      const result = window.JiraStore.mergeAll(response.items || []);
+      if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "JIRA maddeleri birleştirilemedi.");
+      const relinked = relinkMergedJiraEntries(result.value.idRemap);
+      renderJiraItems();
+      render();
+      setJiraCloudStatus(`${result.value.imported} JIRA işlendi: ${result.value.created} yeni, ${result.value.updated} güncellenen${relinked ? `, ${relinked} efor yeniden bağlandı` : ""}.`, "success");
+      backupAndReport("JIRA Cloud senkronizasyonu Drive’a gönderildi.");
+      return result.value;
+    } catch (error) {
+      setJiraCloudStatus(`JIRA senkronizasyonu başarısız: ${error.message}`, "error");
+      return null;
+    } finally {
+      setJiraCloudBusy(false);
+    }
+  }
+
+  async function fetchJiraIssueByKey(issueKey, options = {}) {
+    const key = String(issueKey || "").trim().toUpperCase();
+    const submitButton = $("#jiraSubmitButton");
+    if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key)) {
+      $("#jiraFormMessage").textContent = "RD-179 gibi geçerli bir JIRA Key girin.";
+      $("#jiraFormMessage").classList.remove("success");
+      return null;
+    }
+    submitButton.disabled = true;
+    $("#jiraSubmitLabel").textContent = "JIRA’dan alınıyor…";
+    $("#jiraFormMessage").textContent = `${key} JIRA Cloud’dan alınıyor…`;
+    $("#jiraFormMessage").classList.remove("success");
+    try {
+      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
+      const response = await window.JiraCloudClient.getIssue(key);
+      const result = window.JiraStore.mergeAll([response.item]);
+      if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "JIRA maddesi kaydedilemedi.");
+      const relinked = relinkMergedJiraEntries(result.value.idRemap);
+      if (!options.keepInput) jiraFields.name.value = "";
+      renderJiraItems();
+      render();
+      const action = result.value.created ? "uygulamaya eklendi" : "JIRA’daki son bilgilerle güncellendi";
+      $("#jiraFormMessage").textContent = `${response.item.name} · ${response.item.description} ${action}${relinked ? `; ${relinked} efor bağlantısı korundu` : ""}.`;
+      $("#jiraFormMessage").classList.add("success");
+      setJiraCloudStatus(`${response.item.name} JIRA Cloud’dan başarıyla alındı.`, "success");
+      backupAndReport(`${response.item.name} JIRA maddesi Drive’a gönderildi.`);
+      return response.item;
+    } catch (error) {
+      $("#jiraFormMessage").textContent = `${key} alınamadı: ${error.message}`;
+      $("#jiraFormMessage").classList.remove("success");
+      return null;
+    } finally {
+      submitButton.disabled = false;
+      $("#jiraSubmitLabel").textContent = "JIRA’dan getir";
+    }
+  }
+
+  function setTimesheetJiraSyncStatus(message, state = "") {
+    const status = $("#timesheetJiraSyncStatus");
+    status.textContent = message;
+    status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-busy", state === "busy");
+  }
+
+  async function syncTimesheetJiraWorklogs() {
+    const range = getTimesheetRange();
+    if (!range) {
+      setTimesheetJiraSyncStatus("Önce geçerli bir Timesheet tarih aralığı seçin.", "error");
+      return null;
+    }
+    const button = $("#syncJiraWorklogs");
+    const from = isoFromDate(range.start);
+    const to = isoFromDate(range.end);
+    button.disabled = true;
+    setTimesheetJiraSyncStatus(`${from} – ${to} arasındaki JIRA eforlarınız alınıyor…`, "busy");
+    try {
+      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
+      const response = await window.JiraCloudClient.syncWorklogs(from, to);
+      const issueResult = window.JiraStore.mergeAll(response.issues || []);
+      if (!issueResult.valid) throw new Error(Object.values(issueResult.errors || {}).join(" ") || "JIRA maddeleri birleştirilemedi.");
+      relinkMergedJiraEntries(issueResult.value.idRemap);
+      const jiraByKey = new Map(window.JiraStore.list().map((item) => [String(item.name || "").toLocaleUpperCase("en-US"), item]));
+      let skipped = 0;
+      const worklogs = (response.items || []).flatMap((item) => {
+        const jiraItem = jiraByKey.get(String(item.issueKey || "").toLocaleUpperCase("en-US"));
+        const hours = Number(item.hours);
+        if (!jiraItem || !item.worklogId || !item.date || !Number.isFinite(hours) || hours <= 0 || hours > 24) {
+          skipped += 1;
+          return [];
+        }
+        return [{
+          date: item.date,
+          project: jiraItem.name,
+          task: String(item.description || item.summary || "JIRA worklog").slice(0, 1000),
+          jiraId: jiraItem.id,
+          hours,
+          notes: "",
+          jiraWorklogId: String(item.worklogId),
+          jiraWorklogIssueKey: jiraItem.name,
+          jiraSyncStatus: "synced",
+          jiraSyncDirection: "imported",
+          jiraSyncError: "",
+          jiraSyncedAt: item.updatedAt || new Date().toISOString(),
+          createdAt: item.createdAt || undefined
+        }];
+      });
+      const result = getStore().mergeJiraWorklogs(worklogs);
+      if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "JIRA eforları birleştirilemedi.");
+      renderJiraItems();
+      render();
+      const counts = result.value;
+      const accountName = response.account?.displayName || "JIRA kullanıcısı";
+      setTimesheetJiraSyncStatus(
+        `${accountName}: ${counts.created} yeni, ${counts.updated} güncellenen, ${counts.unchanged} zaten güncel efor${counts.conflicts ? ` · ${counts.conflicts} yerel değişiklik çakışması korundu` : ""}${skipped ? ` · ${skipped} geçersiz kayıt atlandı` : ""}.`,
+        "success"
+      );
+      if (counts.created || counts.updated) backupAndReport("JIRA’dan alınan eforlar Drive’a gönderildi.");
+      return counts;
+    } catch (error) {
+      setTimesheetJiraSyncStatus(`JIRA eforları alınamadı: ${error.message}`, "error");
+      return null;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function updateEntryJiraSync(entryId, changes) {
+    const store = getStore();
+    const current = store?.get?.(entryId);
+    if (!current) return null;
+    return store.update(entryId, { ...current, ...changes });
+  }
+
+  async function syncEffortToJira(entry, previousEntry = null) {
+    if (!$("#jiraAutoWorklog").checked) return { skipped: true };
+    const jiraItem = getJiraItem(entry.jiraId);
+    if (!jiraItem || jiraItem.id === DUMMY_JIRA.id || jiraItem.name === DUMMY_JIRA.name) return { skipped: true };
+    const issueKey = jiraItem.name;
+    let worklogId = previousEntry?.jiraWorklogId || entry.jiraWorklogId || "";
+    const previousIssueKey = previousEntry?.jiraWorklogIssueKey || entry.jiraWorklogIssueKey || "";
+    const movingWorklog = Boolean(worklogId && previousIssueKey && previousIssueKey !== issueKey);
+    const approvalMessage = movingWorklog
+      ? `${previousIssueKey} üzerindeki mevcut worklog silinip ${issueKey} maddesine ${numberFormatter.format(entry.hours)} saat olarak gönderilsin mi?`
+      : `${issueKey} maddesindeki JIRA worklog ${worklogId ? "güncellensin" : "oluşturulsun"} mı?\n\nTarih: ${entry.date}\nSüre: ${numberFormatter.format(entry.hours)} saat\nAçıklama: ${entry.task || entry.description}`;
+    if (!confirm(approvalMessage)) {
+      updateEntryJiraSync(entry.id, { jiraSyncStatus: "pending", jiraSyncDirection: "pushed", jiraSyncError: "JIRA gönderimi kullanıcı onayı bekliyor." });
+      setJiraCloudStatus(`${issueKey} eforu yerelde kaydedildi; JIRA gönderimi onaylanmadı.`, "busy");
+      return { skipped: true, approvalDeclined: true };
+    }
+    updateEntryJiraSync(entry.id, { jiraSyncStatus: "pending", jiraSyncDirection: "pushed", jiraSyncError: "" });
+    try {
+      if (worklogId && previousIssueKey && previousIssueKey !== issueKey) {
+        await window.JiraCloudClient.deleteWorklog(previousIssueKey, worklogId);
+        worklogId = "";
+      }
+      const result = worklogId
+        ? await window.JiraCloudClient.updateWorklog(entry, issueKey, worklogId)
+        : await window.JiraCloudClient.createWorklog(entry, issueKey);
+      updateEntryJiraSync(entry.id, {
+        jiraWorklogId: result.worklogId,
+        jiraWorklogIssueKey: issueKey,
+        jiraSyncStatus: "synced",
+        jiraSyncDirection: "pushed",
+        jiraSyncError: "",
+        jiraSyncedAt: new Date().toISOString()
+      });
+      setJiraCloudStatus(`${issueKey} için JIRA worklog’u güncellendi.`, "success");
+      return { ok: true, worklogId: result.worklogId };
+    } catch (error) {
+      updateEntryJiraSync(entry.id, { jiraSyncStatus: "failed", jiraSyncDirection: "pushed", jiraSyncError: String(error.message || error).slice(0, 500) });
+      setJiraCloudStatus(`Efor yerelde kaydedildi; JIRA worklog gönderilemedi: ${error.message}`, "error");
+      return { ok: false, error };
+    }
   }
 
   function updateEffortJiraPickerLabel() {
@@ -188,6 +437,26 @@
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
   }
 
+  function outlookCalendarUrl(task) {
+    const startDate = parseDate(task.dueDate);
+    const endDate = addDays(startDate, 1);
+    const params = new URLSearchParams({
+      path: "/calendar/action/compose",
+      rru: "addevent",
+      subject: task.title,
+      startdt: `${isoFromDate(startDate)}T00:00:00`,
+      enddt: `${isoFromDate(endDate)}T00:00:00`,
+      allday: "true",
+      body: [
+        `Görev durumu: ${statusLabel(task.status)}`,
+        `Görev tipi: ${taskTypeLabel(task.taskType)}`,
+        `Öncelik: ${priorityLabel(task.priority)}`,
+        task.assignee ? `Atanan / kimde bekliyor: ${task.assignee}` : ""
+      ].filter(Boolean).join("\n")
+    });
+    return `https://outlook.office.com/calendar/deeplink/compose?${params.toString()}`;
+  }
+
   function getStore() {
     return window.effortStore || window.EffortStore || window.dataStore;
   }
@@ -201,7 +470,7 @@
 
   function saveEntry(entry) {
     const store = getStore();
-    if (entry.id && store?.update) return store.update(entry.id, entry);
+    if (entry.id && store?.update) return store.update(entry.id, { ...(store.get?.(entry.id) || {}), ...entry });
     if (!entry.id && store?.create) return store.create(entry);
     if (!entry.id && store?.add) return store.add(entry);
     const next = entry.id ? entries.map((item) => item.id === entry.id ? entry : item) : [...entries, { ...entry, id: crypto.randomUUID() }];
@@ -215,6 +484,29 @@
     localStorage.setItem("daily-effort-entries", JSON.stringify(entries.filter((entry) => entry.id !== id)));
   }
 
+  async function deleteEffortEntry(entry) {
+    if (!requireAppEditMode()) return false;
+    if (!entry) return false;
+    const jiraItem = getJiraItem(entry.jiraId);
+    if (!confirm(`“${jiraItem?.name || entry.project}” efor kaydı silinsin mi?`)) return false;
+    removeEntry(entry.id);
+    render();
+    markAppDirty();
+    if ($("#jiraAutoWorklog").checked && entry.jiraWorklogId && entry.jiraWorklogIssueKey) {
+      if (!confirm(`${entry.jiraWorklogIssueKey} üzerindeki bağlı JIRA worklog da silinsin mi?`)) {
+        setJiraCloudStatus("Yerel efor silindi; JIRA worklog kullanıcı tercihiyle korundu.", "busy");
+        return true;
+      }
+      try {
+        await window.JiraCloudClient.deleteWorklog(entry.jiraWorklogIssueKey, entry.jiraWorklogId);
+        setJiraCloudStatus(`${entry.jiraWorklogIssueKey} worklog’u JIRA’dan silindi.`, "success");
+      } catch (error) {
+        setJiraCloudStatus(`Yerel efor silindi ancak JIRA worklog silinemedi: ${error.message}`, "error");
+      }
+    }
+    return true;
+  }
+
   function render() {
     entries = Array.from(readEntries() || []).sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
     const filterDate = $("#filterDateInput").value;
@@ -222,10 +514,29 @@
     const dailyDate = filterDate || fields.date.value || isoToday();
     const dailyTotal = entries.filter((entry) => entry.date === dailyDate).reduce((sum, entry) => sum + Number(entry.hours), 0);
     const total = entries.reduce((sum, entry) => sum + Number(entry.hours), 0);
+    const today = parseDate(isoToday());
+    const weekStart = addDays(today, -((today.getDay() + 6) % 7));
+    const weekEnd = addDays(weekStart, 6);
+    const weekStartIso = isoFromDate(weekStart);
+    const weekEndIso = isoFromDate(weekEnd);
+    const monthStartIso = isoFromDate(new Date(today.getFullYear(), today.getMonth(), 1, 12));
+    const monthEndIso = isoFromDate(new Date(today.getFullYear(), today.getMonth() + 1, 0, 12));
+    const weekTotal = entries
+      .filter((entry) => entry.date >= weekStartIso && entry.date <= weekEndIso)
+      .reduce((sum, entry) => sum + Number(entry.hours), 0);
+    const monthTotal = entries
+      .filter((entry) => entry.date >= monthStartIso && entry.date <= monthEndIso)
+      .reduce((sum, entry) => sum + Number(entry.hours), 0);
 
-    $("#dailyTotal").textContent = formatHours(dailyTotal);
+    $("#dailyTotal").textContent = `${formatRoundedHours(dailyTotal)} çalışma`;
     $(".summary-card.accent").classList.toggle("day-complete", dailyTotal >= 8);
-    $("#grandTotal").textContent = formatHours(total);
+    $("#dailyDays").textContent = formatEffortDays(dailyTotal);
+    $("#effortWeekHours").textContent = `${formatRoundedHours(weekTotal)} toplam çalışma`;
+    $("#effortWeekDays").textContent = formatEffortDays(weekTotal);
+    $("#effortMonthHours").textContent = `${formatRoundedHours(monthTotal)} toplam çalışma`;
+    $("#effortMonthDays").textContent = formatEffortDays(monthTotal);
+    $("#grandTotal").textContent = `${formatRoundedHours(total)} toplam çalışma`;
+    $("#effortTotalDays").textContent = formatEffortDays(total);
     $("#entryCount").textContent = String(entries.length);
     $("#selectedDateLabel").textContent = dateFormatter.format(parseDate(dailyDate));
     $("#emptyState").classList.toggle("hidden", visible.length > 0);
@@ -249,8 +560,8 @@
       const dayComplete = dayTotal >= 8;
       dayGroup.classList.toggle("day-complete", dayComplete);
       daySummary.textContent = dayComplete
-        ? `✓ Tamamlandı · ${dayEntries.length} kayıt · ${formatHours(dayTotal)}`
-        : `${dayEntries.length} kayıt · ${numberFormatter.format(dayTotal)} / 8 sa`;
+        ? `✓ Tamamlandı · ${formatEffortDays(dayTotal)} · ${dayEntries.length} kayıt`
+        : `${formatEffortDays(dayTotal)} · ${dayEntries.length} kayıt · ${formatRoundedHours(dayTotal)} detay`;
       heading.append(dateTitle, daySummary);
       const progress = document.createElement("div");
       progress.className = "day-progress";
@@ -264,19 +575,32 @@
         card.dataset.id = entry.id;
         const jiraItem = getJiraItem(entry.jiraId);
         card.querySelector("h3").textContent = jiraItem?.name || entry.project || "Eski efor kaydı";
-        card.querySelector(".hours-badge").textContent = formatHours(entry.hours);
+        card.querySelector(".hours-badge").textContent = formatEffortDays(entry.hours);
         card.querySelector(".entry-jira-summary").textContent = jiraItem?.description || "JIRA summary bulunamadı";
-        card.querySelector(".entry-effort-description").textContent = `Efor açıklaması: ${entry.task || entry.description || "—"}`;
+        card.querySelector(".entry-effort-description").textContent = `Süre: ${formatRoundedHours(entry.hours)} · Efor açıklaması: ${entry.task || entry.description || "—"}`;
         const jiraLink = card.querySelector(".jira-entry-link");
         if (jiraItem?.url) {
           jiraLink.textContent = `${jiraItem.issueType || "Task"} · ${jiraItem.priority || "Öncelik yok"} · JIRA’da aç ↗`;
           jiraLink.href = jiraItem.url;
           jiraLink.classList.remove("hidden");
         }
-        card.querySelector(".edit-button").addEventListener("click", () => startEdit(entry));
-        card.querySelector(".delete-button").addEventListener("click", () => {
-          if (confirm(`“${jiraItem?.name || entry.project}” efor kaydı silinsin mi?`)) { removeEntry(entry.id); render(); backupAndReport("Silme işlemi Drive’a gönderildi."); }
-        });
+        const worklogStatus = card.querySelector(".jira-worklog-status");
+        {
+          const displayStatus = entry.jiraSyncStatus === "synced" && entry.jiraSyncDirection === "imported" ? "imported" : (entry.jiraSyncStatus || "local");
+          worklogStatus.dataset.status = displayStatus;
+          const statusIcon = document.createElement("span");
+          statusIcon.className = "jira-worklog-status-icon";
+          statusIcon.setAttribute("aria-hidden", "true");
+          statusIcon.textContent = ({ synced: "✓", imported: "↓", local: "○", pending: "↑", failed: "!" })[displayStatus] || "•";
+          const statusText = document.createElement("span");
+          statusText.textContent = ({ synced: "JIRA’ya gönderildi", imported: "JIRA’dan alındı", local: "JIRA’ya gönderilmedi", pending: "JIRA’ya gönderilmedi · onay bekliyor", failed: "JIRA gönderilemedi" })[displayStatus] || displayStatus;
+          worklogStatus.replaceChildren(statusIcon, statusText);
+          worklogStatus.setAttribute("aria-label", statusText.textContent);
+          worklogStatus.title = entry.jiraSyncError || "";
+          worklogStatus.classList.remove("hidden");
+        }
+        card.querySelector(".edit-button").addEventListener("click", () => openEffortEditModal([entry]));
+        card.querySelector(".delete-button").addEventListener("click", () => deleteEffortEntry(entry));
         dayItems.append(card);
       });
       dayGroup.append(heading, progress, dayItems);
@@ -427,6 +751,15 @@
       button.setAttribute("aria-selected", String(active));
     });
     document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
+  }
+
+  function activateJiraSubview(viewId) {
+    document.querySelectorAll(".jira-subtab-button").forEach((button) => {
+      const active = button.dataset.jiraTab === viewId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll(".jira-subview").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
   }
 
   function renderHomeDashboard() {
@@ -607,20 +940,36 @@
     reminderForm.reset();
     reminderFields.id.value = "";
     reminderFields.importance.value = "normal";
-    $("#reminderSubmitLabel").textContent = "Ekle";
-    $("#cancelReminderEdit").classList.add("hidden");
+    $("#reminderOptions").open = false;
+    $("#reminderSubmitLabel").textContent = "Kaydet";
+    $("#reminderModalTitle").textContent = "Yeni hatırlatma ekle";
     $("#reminderFormMessage").textContent = "";
     $("#reminderFormMessage").classList.remove("success");
   }
 
   function startReminderEdit(item) {
+    if (!requireAppEditMode()) return;
     reminderFields.id.value = item.id;
     reminderFields.text.value = item.text;
     reminderFields.remindAt.value = item.remindAt || "";
     reminderFields.importance.value = item.importance || "normal";
+    $("#reminderOptions").open = Boolean(item.remindAt || item.importance === "important");
     $("#reminderSubmitLabel").textContent = "Güncelle";
-    $("#cancelReminderEdit").classList.remove("hidden");
+    $("#reminderModalTitle").textContent = "Hatırlatmayı düzenle";
+    if (!$("#reminderModal").open) $("#reminderModal").showModal();
     reminderFields.text.focus();
+  }
+
+  function openReminderCreateModal() {
+    if (!requireAppEditMode()) return;
+    resetReminderForm();
+    $("#reminderModal").showModal();
+    reminderFields.text.focus();
+  }
+
+  function closeReminderModal() {
+    if ($("#reminderModal").open) $("#reminderModal").close();
+    resetReminderForm();
   }
 
   function renderReminders() {
@@ -685,6 +1034,165 @@
       row.append(complete, content, actions);
       list.append(row);
     });
+    list.classList.toggle("is-ticker", reminders.length > 1);
+    list.style.setProperty("--reminder-count", String(reminders.length));
+    if (reminders.length > 1) {
+      [...list.children].forEach((row) => {
+        const clone = row.cloneNode(true);
+        clone.setAttribute("aria-hidden", "true");
+        clone.inert = true;
+        list.append(clone);
+      });
+    }
+  }
+
+  function setOutlookCalendarStatus(message, state = "") {
+    const status = $("#outlookCalendarStatus");
+    status.textContent = message;
+    status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-busy", state === "busy");
+  }
+
+  function setOutlookCalendarConnection(account = null, busy = false) {
+    const badge = $("#outlookCalendarConnection");
+    badge.dataset.state = busy ? "busy" : (account ? "connected" : "disconnected");
+    badge.textContent = busy ? "Bağlanıyor…" : (account?.username || account?.name || "Bağlı değil");
+    $("#connectOutlookCalendar").classList.toggle("hidden", Boolean(account));
+    $("#disconnectOutlookCalendar").classList.toggle("hidden", !account);
+    $("#refreshOutlookCalendar").disabled = !account || busy;
+  }
+
+  function outlookEventDate(dateTimeValue, timeZone = "") {
+    let value = String(dateTimeValue || "").replace(/\.(\d{3})\d+/, ".$1");
+    if (String(timeZone).toUpperCase() === "UTC" && value && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(value)) value += "Z";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  function renderOutlookCalendar() {
+    const list = $("#outlookCalendarList");
+    list.replaceChildren();
+    $("#outlookCalendarEmpty").classList.toggle("hidden", outlookCalendarEvents.length > 0);
+    const groups = new Map();
+    outlookCalendarEvents.forEach((event) => {
+      const start = outlookEventDate(event.start?.dateTime, event.start?.timeZone);
+      if (!start) return;
+      const key = isoFromDate(start);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ event, start, end: outlookEventDate(event.end?.dateTime, event.end?.timeZone) });
+    });
+    groups.forEach((dayEvents, dateKey) => {
+      const section = document.createElement("section");
+      section.className = "outlook-day-group";
+      const heading = document.createElement("header");
+      heading.className = "outlook-day-heading";
+      heading.textContent = dateFormatter.format(parseDate(dateKey));
+      const events = document.createElement("div");
+      events.className = "outlook-day-events";
+      dayEvents.forEach(({ event, start, end }) => {
+        const row = event.webLink ? document.createElement("a") : document.createElement("article");
+        row.className = "outlook-event";
+        if (event.webLink) {
+          row.href = event.webLink;
+          row.target = "_blank";
+          row.rel = "noopener noreferrer";
+        }
+        const time = document.createElement("span");
+        time.className = "outlook-event-time";
+        time.textContent = event.isAllDay
+          ? "Tüm gün"
+          : `${start.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}${end ? ` – ${end.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}` : ""}`;
+        const content = document.createElement("span");
+        content.className = "outlook-event-content";
+        const subject = document.createElement("strong");
+        subject.textContent = event.subject || "Başlıksız etkinlik";
+        const preview = document.createElement("small");
+        preview.textContent = event.bodyPreview || event.organizer?.emailAddress?.name || "Outlook etkinliği";
+        content.append(subject, preview);
+        const location = document.createElement("span");
+        location.className = "outlook-event-location";
+        location.textContent = event.location?.displayName || event.showAs || "";
+        row.append(time, content, location);
+        events.append(row);
+      });
+      section.append(heading, events);
+      list.append(section);
+    });
+  }
+
+  function updateOutlookCalendarPeriod() {
+    const days = Number($("#outlookCalendarRange").value || 14);
+    const start = parseDate(isoToday());
+    const end = addDays(start, days);
+    $("#outlookCalendarPeriod").textContent = `${dateFormatter.format(start)} – ${dateFormatter.format(addDays(end, -1))}`;
+    return { start, end, days };
+  }
+
+  async function refreshOutlookCalendar() {
+    const account = window.OutlookCalendar.getAccount();
+    if (!account) {
+      await connectOutlookCalendar();
+      return;
+    }
+    const range = updateOutlookCalendarPeriod();
+    setOutlookCalendarConnection(account, true);
+    setOutlookCalendarStatus(`${range.days} günlük Outlook ajandası alınıyor…`, "busy");
+    try {
+      outlookCalendarEvents = await window.OutlookCalendar.fetchCalendarView(range.start, range.end);
+      renderOutlookCalendar();
+      setOutlookCalendarStatus(`${account.username || account.name}: ${outlookCalendarEvents.length} etkinlik gösteriliyor.`, "success");
+    } catch (error) {
+      setOutlookCalendarStatus(`Outlook Takvim alınamadı: ${error.message}`, "error");
+    } finally {
+      setOutlookCalendarConnection(window.OutlookCalendar.getAccount());
+    }
+  }
+
+  async function connectOutlookCalendar() {
+    const settings = window.OutlookCalendar.getSettings();
+    if (!settings.clientId) {
+      $("#outlookCalendarSettings").open = true;
+      setOutlookCalendarStatus("Önce Microsoft Application (client) ID ve Tenant ID bilgilerini kaydedin.", "error");
+      $("#outlookClientId").focus();
+      return;
+    }
+    setOutlookCalendarConnection(null, true);
+    setOutlookCalendarStatus("Microsoft oturum açma sayfasına yönlendiriliyorsunuz…", "busy");
+    try {
+      const account = await window.OutlookCalendar.signIn();
+      if (account) {
+        setOutlookCalendarConnection(account);
+        await refreshOutlookCalendar();
+      }
+    } catch (error) {
+      setOutlookCalendarConnection(null);
+      setOutlookCalendarStatus(`Outlook bağlantısı kurulamadı: ${error.message}`, "error");
+    }
+  }
+
+  async function initializeOutlookCalendar() {
+    const settings = window.OutlookCalendar.getSettings();
+    $("#outlookClientId").value = settings.clientId;
+    $("#outlookTenantId").value = settings.tenantId;
+    $("#outlookRedirectUri").textContent = window.OutlookCalendar.getRedirectUri();
+    updateOutlookCalendarPeriod();
+    if (!settings.clientId) {
+      setOutlookCalendarConnection(null);
+      $("#outlookCalendarSettings").open = true;
+      renderOutlookCalendar();
+      return;
+    }
+    setOutlookCalendarConnection(null, true);
+    try {
+      const state = await window.OutlookCalendar.initialize();
+      setOutlookCalendarConnection(state.account);
+      if (state.account) await refreshOutlookCalendar();
+      else setOutlookCalendarStatus("Outlook takviminizi görmek için hesabınızla bağlanın.");
+    } catch (error) {
+      setOutlookCalendarConnection(null);
+      setOutlookCalendarStatus(`Outlook başlatılamadı: ${error.message}`, "error");
+    }
   }
 
   function buildAiAssistantContext() {
@@ -967,20 +1475,443 @@
     savedTaskEditorRange = nextRange.cloneRange();
   }
 
+  function normalizePersonName(value) {
+    return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("tr-TR");
+  }
+
+  function legacyAssigneeValue(name) {
+    return name ? `legacy:${encodeURIComponent(name)}` : "";
+  }
+
+  function legacyAssigneeName(value) {
+    if (!String(value || "").startsWith("legacy:")) return "";
+    try { return decodeURIComponent(String(value).slice(7)); }
+    catch (_) { return String(value).slice(7); }
+  }
+
+  function taskAssigneeSelectValue(task) {
+    if (task?.assigneeId && window.PeopleStore.get(task.assigneeId)) return task.assigneeId;
+    const matchingPerson = window.PeopleStore.list().find((person) => normalizePersonName(person.fullName) === normalizePersonName(task?.assignee));
+    if (matchingPerson) return matchingPerson.id;
+    return legacyAssigneeValue(task?.assignee || "");
+  }
+
+  function populateTaskAssigneeOptions(selectedValue = taskFields.assignee.value, legacyName = "") {
+    people = window.PeopleStore.list();
+    const options = [];
+    const unassigned = document.createElement("option");
+    unassigned.value = "";
+    unassigned.textContent = "Atanmamış";
+    options.push(unassigned);
+    people.forEach((person) => {
+      const option = document.createElement("option");
+      option.value = person.id;
+      option.textContent = `${person.fullName} — ${person.email}`;
+      options.push(option);
+    });
+    if (selectedValue && !people.some((person) => person.id === selectedValue)) {
+      const name = legacyName || legacyAssigneeName(selectedValue);
+      if (name) {
+        const legacy = document.createElement("option");
+        legacy.value = legacyAssigneeValue(name);
+        legacy.textContent = `${name} — eski görev kaydı`;
+        options.push(legacy);
+        selectedValue = legacy.value;
+      }
+    }
+    taskFields.assignee.replaceChildren(...options);
+    taskFields.assignee.value = options.some((option) => option.value === selectedValue) ? selectedValue : "";
+  }
+
+  function selectedTaskAssignment() {
+    const value = taskFields.assignee.value;
+    const person = window.PeopleStore.get(value);
+    if (person) return { assignee: person.fullName, assigneeId: person.id };
+    return { assignee: legacyAssigneeName(value), assigneeId: "" };
+  }
+
+  function tasksForPerson(person, previousName = "") {
+    const names = new Set([normalizePersonName(person?.fullName), normalizePersonName(previousName)].filter(Boolean));
+    return window.TaskStore.list().filter((task) => task.assigneeId === person?.id || (!task.assigneeId && names.has(normalizePersonName(task.assignee))));
+  }
+
+  function synchronizeTasksForPerson(person, previousName = "") {
+    let updated = 0;
+    tasksForPerson(person, previousName).forEach((task) => {
+      const result = window.TaskStore.update(task.id, { ...task, assignee: person.fullName, assigneeId: person.id });
+      if (result.valid) updated += 1;
+    });
+    return updated;
+  }
+
+  function subordinateIds(personId, includeLeader = true) {
+    const rows = window.PeopleStore.list();
+    const result = new Set(includeLeader && personId ? [personId] : []);
+    const queue = personId ? [personId] : [];
+    while (queue.length) {
+      const managerId = queue.shift();
+      rows.filter((person) => person.managerId === managerId).forEach((person) => {
+        if (result.has(person.id)) return;
+        result.add(person.id);
+        queue.push(person.id);
+      });
+    }
+    return result;
+  }
+
+  function populatePersonManagerOptions(selectedManagerId = personFields.managerId.value, excludedPersonId = personFields.id.value) {
+    people = window.PeopleStore.list();
+    const blockedIds = excludedPersonId ? subordinateIds(excludedPersonId, true) : new Set();
+    const options = [];
+    const rootOption = document.createElement("option");
+    rootOption.value = "";
+    rootOption.textContent = "Yönetici yok — üst seviye";
+    options.push(rootOption);
+    people.forEach((person) => {
+      if (blockedIds.has(person.id)) return;
+      const option = document.createElement("option");
+      option.value = person.id;
+      option.textContent = `${person.fullName}${person.title ? ` — ${person.title}` : ""}`;
+      options.push(option);
+    });
+    personFields.managerId.replaceChildren(...options);
+    personFields.managerId.value = options.some((option) => option.value === selectedManagerId) ? selectedManagerId : "";
+  }
+
+  function resetPersonForm() {
+    personForm.reset();
+    personFields.id.value = "";
+    personFields.role.value = "member";
+    $("#personJiraIdentity").classList.add("hidden");
+    populatePersonManagerOptions("", "");
+    $("#personFormTitle").textContent = "Yeni kişi ekle";
+    $("#personSubmitLabel").textContent = "Kişiyi ekle";
+    $("#cancelPersonEdit").classList.add("hidden");
+    $("#personFormMessage").textContent = "";
+    $("#personFormMessage").classList.remove("success");
+  }
+
+  function startPersonEdit(person) {
+    if (!requireAppEditMode()) return;
+    personFields.id.value = person.id;
+    personFields.fullName.value = person.fullName;
+    personFields.email.value = person.email;
+    personFields.title.value = person.title || "";
+    personFields.role.value = person.role || "member";
+    populatePersonManagerOptions(person.managerId || "", person.id);
+    const identity = $("#personJiraIdentity");
+    identity.classList.toggle("hidden", !person.jiraAccountId);
+    if (person.jiraAccountId) {
+      renderPersonAvatar($("#personJiraIdentityAvatar"), person);
+      $("#personJiraIdentityName").textContent = person.fullName;
+      $("#personJiraIdentityAccount").textContent = person.jiraAccountId;
+    }
+    $("#personFormTitle").textContent = "Kişiyi düzenle";
+    $("#personSubmitLabel").textContent = "Değişiklikleri kaydet";
+    $("#cancelPersonEdit").classList.remove("hidden");
+    $("#personFormMessage").textContent = "";
+    personFields.fullName.focus();
+  }
+
+  function personInitials(person) {
+    return String(person?.fullName || "?").split(/\s+/).filter(Boolean).slice(0, 2)
+      .map((part) => part[0] || "").join("").toLocaleUpperCase("tr-TR");
+  }
+
+  function renderPersonAvatar(container, person) {
+    container.replaceChildren();
+    container.textContent = personInitials(person);
+    if (!person?.avatarUrl) return;
+    const image = document.createElement("img");
+    image.src = person.avatarUrl;
+    image.alt = "";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => image.remove(), { once: true });
+    container.append(image);
+  }
+
+  function setJiraPeopleSyncStatus(message, state = "") {
+    const status = $("#jiraPeopleSyncStatus");
+    status.textContent = message;
+    status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-busy", state === "busy");
+  }
+
+  async function syncJiraPeople() {
+    if (!requireAppEditMode()) return;
+    const button = $("#syncJiraUsers");
+    button.disabled = true;
+    setJiraPeopleSyncStatus("JIRA’daki aktif kullanıcılar alınıyor…", "busy");
+    try {
+      const before = new Map(window.PeopleStore.list().map((person) => [person.id, person]));
+      const response = await window.JiraCloudClient.syncUsers(1000);
+      const result = window.PeopleStore.mergeJiraUsers(response.items || []);
+      if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "JIRA kullanıcıları kaydedilemedi.");
+      let linkedTasks = 0;
+      window.PeopleStore.list().forEach((person) => {
+        const previous = before.get(person.id);
+        if (previous && previous.fullName !== person.fullName) linkedTasks += synchronizeTasksForPerson(person, previous.fullName);
+      });
+      resetPersonForm();
+      renderTasks();
+      renderPeople();
+      backupAndReport("JIRA kullanıcı değişiklikleri bekliyor.");
+      const { created, updated, skipped } = result.value;
+      setJiraPeopleSyncStatus(`${response.total || response.items?.length || 0} aktif kullanıcı alındı: ${created} yeni kişi, ${updated} güncelleme${skipped ? `, ${skipped} atlanan` : ""}${linkedTasks ? `; ${linkedTasks} görev ataması yenilendi` : ""}.`, "success");
+    } catch (error) {
+      setJiraPeopleSyncStatus(`JIRA kullanıcıları alınamadı: ${error.message}`, "error");
+    } finally {
+      button.disabled = !appEditMode;
+    }
+  }
+
+  function renderPeople() {
+    people = window.PeopleStore.list();
+    const searchTerm = String($("#peopleSearchInput").value || "").trim().toLocaleLowerCase("tr-TR");
+    const sourceFilter = $("#peopleSourceFilter").value;
+    const visiblePeople = people.filter((person) => {
+      const source = person.jiraAccountId ? "jira" : "manual";
+      if (sourceFilter && source !== sourceFilter) return false;
+      if (!searchTerm) return true;
+      return [person.fullName, person.email, person.title, person.jiraAccountId, person.timeZone]
+        .some((value) => String(value || "").toLocaleLowerCase("tr-TR").includes(searchTerm));
+    });
+    const list = $("#peopleList");
+    list.replaceChildren();
+    $("#peopleTabCount").textContent = String(people.length);
+    $("#peopleCount").textContent = searchTerm || sourceFilter ? `${visiblePeople.length} / ${people.length} kişi` : `${people.length} kişi`;
+    $("#jiraPeopleCount").textContent = String(people.filter((person) => person.jiraAccountId).length);
+    $("#manualPeopleCount").textContent = String(people.filter((person) => !person.jiraAccountId).length);
+    $("#peopleEmptyState").classList.toggle("hidden", people.length > 0);
+    $("#peopleFilterEmpty").classList.toggle("hidden", people.length === 0 || visiblePeople.length > 0);
+    visiblePeople.forEach((person) => {
+      const card = document.createElement("article");
+      card.className = "person-card";
+      card.dataset.id = person.id;
+      card.dataset.source = person.jiraAccountId ? "jira" : "manual";
+      const avatar = document.createElement("div");
+      avatar.className = "person-avatar";
+      renderPersonAvatar(avatar, person);
+      const name = document.createElement("div");
+      name.className = "person-card-name";
+      const nameLine = document.createElement("div");
+      nameLine.className = "person-card-titleline";
+      const strong = document.createElement("strong");
+      strong.textContent = person.fullName;
+      const sourceBadge = document.createElement("span");
+      sourceBadge.className = `person-source-badge ${person.jiraAccountId ? "jira" : "manual"}`;
+      sourceBadge.textContent = person.jiraAccountId ? "JIRA" : "Manuel";
+      nameLine.append(strong, sourceBadge);
+      const detail = document.createElement("small");
+      const manager = people.find((item) => item.id === person.managerId);
+      detail.textContent = [person.title || (person.role === "leader" ? "Lider" : "Ekip üyesi"), manager ? `${manager.fullName} ekibi` : "Üst seviye"].join(" · ");
+      name.append(nameLine, detail);
+      const contact = document.createElement("div");
+      contact.className = "person-contact";
+      if (person.email) {
+        const email = document.createElement("a");
+        email.className = "person-email";
+        email.href = `mailto:${person.email}`;
+        email.textContent = person.email;
+        contact.append(email);
+      } else {
+        const hiddenEmail = document.createElement("span");
+        hiddenEmail.className = "person-email-hidden";
+        hiddenEmail.textContent = "E-posta JIRA’da gizli";
+        contact.append(hiddenEmail);
+      }
+      if (person.jiraAccountId) {
+        const jiraMeta = document.createElement("small");
+        jiraMeta.className = "person-jira-meta";
+        jiraMeta.textContent = [person.active === false ? "Pasif" : "Aktif", person.timeZone || "JIRA hesabı"].join(" · ");
+        jiraMeta.title = `JIRA Account ID: ${person.jiraAccountId}`;
+        contact.append(jiraMeta);
+      }
+      const assignedTasks = tasksForPerson(person).length;
+      const count = document.createElement("span");
+      count.className = "person-task-count";
+      const countValue = document.createElement("strong");
+      countValue.textContent = String(assignedTasks);
+      const countLabel = document.createElement("small");
+      countLabel.textContent = "görev";
+      count.append(countValue, countLabel);
+      const actions = document.createElement("div");
+      actions.className = "person-card-actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "icon-button";
+      edit.textContent = "Düzenle";
+      edit.addEventListener("click", () => startPersonEdit(person));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "icon-button danger";
+      remove.textContent = "Sil";
+      remove.addEventListener("click", () => {
+        const directReports = people.filter((item) => item.managerId === person.id).length;
+        if (directReports) {
+          $("#personFormMessage").textContent = `${person.fullName} kişisine bağlı ${directReports} ekip üyesi var. Önce bu kişilerin yöneticisini değiştirin.`;
+          $("#personFormMessage").classList.remove("success");
+          return;
+        }
+        const currentTaskCount = tasksForPerson(person).length;
+        if (currentTaskCount) {
+          $("#personFormMessage").textContent = `${person.fullName} ${currentTaskCount} görevde atanmış durumda. Önce bu görevleri başka bir kişiye atayın.`;
+          $("#personFormMessage").classList.remove("success");
+          return;
+        }
+        if (!confirm(`“${person.fullName}” kişi tanımından silinsin mi?`)) return;
+        window.PeopleStore.remove(person.id);
+        if (personFields.id.value === person.id) resetPersonForm();
+        renderPeople();
+        renderTasks();
+        backupAndReport("Silinen kişi Drive’a gönderildi.");
+      });
+      actions.append(edit, remove);
+      card.append(avatar, name, contact, count, actions);
+      list.append(card);
+    });
+    populateTaskAssigneeOptions(taskFields.assignee.value);
+    populatePersonManagerOptions(personFields.managerId.value, personFields.id.value);
+    renderOrganization();
+  }
+
+  function organizationLeaders(rows) {
+    return rows.filter((person) => person.role === "leader" || rows.some((item) => item.managerId === person.id));
+  }
+
+  function renderOrganizationTree(rows, selectedPersonId) {
+    const container = $("#organizationTree");
+    container.replaceChildren();
+    const byManager = new Map();
+    rows.forEach((person) => {
+      const managerId = rows.some((item) => item.id === person.managerId) ? person.managerId : "";
+      if (!byManager.has(managerId)) byManager.set(managerId, []);
+      byManager.get(managerId).push(person);
+    });
+    const visited = new Set();
+    const buildBranch = (managerId, depth) => {
+      const branch = document.createElement("div");
+      branch.className = "organization-branch";
+      branch.style.setProperty("--org-depth", String(depth));
+      (byManager.get(managerId) || []).forEach((person) => {
+        if (visited.has(person.id)) return;
+        visited.add(person.id);
+        const reports = byManager.get(person.id) || [];
+        const button = document.createElement("button");
+        const canShowTeam = person.role === "leader" || reports.length > 0;
+        button.type = "button";
+        button.className = "organization-person";
+        button.classList.toggle("selected", person.id === selectedPersonId);
+        button.dataset.role = person.role || "member";
+        button.disabled = !canShowTeam;
+        button.setAttribute("aria-label", canShowTeam ? `${person.fullName} ekip işlerini göster` : `${person.fullName}, ekip üyesi`);
+        const avatar = document.createElement("span");
+        avatar.className = "organization-avatar person-avatar";
+        renderPersonAvatar(avatar, person);
+        const copy = document.createElement("span");
+        copy.className = "organization-person-copy";
+        const name = document.createElement("strong");
+        name.textContent = person.fullName;
+        const meta = document.createElement("small");
+        meta.textContent = `${person.title || (person.role === "leader" ? "Lider" : "Ekip üyesi")} · ${reports.length} doğrudan bağlı`;
+        copy.append(name, meta);
+        const badge = document.createElement("span");
+        badge.className = "organization-role-badge";
+        badge.textContent = person.role === "leader" || reports.length ? "Lider" : "Üye";
+        button.append(avatar, copy, badge);
+        if (canShowTeam) {
+          button.addEventListener("click", () => {
+            $("#organizationLeaderFilter").value = person.id;
+            renderOrganization();
+          });
+        }
+        branch.append(button);
+        if (reports.length) branch.append(buildBranch(person.id, depth + 1));
+      });
+      return branch;
+    };
+    container.append(buildBranch("", 0));
+  }
+
+  function renderOrganization() {
+    if (!$("#organizationView")) return;
+    const rows = window.PeopleStore.list();
+    const leaderSelect = $("#organizationLeaderFilter");
+    const previousSelection = leaderSelect.value;
+    const leaderOptions = [];
+    const allOption = document.createElement("option");
+    allOption.value = "";
+    allOption.textContent = "Tüm organizasyon";
+    leaderOptions.push(allOption);
+    organizationLeaders(rows).forEach((person) => {
+      const option = document.createElement("option");
+      option.value = person.id;
+      option.textContent = `${person.fullName}${person.title ? ` — ${person.title}` : ""}`;
+      leaderOptions.push(option);
+    });
+    leaderSelect.replaceChildren(...leaderOptions);
+    leaderSelect.value = leaderOptions.some((option) => option.value === previousSelection) ? previousSelection : "";
+
+    const selectedLeader = rows.find((person) => person.id === leaderSelect.value) || null;
+    const teamIds = selectedLeader ? subordinateIds(selectedLeader.id, true) : new Set(rows.map((person) => person.id));
+    const teamRows = rows.filter((person) => teamIds.has(person.id));
+    const teamNames = new Set(teamRows.map((person) => normalizePersonName(person.fullName)));
+    const teamTasks = window.TaskStore.list().filter((task) => teamIds.has(task.assigneeId) || (!task.assigneeId && teamNames.has(normalizePersonName(task.assignee))));
+
+    $("#organizationPeopleCount").textContent = `${rows.length} kişi`;
+    $("#organizationEmptyState").classList.toggle("hidden", rows.length > 0);
+    $("#organizationTree").classList.toggle("hidden", rows.length === 0);
+    $("#organizationWorkloadTitle").textContent = selectedLeader ? `${selectedLeader.fullName} ekibinin işleri` : "Tüm organizasyonun işleri";
+    renderOrganizationTree(rows, selectedLeader?.id || "");
+
+    const stats = $("#organizationTaskStats");
+    stats.replaceChildren();
+    [
+      ["planned", "Bekleyen"],
+      ["in_progress", "Devam eden"],
+      ["completed", "Tamamlanan"]
+    ].forEach(([status, label]) => {
+      const badge = document.createElement("span");
+      badge.dataset.status = status;
+      badge.textContent = `${label} ${teamTasks.filter((task) => task.status === status).length}`;
+      stats.append(badge);
+    });
+
+    $("#organizationTaskEmpty").classList.toggle("hidden", teamTasks.length > 0);
+    $("#organizationTaskTableWrap").classList.toggle("hidden", teamTasks.length === 0);
+    const taskList = $("#organizationTaskList");
+    taskList.replaceChildren();
+    teamTasks.forEach((task) => {
+      const row = document.createElement("tr");
+      const taskCell = document.createElement("td");
+      const taskButton = document.createElement("button");
+      taskButton.type = "button";
+      taskButton.className = "organization-task-link";
+      taskButton.textContent = task.title;
+      taskButton.addEventListener("click", () => showTaskDetail(task));
+      taskCell.append(taskButton);
+      const assignee = document.createElement("td");
+      assignee.textContent = task.assignee || "Atanmamış";
+      const status = document.createElement("td");
+      const statusBadge = document.createElement("span");
+      statusBadge.className = "task-status";
+      statusBadge.dataset.status = task.status;
+      statusBadge.textContent = statusLabel(task.status);
+      status.append(statusBadge);
+      const dueDate = document.createElement("td");
+      dueDate.textContent = task.dueDate ? dateFormatter.format(parseDate(task.dueDate)) : taskPlanLabel(task);
+      row.append(taskCell, assignee, status, dueDate);
+      taskList.append(row);
+    });
+  }
+
   function renderTasks() {
     tasks = window.TaskStore.list();
     populateTaskParentOptions(taskFields.id.value, taskFields.parentTaskId.value);
     const selectedTaskType = $("#taskTypeFilter").value;
     const reportTasks = tasksForType(tasks, selectedTaskType);
-    const assigneeOptions = $("#taskAssigneeOptions");
-    assigneeOptions.replaceChildren();
-    Array.from(new Set(tasks.map((task) => task.assignee).filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b, "tr"))
-      .forEach((assignee) => {
-        const option = document.createElement("option");
-        option.value = assignee;
-        assigneeOptions.append(option);
-      });
+    populateTaskAssigneeOptions(taskFields.assignee.value);
     const openTasks = tasks.filter((task) => task.status !== "completed");
     $("#taskTabCount").textContent = String(openTasks.length);
     $("#taskReportCount").textContent = String(tasks.length);
@@ -995,6 +1926,7 @@
       ? (nextDashboardTask.dueDate ? dateFormatter.format(parseDate(nextDashboardTask.dueDate)) : taskPlanLabel(nextDashboardTask))
       : "Teslim tarihi bulunmuyor";
     $("#addNextTaskToCalendar").disabled = !nextDashboardTask?.dueDate;
+    $("#addNextTaskToOutlookCalendar").disabled = !nextDashboardTask?.dueDate;
 
     const list = $("#taskList");
     list.replaceChildren();
@@ -1013,12 +1945,173 @@
       });
       list.append(groupRow);
     });
+    renderOrganization();
     renderHomeDashboard();
+  }
+
+  function saveJiraTableLayout() {
+    localStorage.setItem(JIRA_TABLE_LAYOUT_KEY, JSON.stringify(jiraTableLayout));
+  }
+
+  function visibleJiraColumns() {
+    const byId = new Map(JIRA_TABLE_COLUMNS.map((column) => [column.id, column]));
+    return jiraTableLayout.order
+      .filter((id) => jiraTableLayout.visible.includes(id))
+      .map((id) => byId.get(id))
+      .filter(Boolean);
+  }
+
+  function applyJiraColumnWidths(columnId = "") {
+    const columns = columnId ? JIRA_TABLE_COLUMNS.filter((column) => column.id === columnId) : visibleJiraColumns();
+    columns.forEach((column) => {
+      const width = Number(jiraTableLayout.widths[column.id]);
+      document.querySelectorAll(`#jiraIssueTable [data-column-id="${column.id}"]`).forEach((cell) => {
+        if (Number.isFinite(width) && width > 0) {
+          cell.style.width = `${width}px`;
+          cell.style.minWidth = `${width}px`;
+          cell.style.maxWidth = `${width}px`;
+        } else {
+          cell.style.removeProperty("width");
+          cell.style.minWidth = `${column.min}px`;
+          cell.style.maxWidth = `${column.max}px`;
+        }
+      });
+    });
+  }
+
+  function moveJiraColumn(sourceId, targetId) {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const order = jiraTableLayout.order.filter((id) => id !== sourceId);
+    const targetIndex = order.indexOf(targetId);
+    order.splice(Math.max(0, targetIndex), 0, sourceId);
+    jiraTableLayout.order = order;
+    saveJiraTableLayout();
+    renderJiraItems();
+    $("#jiraColumnStatus").textContent = "Kolon sırası kaydedildi.";
+  }
+
+  function beginJiraColumnResize(event, column) {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const header = handle.closest("th");
+    const startX = event.clientX;
+    const startWidth = header.getBoundingClientRect().width;
+    handle.classList.add("is-resizing");
+    jiraTableLayout.autoFit = false;
+    const resize = (moveEvent) => {
+      const width = Math.max(column.min, Math.min(column.max, Math.round(startWidth + moveEvent.clientX - startX)));
+      jiraTableLayout.widths[column.id] = width;
+      applyJiraColumnWidths(column.id);
+      $("#jiraColumnStatus").textContent = `${column.label} genişliği: ${width}px`;
+    };
+    const finish = () => {
+      handle.classList.remove("is-resizing");
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", finish);
+      saveJiraTableLayout();
+    };
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", finish, { once: true });
+  }
+
+  function renderJiraTableHeader() {
+    const headerRow = $("#jiraTableHeaderRow");
+    headerRow.replaceChildren();
+    visibleJiraColumns().forEach((column) => {
+      const header = document.createElement("th");
+      header.dataset.columnId = column.id;
+      header.draggable = true;
+      header.title = `${column.label} kolonunu sürükleyin veya sağ kenarından boyutlandırın`;
+      const label = document.createElement("span");
+      label.textContent = column.label;
+      const resizer = document.createElement("span");
+      resizer.className = "jira-column-resizer";
+      resizer.setAttribute("aria-hidden", "true");
+      resizer.addEventListener("pointerdown", (event) => beginJiraColumnResize(event, column));
+      resizer.addEventListener("dblclick", (event) => {
+        event.stopPropagation();
+        delete jiraTableLayout.widths[column.id];
+        autoFitJiraColumns(true, column.id);
+      });
+      header.addEventListener("dragstart", (event) => {
+        header.classList.add("is-dragging");
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", column.id);
+      });
+      header.addEventListener("dragend", () => header.classList.remove("is-dragging"));
+      header.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        header.classList.add("is-drop-target");
+      });
+      header.addEventListener("dragleave", () => header.classList.remove("is-drop-target"));
+      header.addEventListener("drop", (event) => {
+        event.preventDefault();
+        header.classList.remove("is-drop-target");
+        moveJiraColumn(event.dataTransfer.getData("text/plain"), column.id);
+      });
+      header.append(label, resizer);
+      headerRow.append(header);
+    });
+  }
+
+  function renderJiraColumnOptions() {
+    const options = $("#jiraColumnOptions");
+    options.replaceChildren();
+    jiraTableLayout.order.forEach((id) => {
+      const column = JIRA_TABLE_COLUMNS.find((item) => item.id === id);
+      if (!column) return;
+      const label = document.createElement("label");
+      label.className = "jira-column-option";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = jiraTableLayout.visible.includes(id);
+      checkbox.disabled = checkbox.checked && jiraTableLayout.visible.length === 1;
+      const text = document.createElement("span");
+      text.textContent = column.label;
+      checkbox.addEventListener("change", () => {
+        jiraTableLayout.visible = checkbox.checked
+          ? [...jiraTableLayout.visible, id]
+          : jiraTableLayout.visible.filter((visibleId) => visibleId !== id);
+        saveJiraTableLayout();
+        renderJiraItems();
+        $("#jiraColumnStatus").textContent = `${column.label} kolonu ${checkbox.checked ? "gösterildi" : "gizlendi"}.`;
+      });
+      label.append(checkbox, text);
+      options.append(label);
+    });
+  }
+
+  function applyJiraColumnLayout(row) {
+    const cells = new Map([...row.children].map((cell) => [cell.dataset.columnId, cell]));
+    row.replaceChildren(...visibleJiraColumns().map((column) => cells.get(column.id)).filter(Boolean));
+  }
+
+  function autoFitJiraColumns(persist = true, onlyColumnId = "") {
+    const columns = visibleJiraColumns().filter((column) => !onlyColumnId || column.id === onlyColumnId);
+    columns.forEach((column) => {
+      const cells = [...document.querySelectorAll(`#jiraIssueTable [data-column-id="${column.id}"]`)];
+      cells.forEach((cell) => {
+        cell.style.removeProperty("width");
+        cell.style.minWidth = `${column.min}px`;
+        cell.style.maxWidth = `${column.max}px`;
+      });
+      const contentWidth = Math.max(column.min, ...cells.map((cell) => Math.ceil(cell.scrollWidth + 2)));
+      jiraTableLayout.widths[column.id] = Math.min(column.max, contentWidth);
+    });
+    jiraTableLayout.autoFit = true;
+    applyJiraColumnWidths(onlyColumnId);
+    if (persist) {
+      saveJiraTableLayout();
+      $("#jiraColumnStatus").textContent = onlyColumnId ? "Kolon içeriğine sığdırıldı." : "Tüm kolonlar içeriklerine göre sığdırıldı.";
+    }
   }
 
   function renderJiraItems() {
     jiraItems = window.JiraStore.list();
     $("#jiraTabCount").textContent = String(jiraItems.length);
+    $("#jiraItemsSubtabCount").textContent = String(jiraItems.length);
+    $("#jiraRequestsSubtabCount").textContent = String(jiraItems.length);
     const searchTerm = $("#jiraSearchInput").value.trim().toLocaleLowerCase("tr-TR");
     const visibleItems = searchTerm
       ? jiraItems.filter((item) => [item.issueType, item.name, item.description, item.assignee, item.reporter, item.priority, item.status, item.resolution, item.dueDate]
@@ -1031,6 +2124,8 @@
     const selectedJiraId = fields.jiraId.value;
     filterEffortJiraOptions(selectedJiraId);
 
+    renderJiraTableHeader();
+    renderJiraColumnOptions();
     const body = $("#jiraTableBody");
     body.replaceChildren();
     visibleItems.forEach((item) => {
@@ -1051,7 +2146,7 @@
       row.querySelector(".jira-created").textContent = item.jiraCreated || formatJiraTimestamp(item.createdAt);
       row.querySelector(".jira-updated").textContent = item.jiraUpdated || formatJiraTimestamp(item.updatedAt);
       row.querySelector(".jira-due-date").textContent = item.dueDate || "—";
-      row.querySelector(".jira-edit-button").addEventListener("click", () => startJiraEdit(item));
+      row.querySelector(".jira-edit-button").addEventListener("click", () => fetchJiraIssueByKey(item.name, { keepInput: true }));
       row.querySelector(".jira-delete-button").addEventListener("click", () => {
         const linkedCount = readEntries().filter((entry) => entry.jiraId === item.id).length;
         if (linkedCount) {
@@ -1065,7 +2160,240 @@
           backupAndReport("Silinen JIRA maddesi Drive’a gönderildi.");
         }
       });
+      applyJiraColumnLayout(row);
       body.append(row);
+    });
+    applyJiraColumnWidths();
+    if (jiraTableLayout.autoFit) requestAnimationFrame(() => autoFitJiraColumns(false));
+    renderJiraRequests();
+  }
+
+  function jiraStatusOrder(status) {
+    const normalized = normalizeJiraSearch(status).replaceAll(" ", "_");
+    if (["done", "closed", "resolved", "completed", "tamamlandi"].includes(normalized)) return 2;
+    if (["in_progress", "in_review", "review", "devam_ediyor"].includes(normalized)) return 1;
+    return 0;
+  }
+
+  function jiraRequestStatusKey(status) {
+    return String(status || "Statü belirtilmedi").trim().toLocaleLowerCase("tr-TR") || "statü belirtilmedi";
+  }
+
+  function groupJiraRequestsByStatus(items) {
+    const groups = new Map();
+    items.forEach((item) => {
+      const status = String(item.status || "Statü belirtilmedi").trim() || "Statü belirtilmedi";
+      const key = jiraRequestStatusKey(status);
+      if (!groups.has(key)) groups.set(key, { key, status, items: [] });
+      groups.get(key).items.push(item);
+    });
+    return [...groups.values()].sort((a, b) => jiraStatusOrder(a.status) - jiraStatusOrder(b.status) || a.status.localeCompare(b.status, "tr", { sensitivity: "base" }));
+  }
+
+  function renderJiraRequestStatusFilters(groups) {
+    groups.forEach((group) => {
+      if (!knownJiraRequestStatuses.has(group.key)) selectedJiraRequestStatuses.add(group.key);
+      knownJiraRequestStatuses.add(group.key);
+      knownJiraRequestStatusLabels.set(group.key, group.status);
+    });
+    const container = $("#jiraRequestStatusFilters");
+    container.replaceChildren();
+    groups.forEach((group) => {
+      const label = document.createElement("label");
+      label.className = "jira-request-status-filter";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = group.key;
+      checkbox.checked = selectedJiraRequestStatuses.has(group.key);
+      const status = document.createElement("span");
+      status.textContent = group.status;
+      const count = document.createElement("strong");
+      count.textContent = String(group.items.length);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedJiraRequestStatuses.add(group.key);
+        else selectedJiraRequestStatuses.delete(group.key);
+        renderJiraRequests();
+      });
+      label.append(checkbox, status, count);
+      container.append(label);
+    });
+  }
+
+  function setJiraRequestBoardStatus(message, state = "") {
+    const status = $("#jiraRequestBoardStatus");
+    status.textContent = message;
+    status.classList.toggle("is-busy", state === "busy");
+    status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-error", state === "error");
+  }
+
+  async function transitionJiraRequest(itemId, targetStatus) {
+    if (!requireAppEditMode()) return;
+    const item = window.JiraStore.get(itemId);
+    if (!item || !targetStatus || jiraRequestStatusKey(item.status) === jiraRequestStatusKey(targetStatus)) return;
+    if (jiraRequestTransitionPending) {
+      setJiraRequestBoardStatus("Devam eden statü değişikliğinin tamamlanmasını bekleyin.", "error");
+      return;
+    }
+    const previousItem = { ...item };
+    const approved = confirm(`${item.name} statüsü “${item.status || "Belirtilmedi"}” → “${targetStatus}” olarak değiştirilsin ve JIRA’ya gönderilsin mi?`);
+    if (!approved) {
+      draggedJiraRequestId = "";
+      setJiraRequestBoardStatus(`${item.name} statü değişikliği iptal edildi; kart mevcut sütununda kaldı.`);
+      return;
+    }
+    const optimistic = window.JiraStore.update(item.id, { ...item, status: targetStatus });
+    if (!optimistic.valid) {
+      setJiraRequestBoardStatus(Object.values(optimistic.errors || {}).join(" ") || "Talep statüsü güncellenemedi.", "error");
+      return;
+    }
+    jiraRequestTransitionPending = true;
+    renderJiraItems();
+    setJiraRequestBoardStatus(`${item.name} JIRA’da “${targetStatus}” statüsüne taşınıyor…`, "busy");
+    try {
+      const response = await window.JiraCloudClient.transitionIssue(item.name, targetStatus);
+      if (response.item) {
+        const merged = window.JiraStore.mergeAll([response.item]);
+        if (!merged.valid) throw new Error(Object.values(merged.errors || {}).join(" ") || "Güncel JIRA maddesi kaydedilemedi.");
+      }
+      renderJiraItems();
+      setJiraRequestBoardStatus(`${item.name} başarıyla “${response.item?.status || targetStatus}” statüsüne taşındı.${response.warning ? ` ${response.warning}` : ""}`, "success");
+      backupAndReport("JIRA statü değişikliği Drive’a gönderildi.");
+    } catch (error) {
+      window.JiraStore.update(previousItem.id, previousItem);
+      renderJiraItems();
+      setJiraRequestBoardStatus(`${item.name} taşınamadı; önceki statüsüne geri alındı. ${error.message}`, "error");
+    } finally {
+      jiraRequestTransitionPending = false;
+      draggedJiraRequestId = "";
+    }
+  }
+
+  function renderJiraRequests() {
+    const allItems = window.JiraStore.list();
+    const currentGroups = groupJiraRequestsByStatus(allItems);
+    currentGroups.forEach((group) => knownJiraRequestStatusLabels.set(group.key, group.status));
+    const currentKeys = new Set(currentGroups.map((group) => group.key));
+    const allGroups = [
+      ...currentGroups,
+      ...[...knownJiraRequestStatusLabels.entries()]
+        .filter(([key]) => !currentKeys.has(key))
+        .map(([key, status]) => ({ key, status, items: [] }))
+    ].sort((a, b) => jiraStatusOrder(a.status) - jiraStatusOrder(b.status) || a.status.localeCompare(b.status, "tr", { sensitivity: "base" }));
+    renderJiraRequestStatusFilters(allGroups);
+    const searchTerm = normalizeJiraSearch($("#jiraRequestsSearch").value);
+    const searchedItems = searchTerm
+      ? allItems.filter((item) => [item.name, item.description, item.assignee, item.reporter, item.priority, item.status, item.issueType]
+        .some((value) => normalizeJiraSearch(value).includes(searchTerm)))
+      : allItems;
+    const visibleItems = searchedItems.filter((item) => selectedJiraRequestStatuses.has(jiraRequestStatusKey(item.status)));
+    const hasFilter = selectedJiraRequestStatuses.size !== allGroups.length;
+    $("#jiraRequestTotal").textContent = searchTerm || hasFilter ? `${visibleItems.length} / ${allItems.length} talep` : `${allItems.length} talep`;
+    const showBoard = allItems.length > 0 && selectedJiraRequestStatuses.size > 0;
+    $("#jiraRequestsEmpty").classList.toggle("hidden", showBoard);
+    const emptyTitle = $("#jiraRequestsEmpty h3");
+    const emptyCopy = $("#jiraRequestsEmpty p");
+    emptyTitle.textContent = selectedJiraRequestStatuses.size ? "Gösterilecek talep yok" : "En az bir statü seçin";
+    emptyCopy.textContent = selectedJiraRequestStatuses.size
+      ? "Arama ve statü seçiminize uyan JIRA maddesi bulunamadı."
+      : "Kanban sütunlarını göstermek için yukarıdan bir veya daha fazla statü seçin.";
+    const board = $("#jiraRequestBoard");
+    board.classList.toggle("hidden", !showBoard);
+    board.replaceChildren();
+
+    allGroups.filter((group) => selectedJiraRequestStatuses.has(group.key)).forEach((group) => {
+      const groupItems = searchedItems.filter((item) => jiraRequestStatusKey(item.status) === group.key);
+      const column = document.createElement("section");
+      column.className = "jira-request-column";
+      column.dataset.status = group.key;
+      column.setAttribute("aria-label", `${group.status} statüsü; buraya talep bırakabilirsiniz`);
+      column.addEventListener("dragover", (event) => {
+        const draggedItem = window.JiraStore.get(draggedJiraRequestId);
+        if (!draggedItem || jiraRequestTransitionPending || jiraRequestStatusKey(draggedItem.status) === group.key) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        column.classList.add("is-drop-target");
+      });
+      column.addEventListener("dragleave", (event) => {
+        if (!column.contains(event.relatedTarget)) column.classList.remove("is-drop-target");
+      });
+      column.addEventListener("drop", (event) => {
+        event.preventDefault();
+        column.classList.remove("is-drop-target");
+        const itemId = event.dataTransfer.getData("text/plain") || draggedJiraRequestId;
+        transitionJiraRequest(itemId, group.status);
+      });
+      const header = document.createElement("header");
+      header.className = "jira-request-column-header";
+      const statusBadge = document.createElement("span");
+      statusBadge.className = "jira-status";
+      statusBadge.dataset.status = group.status.toLocaleLowerCase("en-US").replaceAll(" ", "_");
+      statusBadge.textContent = group.status;
+      const count = document.createElement("strong");
+      count.textContent = `${groupItems.length} talep`;
+      header.append(statusBadge, count);
+      const list = document.createElement("div");
+      list.className = "jira-request-list";
+
+      if (!groupItems.length) {
+        const empty = document.createElement("p");
+        empty.className = "jira-request-column-empty";
+        empty.textContent = searchTerm ? "Aramayla eşleşen talep yok." : "Bu statüde talep yok.";
+        list.append(empty);
+      }
+
+      groupItems.forEach((item) => {
+        const card = document.createElement("article");
+        card.className = "jira-request-card";
+        card.draggable = appEditMode && !jiraRequestTransitionPending;
+        card.setAttribute("aria-label", `${item.name} talebi; başka bir statü sütununa sürükleyebilirsiniz`);
+        card.addEventListener("dragstart", (event) => {
+          if (jiraRequestTransitionPending) {
+            event.preventDefault();
+            return;
+          }
+          draggedJiraRequestId = item.id;
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", item.id);
+          card.classList.add("is-dragging");
+          setJiraRequestBoardStatus(`${item.name} taşınıyor; hedef statü sütununa bırakın.`, "busy");
+        });
+        card.addEventListener("dragend", () => {
+          draggedJiraRequestId = "";
+          card.classList.remove("is-dragging");
+          document.querySelectorAll(".jira-request-column.is-drop-target").forEach((item) => item.classList.remove("is-drop-target"));
+          if (!jiraRequestTransitionPending) setJiraRequestBoardStatus("Statüsünü değiştirmek için talep kartını başka bir sütuna sürükleyin.");
+        });
+        const keyLink = document.createElement("a");
+        keyLink.className = "jira-request-key";
+        keyLink.href = item.url;
+        keyLink.target = "_blank";
+        keyLink.rel = "noopener noreferrer";
+        keyLink.textContent = item.name;
+        const issueType = document.createElement("span");
+        issueType.className = "jira-request-type";
+        issueType.textContent = item.issueType || "Task";
+        const title = document.createElement("h3");
+        title.textContent = item.description;
+        const meta = document.createElement("div");
+        meta.className = "jira-request-meta";
+        [
+          `Atanan: ${item.assignee || "Atanmamış"}`,
+          `Öncelik: ${item.priority || "Belirtilmedi"}`,
+          `Güncelleme: ${item.jiraUpdated || formatJiraTimestamp(item.updatedAt)}`
+        ].forEach((value) => {
+          const text = document.createElement("span");
+          text.textContent = value;
+          meta.append(text);
+        });
+        const top = document.createElement("div");
+        top.className = "jira-request-card-top";
+        top.append(keyLink, issueType);
+        card.append(top, title, meta);
+        list.append(card);
+      });
+      column.append(header, list);
+      board.append(column);
     });
   }
 
@@ -1073,35 +2401,6 @@
     if (!value) return "—";
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? String(value) : dateTimeFormatter.format(parsed);
-  }
-
-  function startJiraEdit(item) {
-    jiraFields.id.value = item.id;
-    jiraFields.issueType.value = item.issueType || "Task";
-    jiraFields.name.value = item.name;
-    jiraFields.description.value = item.description;
-    jiraFields.url.value = item.url;
-    jiraFields.assignee.value = item.assignee || "";
-    jiraFields.reporter.value = item.reporter || "";
-    jiraFields.priority.value = item.priority || "";
-    jiraFields.status.value = item.status || "";
-    jiraFields.resolution.value = item.resolution || "";
-    jiraFields.jiraCreated.value = item.jiraCreated || "";
-    jiraFields.jiraUpdated.value = item.jiraUpdated || "";
-    jiraFields.dueDate.value = item.dueDate || "";
-    $("#jiraSubmitLabel").textContent = "Değişiklikleri kaydet";
-    $("#cancelJiraEdit").classList.remove("hidden");
-    jiraFields.name.focus();
-  }
-
-  function resetJiraForm() {
-    jiraForm.reset();
-    jiraFields.id.value = "";
-    jiraFields.issueType.value = "Task";
-    $("#jiraSubmitLabel").textContent = "JIRA maddesini ekle";
-    $("#cancelJiraEdit").classList.add("hidden");
-    $("#jiraFormMessage").textContent = "";
-    $("#jiraFormMessage").classList.remove("success");
   }
 
   function jiraCellText(row, className) {
@@ -1186,6 +2485,13 @@
     return cell;
   }
 
+  function renderRepeatEntryMode() {
+    if (modalEffortMode !== "create") return;
+    $("#effortEditModalSubmitLabel").textContent = $("#modalRepeatEntryToggle").checked
+      ? "Kaydet ve yeni giriş aç"
+      : "Eforu kaydet";
+  }
+
   function loadEffortModalEntry(entryId) {
     const entry = modalEffortEntries.find((item) => item.id === entryId);
     if (!entry) return;
@@ -1198,7 +2504,10 @@
   }
 
   function openEffortEditModal(sourceEntries) {
+    if (!requireAppEditMode()) return;
     modalEffortMode = "edit";
+    $("#modalRepeatEntryToggle").checked = false;
+    $("#modalRepeatEntryToggleField").classList.add("hidden");
     modalEffortEntries = sourceEntries.slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
     const entrySelect = $("#modalEntrySelect");
     entrySelect.replaceChildren();
@@ -1213,12 +2522,17 @@
     if (!modalEffortEntries.length) return;
     $("#effortEditModalTitle").textContent = "Eforu revize et";
     $("#effortEditModalSubmitLabel").textContent = "Değişiklikleri kaydet";
+    $("#deleteEffortModal").classList.remove("hidden");
+    $("#effortEditModalMessage").classList.remove("success");
     loadEffortModalEntry(modalEffortEntries[0].id);
     $("#effortEditModal").showModal();
   }
 
   function openEffortCreateModal(jiraId, date) {
+    if (!requireAppEditMode()) return;
     modalEffortMode = "create";
+    $("#modalRepeatEntryToggleField").classList.remove("hidden");
+    $("#modalRepeatEntryToggle").checked = false;
     modalEffortEntries = [];
     $("#modalEntrySelect").replaceChildren();
     $("#modalEntrySelectField").classList.add("hidden");
@@ -1229,7 +2543,9 @@
     $("#modalDescriptionInput").value = "";
     $("#effortEditModalTitle").textContent = "Timesheet’e efor ekle";
     $("#effortEditModalSubmitLabel").textContent = "Eforu kaydet";
+    $("#deleteEffortModal").classList.add("hidden");
     $("#effortEditModalMessage").textContent = "";
+    $("#effortEditModalMessage").classList.remove("success");
     $("#effortEditModal").showModal();
     $("#modalHoursInput").focus();
   }
@@ -1361,8 +2677,42 @@
           const effortButton = document.createElement("button");
           effortButton.type = "button";
           effortButton.className = "timesheet-effort-button";
-          effortButton.textContent = sheetHours(hours);
           const entriesForCell = row.entries.filter((entry) => entry.date === iso);
+          const effortHours = document.createElement("span");
+          effortHours.className = "timesheet-effort-hours";
+          effortHours.textContent = sheetHours(hours);
+          effortButton.append(effortHours);
+          const jiraSyncCounts = entriesForCell.reduce((counts, entry) => {
+            const status = entry.jiraSyncStatus === "synced" && entry.jiraSyncDirection === "imported" ? "imported" : (entry.jiraSyncStatus || "local");
+            counts[status] = (counts[status] || 0) + 1;
+            return counts;
+          }, {});
+          const jiraSyncSummary = document.createElement("span");
+          jiraSyncSummary.className = "timesheet-jira-sync-summary";
+          [
+            ["synced", "✓", "JIRA’ya gönderildi"],
+            ["imported", "↓", "JIRA’dan alındı"],
+            ["local", "○", "JIRA’ya gönderilmedi"],
+            ["pending", "↑", "JIRA’ya gönderilmedi · onay bekliyor"],
+            ["failed", "!", "JIRA gönderilemedi"]
+          ].forEach(([status, icon, label]) => {
+            const statusCount = jiraSyncCounts[status] || 0;
+            if (!statusCount) return;
+            const marker = document.createElement("span");
+            marker.className = "timesheet-jira-status";
+            marker.dataset.status = status;
+            marker.textContent = `${icon}${statusCount > 1 ? statusCount : ""}`;
+            marker.title = `${statusCount} efor · ${label}`;
+            marker.setAttribute("aria-label", marker.title);
+            jiraSyncSummary.append(marker);
+          });
+          if (jiraSyncSummary.childElementCount) effortButton.append(jiraSyncSummary);
+          const syncedCount = jiraSyncCounts.synced || 0;
+          const importedCount = jiraSyncCounts.imported || 0;
+          const localCount = jiraSyncCounts.local || 0;
+          const pendingCount = jiraSyncCounts.pending || 0;
+          const failedCount = jiraSyncCounts.failed || 0;
+          effortButton.setAttribute("aria-label", `${row.issueKey} · ${dateFormatter.format(date)} · ${sheetHours(hours)}${syncedCount ? ` · ${syncedCount} JIRA’ya gönderildi` : ""}${importedCount ? ` · ${importedCount} JIRA’dan alındı` : ""}${localCount ? ` · ${localCount} JIRA’ya gönderilmedi` : ""}${pendingCount ? ` · ${pendingCount} gönderim onayı bekliyor` : ""}${failedCount ? ` · ${failedCount} gönderilemedi` : ""}`);
           effortButton.addEventListener("click", () => openEffortEditModal(entriesForCell));
           cell.append(effortButton);
         } else {
@@ -1417,11 +2767,12 @@
   }
 
   function startTaskEdit(task) {
+    if (!requireAppEditMode()) return;
     activateTaskSubview("taskCreateView");
     taskFields.id.value = task.id;
     populateTaskParentOptions(task.id, task.parentTaskId || "");
     taskFields.title.value = task.title;
-    taskFields.assignee.value = task.assignee || "";
+    populateTaskAssigneeOptions(taskAssigneeSelectValue(task), task.assignee || "");
     taskFields.taskType.value = task.taskType || "architecture_roadmap";
     taskFields.priority.value = task.priority || "";
     taskFields.year.value = task.year || "";
@@ -1437,11 +2788,12 @@
   }
 
   function startSubtaskCreate(parentTask) {
+    if (!requireAppEditMode()) return;
     resetTaskForm();
     activateTaskSubview("taskCreateView");
     populateTaskParentOptions("", parentTask.id);
     taskFields.parentTaskId.value = parentTask.id;
-    taskFields.assignee.value = parentTask.assignee || "";
+    populateTaskAssigneeOptions(taskAssigneeSelectValue(parentTask), parentTask.assignee || "");
     taskFields.priority.value = parentTask.priority || "";
     taskFields.year.value = parentTask.year || "";
     taskFields.quarter.value = parentTask.quarter || "";
@@ -1457,7 +2809,7 @@
     taskFields.id.value = "";
     populateTaskParentOptions();
     taskFields.parentTaskId.value = "";
-    taskFields.assignee.value = "";
+    populateTaskAssigneeOptions("");
     taskFields.taskType.value = "architecture_roadmap";
     taskFields.priority.value = "";
     taskFields.year.value = "";
@@ -1542,39 +2894,94 @@
     return {
       entries: readEntries(),
       tasks: window.TaskStore.list(),
+      people: window.PeopleStore.list(),
       jiraItems: window.JiraStore.list(),
       reminders: window.ReminderStore.list()
     };
   }
 
+  const EDIT_ACTION_SELECTOR = [
+    "[data-task-tab=\"taskCreateView\"]", "#openReminderModal", "#addTimesheetEffort", "#syncJiraIssues", "#syncJiraWorklogs", "#syncJiraUsers",
+    ".edit-button", ".delete-button", ".jira-edit-button", ".jira-delete-button", ".reminder-complete-button",
+    ".reminder-row-actions button", ".person-card-actions button", ".task-check", ".timesheet-effort-button", ".timesheet-empty-effort-button"
+  ].join(",");
+  const EDIT_FORM_SELECTOR = "#effortForm,#taskForm,#personForm,#jiraForm,#reminderForm,#taskPlanPasteForm,#effortEditModalForm";
+
+  function updateAppEditModeUi() {
+    document.body.classList.toggle("app-edit-mode", appEditMode);
+    document.body.classList.toggle("app-has-unsaved-changes", appEditDirty);
+    $("#appEditModeLabel").textContent = appEditMode ? "Düzenleme modu" : "Görüntüleme modu";
+    $("#appEditModeStatus").textContent = appEditDirty
+      ? (appEditMode ? "Yerel değişiklikler Drive’a gönderilmeyi bekliyor." : "Drive’a gönderilmemiş yerel değişiklikler var.")
+      : (appEditMode ? "Değişiklik yapabilirsiniz. Kaydet yalnızca Drive’a gönderir." : "Değişiklik yapmak için Düzenle’ye basın.");
+    $("#enterAppEditMode").textContent = appEditMode ? "Düzenleme açık" : "Düzenle";
+    $("#enterAppEditMode").disabled = appEditMode;
+    $("#saveAppChanges").disabled = !appEditDirty;
+    ["#effortForm", "#taskCreateView", "#peopleView .people-form-panel", "#jiraItemsView .jira-form-panel", "#reminderForm", "#effortEditModalForm"].forEach((selector) => {
+      const element = $(selector);
+      if (element) element.inert = !appEditMode;
+    });
+    ["#openReminderModal", "#addTimesheetEffort", "#syncJiraIssues", "#syncJiraWorklogs", "#syncJiraUsers", "#jiraHtmlImport", "#taskPlanImport"].forEach((selector) => {
+      const element = $(selector);
+      if (element) element.disabled = !appEditMode;
+    });
+    document.querySelectorAll(".jira-request-card").forEach((card) => { card.draggable = appEditMode && !jiraRequestTransitionPending; });
+  }
+
+  function setAppEditMode(enabled) {
+    appEditMode = Boolean(enabled);
+    if (appEditMode) sessionStorage.setItem(APP_EDIT_SESSION_KEY, "true");
+    else sessionStorage.removeItem(APP_EDIT_SESSION_KEY);
+    updateAppEditModeUi();
+  }
+
+  function requireAppEditMode() {
+    if (appEditMode) return true;
+    $("#appEditModeStatus").textContent = "Bu işlem için önce Düzenle’ye basın.";
+    $("#appEditToolbar").classList.add("needs-attention");
+    setTimeout(() => $("#appEditToolbar").classList.remove("needs-attention"), 1200);
+    return false;
+  }
+
+  function markAppDirty() {
+    appEditDirty = true;
+    localStorage.setItem(APP_DIRTY_KEY, "true");
+    updateAppEditModeUi();
+    setDriveStatus("Değişiklik yerel olarak kaydedildi. Drive’a göndermek için Kaydet’e basın.");
+  }
+
+  async function saveAppChangesToDrive(message = "Değişiklikler Google Drive’a kaydedildi.") {
+    setDriveStatus("Veriler Google Drive’a gönderiliyor…");
+    try {
+      const result = await window.DriveSync.backup(backupBundle());
+      appEditDirty = false;
+      localStorage.removeItem(APP_DIRTY_KEY);
+      updateLastBackupTime(result.modifiedTime);
+      setDriveStatus(message);
+      $("#restorePrompt").classList.add("hidden");
+      setAppEditMode(false);
+      return true;
+    } catch (error) {
+      setDriveStatus(`Drive yedeklemesi yapılamadı: ${error.message}`, true);
+      updateAppEditModeUi();
+      return false;
+    }
+  }
+
   function setDriveBusy(busy) {
-    ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive", "#initialRestoreButton"].forEach((selector) => {
+    ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive", "#initialRestoreButton", "#saveAppChanges"].forEach((selector) => {
       $(selector).disabled = busy;
     });
   }
 
   async function backupAndReport(message = "Kayıt Drive’a otomatik gönderildi.") {
-    setDriveStatus("Veriler Google Drive’a gönderiliyor…");
-    try {
-      const result = await window.DriveSync.backup(backupBundle());
-      updateLastBackupTime(result.modifiedTime);
-      setDriveStatus(message);
-      $("#restorePrompt").classList.add("hidden");
-      return true;
-    } catch (error) {
-      setDriveStatus(`Drive yedeklemesi yapılamadı: ${error.message}`, true);
-      return false;
-    }
-  }
-
-  function finalAutoBackup() {
-    if (!window.DriveSync?.getClientId() || !window.DriveSync.hasAccessToken()) return;
-    window.DriveSync.backup(backupBundle(), { silent: true, keepalive: true }).catch(() => {});
+    markAppDirty();
+    return true;
   }
 
   async function restoreFromDrive() {
     const backup = await window.DriveSync.restore();
-    if ((readEntries().length || window.TaskStore.list().length || window.JiraStore.list().length || window.ReminderStore.list().length) && !confirm(`Drive yedeğindeki ${backup.entries.length} efor, ${(backup.tasks || []).length} görev, ${(backup.jiraItems || []).length} JIRA maddesi ve ${(backup.reminders || []).length} hatırlatma yerel verilerin yerine yüklensin mi?`)) {
+    if ((readEntries().length || window.TaskStore.list().length || window.PeopleStore.list().length || window.JiraStore.list().length || window.ReminderStore.list().length) && !confirm(`Drive yedeğindeki ${backup.entries.length} efor, ${(backup.tasks || []).length} görev, ${(backup.people || []).length} kişi, ${(backup.jiraItems || []).length} JIRA maddesi ve ${(backup.reminders || []).length} hatırlatma yerel verilerin yerine yüklensin mi?`)) {
       setDriveStatus("Geri yükleme iptal edildi.");
       return;
     }
@@ -1582,6 +2989,8 @@
     if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "Yedek doğrulanamadı.");
     const taskResult = window.TaskStore.replaceAll(backup.tasks || []);
     if (!taskResult.valid) throw new Error(Object.values(taskResult.errors || {}).join(" ") || "Görev yedeği doğrulanamadı.");
+    const peopleResult = window.PeopleStore.replaceAll(backup.people || []);
+    if (!peopleResult.valid) throw new Error(Object.values(peopleResult.errors || {}).join(" ") || "Kişi yedeği doğrulanamadı.");
     window.TaskStore.ensureHierarchy();
     const jiraResult = window.JiraStore.replaceAll(backup.jiraItems || []);
     if (!jiraResult.valid) throw new Error(Object.values(jiraResult.errors || {}).join(" ") || "JIRA yedeği doğrulanamadı.");
@@ -1589,20 +2998,24 @@
     if (!reminderResult.valid) throw new Error(Object.values(reminderResult.errors || {}).join(" ") || "Hatırlatma yedeği doğrulanamadı.");
     renderJiraItems();
     render();
+    renderPeople();
     renderTasks();
+    appEditDirty = false;
+    localStorage.removeItem(APP_DIRTY_KEY);
+    updateAppEditModeUi();
     updateLastBackupTime(backup.file.modifiedTime);
     $("#restorePrompt").classList.add("hidden");
-    setDriveStatus(`${backup.entries.length} efor ve ${(backup.reminders || []).length} hatırlatma Google Drive’dan geri yüklendi.`);
+    setDriveStatus(`${backup.entries.length} efor, ${(backup.tasks || []).length} görev ve ${(backup.people || []).length} kişi Google Drive’dan geri yüklendi.`);
   }
 
   async function runDriveAction(action) {
     setDriveBusy(true);
     try { await action(); }
     catch (error) { setDriveStatus(error.message || "Google Drive işlemi tamamlanamadı.", true); }
-    finally { setDriveBusy(false); }
+    finally { setDriveBusy(false); updateAppEditModeUi(); }
   }
 
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const invalid = Object.values(fields).filter((field) => field !== fields.id && !field.checkValidity());
     Object.values(fields).forEach((field) => field.toggleAttribute("aria-invalid", invalid.includes(field)));
@@ -1614,6 +3027,7 @@
       return;
     }
     const editing = Boolean(fields.id.value);
+    const previousEntry = editing ? getStore()?.get?.(fields.id.value) : null;
     const savedDate = fields.date.value;
     const selectedJira = getJiraItem(fields.jiraId.value);
     if (!selectedJira) {
@@ -1637,10 +3051,46 @@
       return;
     }
     resetForm(savedDate);
-    $("#formMessage").textContent = editing ? "Kayıt güncellendi." : "Efor kaydı eklendi.";
+    const jiraSync = await syncEffortToJira(result.value, previousEntry);
+    $("#formMessage").textContent = jiraSync.ok
+      ? `${editing ? "Kayıt güncellendi" : "Efor kaydı eklendi"} ve JIRA worklog’una gönderildi.`
+      : (jiraSync.approvalDeclined
+        ? `${editing ? "Kayıt güncellendi" : "Efor kaydı eklendi"}; JIRA gönderimi onaylanmadı.`
+        : jiraSync.skipped
+        ? (editing ? "Kayıt güncellendi." : "Efor kaydı eklendi.")
+        : `${editing ? "Kayıt güncellendi" : "Efor kaydı eklendi"}; JIRA gönderimi bekliyor.`);
     $("#formMessage").classList.add("success");
     render();
-    backupAndReport(editing ? "Güncellenen kayıt Drive’a gönderildi." : "Yeni kayıt Drive’a gönderildi.");
+    backupAndReport(editing ? "Güncellenen kayıt bekliyor." : "Yeni kayıt bekliyor.");
+  });
+
+  personForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const editingPerson = personFields.id.value ? window.PeopleStore.get(personFields.id.value) : null;
+    const payload = {
+      fullName: personFields.fullName.value,
+      email: personFields.email.value,
+      title: personFields.title.value,
+      role: personFields.role.value,
+      managerId: personFields.managerId.value
+    };
+    const result = editingPerson
+      ? window.PeopleStore.update(editingPerson.id, payload)
+      : window.PeopleStore.create(payload);
+    if (!result.valid) {
+      $("#personFormMessage").textContent = Object.values(result.errors || {}).join(" ");
+      $("#personFormMessage").classList.remove("success");
+      return;
+    }
+    const linkedTasks = synchronizeTasksForPerson(result.value, editingPerson?.fullName || "");
+    resetPersonForm();
+    renderTasks();
+    renderPeople();
+    $("#personFormMessage").textContent = editingPerson
+      ? `Kişi güncellendi${linkedTasks ? `; ${linkedTasks} görevdeki atama yenilendi` : ""}.`
+      : `Kişi eklendi${linkedTasks ? `; ${linkedTasks} eski görev kaydı bu kişiye bağlandı` : ""}.`;
+    $("#personFormMessage").classList.add("success");
+    backupAndReport(editingPerson ? "Güncellenen kişi Drive’a gönderildi." : "Yeni kişi Drive’a gönderildi.");
   });
 
   taskForm.addEventListener("submit", (event) => {
@@ -1648,11 +3098,13 @@
     const editing = Boolean(taskFields.id.value);
     const selectedParent = tasks.find((task) => task.id === taskFields.parentTaskId.value) || null;
     const creatingSubtask = !editing && Boolean(selectedParent);
+    const assignment = selectedTaskAssignment();
     const payload = {
       title: taskFields.title.value.trim(),
       parentTaskId: selectedParent?.id || "",
       parentItem: selectedParent?.title || "",
-      assignee: taskFields.assignee.value.trim(),
+      assignee: assignment.assignee,
+      assigneeId: assignment.assigneeId,
       taskType: taskFields.taskType.value,
       priority: taskFields.priority.value,
       year: taskFields.year.value,
@@ -1693,47 +3145,55 @@
       $("#reminderFormMessage").classList.remove("success");
       return;
     }
-    const message = editingItem ? "Hatırlatma güncellendi." : "Not ve hatırlatma eklendi.";
-    resetReminderForm();
-    $("#reminderFormMessage").textContent = message;
-    $("#reminderFormMessage").classList.add("success");
+    closeReminderModal();
     renderReminders();
     backupAndReport(editingItem ? "Güncellenen hatırlatma Drive’a gönderildi." : "Yeni hatırlatma Drive’a gönderildi.");
   });
 
-  jiraForm.addEventListener("submit", (event) => {
+  jiraForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const editing = Boolean(jiraFields.id.value);
-    const payload = {
-      issueType: jiraFields.issueType.value,
-      name: jiraFields.name.value.trim(),
-      description: jiraFields.description.value.trim(),
-      url: jiraFields.url.value.trim(),
-      assignee: jiraFields.assignee.value.trim(),
-      reporter: jiraFields.reporter.value.trim(),
-      priority: jiraFields.priority.value,
-      status: jiraFields.status.value.trim(),
-      resolution: jiraFields.resolution.value.trim(),
-      jiraCreated: jiraFields.jiraCreated.value.trim(),
-      jiraUpdated: jiraFields.jiraUpdated.value.trim(),
-      dueDate: jiraFields.dueDate.value.trim()
-    };
-    const result = editing ? window.JiraStore.update(jiraFields.id.value, payload) : window.JiraStore.create(payload);
-    if (!result.valid) {
-      $("#jiraFormMessage").textContent = Object.values(result.errors || {}).join(" ");
+    jiraFields.name.value = jiraFields.name.value.trim().toUpperCase();
+    if (!jiraFields.name.checkValidity()) {
+      $("#jiraFormMessage").textContent = "RD-179 gibi geçerli bir JIRA Key girin.";
       $("#jiraFormMessage").classList.remove("success");
+      jiraFields.name.focus();
       return;
     }
-    resetJiraForm();
-    $("#jiraFormMessage").textContent = editing ? "JIRA maddesi güncellendi." : "JIRA maddesi eklendi.";
-    $("#jiraFormMessage").classList.add("success");
-    renderJiraItems();
-    render();
-    backupAndReport(editing ? "Güncellenen JIRA maddesi Drive’a gönderildi." : "Yeni JIRA maddesi Drive’a gönderildi.");
+    await fetchJiraIssueByKey(jiraFields.name.value);
   });
 
   $("#cancelTaskEdit").addEventListener("click", resetTaskForm);
-  $("#cancelReminderEdit").addEventListener("click", resetReminderForm);
+  $("#cancelPersonEdit").addEventListener("click", resetPersonForm);
+  $("#syncJiraUsers").addEventListener("click", syncJiraPeople);
+  $("#peopleSearchInput").addEventListener("input", renderPeople);
+  $("#peopleSourceFilter").addEventListener("change", renderPeople);
+  $("#openReminderModal").addEventListener("click", openReminderCreateModal);
+  $("#closeReminderModal").addEventListener("click", closeReminderModal);
+  $("#cancelReminderEdit").addEventListener("click", closeReminderModal);
+  $("#reminderModal").addEventListener("cancel", () => resetReminderForm());
+  $("#connectOutlookCalendar").addEventListener("click", connectOutlookCalendar);
+  $("#refreshOutlookCalendar").addEventListener("click", refreshOutlookCalendar);
+  $("#disconnectOutlookCalendar").addEventListener("click", async () => {
+    setOutlookCalendarStatus("Microsoft oturumu kapatılıyor…", "busy");
+    try { await window.OutlookCalendar.signOut(); }
+    catch (error) { setOutlookCalendarStatus(`Outlook oturumu kapatılamadı: ${error.message}`, "error"); }
+  });
+  $("#outlookCalendarRange").addEventListener("change", () => {
+    updateOutlookCalendarPeriod();
+    if (window.OutlookCalendar.getAccount()) refreshOutlookCalendar();
+  });
+  $("#saveOutlookSettings").addEventListener("click", async () => {
+    try {
+      const settings = window.OutlookCalendar.saveSettings($("#outlookClientId").value, $("#outlookTenantId").value);
+      $("#outlookClientId").value = settings.clientId;
+      $("#outlookTenantId").value = settings.tenantId;
+      setOutlookCalendarStatus("Outlook ayarları kaydedildi. Şimdi Outlook’a bağlanabilirsiniz.", "success");
+      setOutlookCalendarConnection(null);
+      $("#outlookCalendarSettings").open = false;
+    } catch (error) {
+      setOutlookCalendarStatus(error.message, "error");
+    }
+  });
   $("#openAiAssistant").addEventListener("click", () => setAiAssistantPanel(true));
   $("#closeAiAssistant").addEventListener("click", () => setAiAssistantPanel(false));
   $("#aiAssistantForm").addEventListener("submit", (event) => {
@@ -1785,7 +3245,21 @@
     const task = selectedTaskDetailId ? window.TaskStore.get(selectedTaskDetailId) : null;
     if (task) startTaskEdit(task);
   });
-  $("#cancelJiraEdit").addEventListener("click", resetJiraForm);
+  $("#saveJiraApiEndpoint").addEventListener("click", () => {
+    try {
+      const endpoint = window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
+      $("#jiraApiEndpoint").value = endpoint;
+      setJiraCloudStatus("JIRA backend adresi kaydedildi.", "success");
+    } catch (error) {
+      setJiraCloudStatus(error.message, "error");
+    }
+  });
+  $("#testJiraConnection").addEventListener("click", testJiraCloudConnection);
+  $("#syncJiraIssues").addEventListener("click", syncJiraCloudIssues);
+  $("#jiraAutoWorklog").addEventListener("change", (event) => {
+    localStorage.setItem(JIRA_AUTO_WORKLOG_KEY, String(event.target.checked));
+    setJiraCloudStatus(event.target.checked ? "JIRA worklog gönderimi için kayıt sonrası onay istenecek." : "JIRA worklog gönderimi kapatıldı.", "success");
+  });
   $("#jiraItemSearchInput").addEventListener("input", () => filterEffortJiraOptions());
   $("#jiraItemPickerButton").addEventListener("click", () => {
     const isOpen = $("#jiraItemPickerButton").getAttribute("aria-expanded") === "true";
@@ -1830,6 +3304,27 @@
     if (!$("#jiraItemPicker").contains(event.target)) setEffortJiraPickerOpen(false);
   });
   $("#jiraSearchInput").addEventListener("input", renderJiraItems);
+  $("#jiraRequestsSearch").addEventListener("input", renderJiraRequests);
+  $("#selectAllJiraRequestStatuses").addEventListener("click", () => {
+    groupJiraRequestsByStatus(window.JiraStore.list()).forEach((group) => selectedJiraRequestStatuses.add(group.key));
+    renderJiraRequests();
+  });
+  $("#clearJiraRequestStatuses").addEventListener("click", () => {
+    selectedJiraRequestStatuses.clear();
+    renderJiraRequests();
+  });
+  $("#autoFitJiraColumns").addEventListener("click", () => autoFitJiraColumns(true));
+  $("#resetJiraColumns").addEventListener("click", () => {
+    jiraTableLayout = {
+      order: JIRA_TABLE_COLUMNS.map((column) => column.id),
+      visible: JIRA_TABLE_COLUMNS.map((column) => column.id),
+      widths: {},
+      autoFit: true
+    };
+    saveJiraTableLayout();
+    renderJiraItems();
+    $("#jiraColumnStatus").textContent = "Kolon görünümü varsayılan düzene döndürüldü.";
+  });
   $("#jiraHtmlImport").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1853,6 +3348,9 @@
   $("#addNextTaskToCalendar").addEventListener("click", () => {
     if (nextDashboardTask?.dueDate) window.open(googleCalendarUrl(nextDashboardTask), "_blank", "noopener,noreferrer");
   });
+  $("#addNextTaskToOutlookCalendar").addEventListener("click", () => {
+    if (nextDashboardTask?.dueDate) window.open(outlookCalendarUrl(nextDashboardTask), "_blank", "noopener,noreferrer");
+  });
 
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.addEventListener("click", () => activateMainView(button.dataset.tab));
@@ -1862,8 +3360,13 @@
     button.addEventListener("click", () => activateMainView(button.dataset.homeTarget));
   });
 
+  $("#organizationLeaderFilter").addEventListener("change", renderOrganization);
+
   document.querySelectorAll(".task-subtab-button").forEach((button) => {
     button.addEventListener("click", () => activateTaskSubview(button.dataset.taskTab));
+  });
+  document.querySelectorAll(".jira-subtab-button").forEach((button) => {
+    button.addEventListener("click", () => activateJiraSubview(button.dataset.jiraTab));
   });
   $("#taskTypeFilter").addEventListener("change", (event) => {
     renderTasks();
@@ -1873,8 +3376,18 @@
   const closeEffortModal = () => $("#effortEditModal").close();
   $("#closeEffortEditModal").addEventListener("click", closeEffortModal);
   $("#cancelEffortEditModal").addEventListener("click", closeEffortModal);
-  effortEditModalForm.addEventListener("submit", (event) => {
+  $("#deleteEffortModal").addEventListener("click", async () => {
+    const entry = modalEffortEntries.find((item) => item.id === $("#modalEntrySelect").value) || modalEffortEntries[0];
+    if (!entry) {
+      $("#effortEditModalMessage").textContent = "Silinecek efor kaydı bulunamadı.";
+      return;
+    }
+    if (await deleteEffortEntry(entry)) closeEffortModal();
+  });
+  $("#modalRepeatEntryToggle").addEventListener("change", renderRepeatEntryMode);
+  effortEditModalForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    $("#effortEditModalMessage").classList.remove("success");
     const modalFields = [$("#modalJiraInput"), $("#modalDateInput"), $("#modalHoursInput"), $("#modalDescriptionInput")];
     const invalidField = modalFields.find((field) => !field.checkValidity());
     if (invalidField) {
@@ -1888,7 +3401,6 @@
       return;
     }
     const payload = {
-      date: $("#modalDateInput").value,
       project: jiraItem.name,
       jiraId: jiraItem.id,
       hours: Number($("#modalHoursInput").value),
@@ -1896,18 +3408,39 @@
       notes: ""
     };
     const entry = modalEffortEntries.find((item) => item.id === $("#modalEntrySelect").value) || modalEffortEntries[0];
-    const result = modalEffortMode === "create"
-      ? saveEntry(payload)
-      : (entry ? getStore().update(entry.id, { ...entry, ...payload }) : { valid: false, errors: { id: "Kayıt bulunamadı." } });
+    if (modalEffortMode === "create") {
+      const repeatEntry = $("#modalRepeatEntryToggle").checked;
+      const result = saveEntry({ ...payload, date: $("#modalDateInput").value });
+      if (!result?.valid) {
+        $("#effortEditModalMessage").textContent = Object.values(result?.errors || {}).join(" ") || "Efor kaydı oluşturulamadı.";
+        return;
+      }
+      await syncEffortToJira(result.value);
+      render();
+      markAppDirty();
+      if (repeatEntry) {
+        $("#modalDateInput").value = "";
+        $("#modalHoursInput").value = "";
+        $("#effortEditModalMessage").textContent = "Efor kaydedildi. Yeni giriş için tarih ve süreyi girin.";
+        $("#effortEditModalMessage").classList.add("success");
+        renderRepeatEntryMode();
+        $("#modalDateInput").focus();
+        return;
+      }
+      closeEffortModal();
+      return;
+    }
+    const result = entry
+      ? getStore().update(entry.id, { ...entry, ...payload, date: $("#modalDateInput").value })
+      : { valid: false, errors: { id: "Kayıt bulunamadı." } };
     if (!result.valid) {
       $("#effortEditModalMessage").textContent = Object.values(result.errors || {}).join(" ");
       return;
     }
+    await syncEffortToJira(result.value, entry);
     closeEffortModal();
     render();
-    backupAndReport(modalEffortMode === "create"
-      ? "Timesheet üzerinden eklenen efor Drive’a gönderildi."
-      : "Timesheet üzerinden güncellenen efor Drive’a gönderildi.");
+    backupAndReport("Timesheet üzerinden güncellenen efor Drive’a gönderildi.");
   });
 
   function updateTimesheetControls() {
@@ -1924,6 +3457,8 @@
   $("#timesheetStartDate").addEventListener("change", renderTimesheet);
   $("#timesheetEndDate").addEventListener("change", renderTimesheet);
   $("#includeWeekends").addEventListener("change", renderTimesheet);
+  $("#addTimesheetEffort").addEventListener("click", () => openEffortCreateModal(DUMMY_JIRA.id, isoToday()));
+  $("#syncJiraWorklogs").addEventListener("click", syncTimesheetJiraWorklogs);
   $("#timesheetPrevious").addEventListener("click", () => {
     const reference = parseDate($("#timesheetReferenceDate").value || isoToday());
     if ($("#timesheetPeriod").value === "month") { reference.setDate(1); reference.setMonth(reference.getMonth() - 1); }
@@ -1971,8 +3506,24 @@
     } catch (error) { setDriveStatus(error.message, true); }
   });
 
+  $("#enterAppEditMode").addEventListener("click", () => setAppEditMode(true));
+  $("#saveAppChanges").addEventListener("click", () => runDriveAction(() => saveAppChangesToDrive()));
+
+  document.addEventListener("click", (event) => {
+    if (appEditMode || !event.target.closest(EDIT_ACTION_SELECTOR)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requireAppEditMode();
+  }, true);
+  document.addEventListener("submit", (event) => {
+    if (appEditMode || !event.target.matches(EDIT_FORM_SELECTOR)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requireAppEditMode();
+  }, true);
+
   $("#backupToDrive").addEventListener("click", () => runDriveAction(async () => {
-    await backupAndReport("Yedek Google Drive’a kaydedildi.");
+    await saveAppChangesToDrive("Yedek Google Drive’a kaydedildi.");
   }));
 
   $("#restoreFromDrive").addEventListener("click", () => runDriveAction(restoreFromDrive));
@@ -1980,11 +3531,6 @@
   $("#skipInitialRestore").addEventListener("click", () => {
     $("#restorePrompt").classList.add("hidden");
     setDriveStatus("Drive geri yüklemesi bu açılış için atlandı.");
-  });
-
-  window.addEventListener("pagehide", finalAutoBackup);
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") finalAutoBackup();
   });
 
   $("#todayLabel").textContent = dateFormatter.format(new Date());
@@ -2004,10 +3550,15 @@
   $("#timesheetStartDate").value = isoFromDate(rangeMonday);
   $("#timesheetEndDate").value = isoFromDate(addDays(rangeMonday, 6));
   $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
+  $("#jiraApiEndpoint").value = window.JiraCloudClient.getEndpoint();
+  $("#jiraAutoWorklog").checked = localStorage.getItem(JIRA_AUTO_WORKLOG_KEY) !== "false";
   renderJiraItems();
   render();
+  initializeOutlookCalendar();
   window.TaskStore.ensureHierarchy();
   window.TaskStore.migrateExistingTasksToArchitectureRoadmap();
+  renderPeople();
   renderTasks();
+  updateAppEditModeUi();
   applyInitialRoute();
 })();
