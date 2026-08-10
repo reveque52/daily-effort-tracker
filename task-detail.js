@@ -49,6 +49,21 @@
     return Number.isNaN(date.getTime()) ? "Belirtilmedi" : dateTimeFormatter.format(date);
   }
 
+  function formatDocumentSize(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function safeDocumentUrl(attachment) {
+    const value = String(attachment?.webViewLink || attachment?.webContentLink || "").trim();
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" ? url.href : "";
+    } catch { return ""; }
+  }
+
   function taskUrl(taskId) {
     return `task-detail.html?id=${encodeURIComponent(taskId)}`;
   }
@@ -118,6 +133,39 @@
     const description = $("#detailPageDescription");
     description.innerHTML = sanitizeTaskHtml(task.descriptionHtml);
     if (!description.textContent.trim()) description.textContent = "Bu görev için detaylı açıklama girilmemiş.";
+
+    const attachments = Array.isArray(task.attachments) ? task.attachments : [];
+    $("#detailPageDocumentCount").textContent = String(attachments.length);
+    const documentList = $("#detailPageDocumentList");
+    if (!attachments.length) {
+      const empty = document.createElement("p");
+      empty.className = "task-detail-document-empty";
+      empty.textContent = "Bu göreve henüz doküman eklenmedi.";
+      documentList.append(empty);
+    } else {
+      attachments.forEach((attachment) => {
+        const url = safeDocumentUrl(attachment);
+        const card = document.createElement(url ? "a" : "div");
+        card.className = "task-detail-page-document";
+        if (url) {
+          card.href = url;
+          card.target = "_blank";
+          card.rel = "noopener noreferrer";
+        }
+        const icon = document.createElement("span");
+        icon.className = "task-detail-document-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = "↗";
+        const copy = document.createElement("span");
+        const name = document.createElement("strong");
+        name.textContent = attachment.name || "İsimsiz doküman";
+        const meta = document.createElement("small");
+        meta.textContent = [formatDocumentSize(attachment.size), attachment.mimeType || "Dosya", formatDateTime(attachment.uploadedAt)].join(" · ");
+        copy.append(name, meta);
+        card.append(icon, copy);
+        documentList.append(card);
+      });
+    }
 
     $("#detailPageSubtaskCount").textContent = String(subtasks.length);
     const subtaskList = $("#detailPageSubtaskList");

@@ -18,6 +18,8 @@ const jiraCloudClient = fs.readFileSync(path.join(root, "jira-cloud.js"), "utf8"
 const outlookCalendarClient = fs.readFileSync(path.join(root, "outlook-calendar.js"), "utf8");
 const googleCalendarClient = fs.readFileSync(path.join(root, "google-calendar.js"), "utf8");
 const supabaseCloudClient = fs.readFileSync(path.join(root, "supabase-cloud.js"), "utf8");
+const jiraEdgeFunction = fs.readFileSync(path.join(root, "supabase", "functions", "jira-proxy", "index.ts"), "utf8");
+const jiraVaultMigration = fs.readFileSync(path.join(root, "supabase", "migrations", "20260810190000_jira_credentials_vault.sql"), "utf8");
 const aiServer = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 const taskDetailHtml = fs.readFileSync(path.join(root, "task-detail.html"), "utf8");
@@ -39,10 +41,10 @@ const requiredIds = [
   "aiAssistantEndpoint", "saveAiAssistantEndpoint",
   "effortForm", "entryId", "dateInput", "hoursInput",
   "descriptionInput", "filterDateInput", "entryList", "entryTemplate",
-  "dailyTotal", "dailyDays", "effortWeekHours", "effortWeekDays", "effortMonthHours", "effortMonthDays", "grandTotal", "effortTotalDays", "entryCount", "formMessage", "lastBackupTime", "appEditMenu", "headerEditModeLabel", "headerUnsavedBadge", "appEditToolbar", "appEditModeDot", "appEditModeLabel", "appEditModeStatus", "enterAppEditMode", "saveAppChanges",
-  "driveHeaderMenu", "headerDriveMenuLabel", "headerDriveMenuBadge", "restorePrompt", "initialRestoreButton", "skipInitialRestore",
+  "dailyTotal", "dailyDays", "effortWeekHours", "effortWeekDays", "effortMonthHours", "effortMonthDays", "grandTotal", "effortTotalDays", "entryCount", "formMessage", "lastBackupTime",
+  "driveHeaderMenu", "headerDriveMenuLabel", "headerDriveMenuBadge", "driveCompactPanel", "driveCompactTitle", "driveConnectionBadge", "driveSettingsSummary", "driveClientIdPreview", "editDriveSettings", "driveSettingsEditor", "cancelDriveSettings", "skipInitialRestore",
   "supabaseHeaderMenu", "headerSupabaseMenuLabel", "headerSupabaseMenuBadge", "supabaseConnectionBadge", "supabaseStatus", "supabaseAuthForm", "supabaseEmail", "supabasePassword", "supabaseSignIn", "supabaseSignUp", "supabaseForgotPassword", "supabaseRecoveryForm", "supabaseNewPassword", "supabaseSignedInPanel", "supabaseUserEmail", "supabaseOrganizationName", "supabaseLastSync", "supabasePull", "supabasePush", "supabaseSignOut",
-  "tasksView", "taskForm", "taskTitleInput", "taskDueDateInput", "taskStatusInput", "taskDescriptionInput",
+  "tasksView", "taskForm", "taskTitleInput", "taskDueDateInput", "taskStatusInput", "taskDescriptionInput", "taskDocumentsInput", "taskDocumentSelectionSummary", "taskDocumentList",
   "taskParentTaskInput", "taskAssigneeInput", "taskTypeInput", "taskPriorityInput", "taskYearInput", "taskQuarterInput", "taskPlanImport",
   "openTaskPlanPaste", "taskPlanImportModal", "taskPlanPasteForm", "taskPlanTextInput", "taskPlanPasteMessage",
   "taskList", "taskTemplate", "taskTypeGroupTemplate", "taskCreateView", "taskReportView", "taskDetailView", "taskDetailTitle",
@@ -52,19 +54,19 @@ const requiredIds = [
   "timesheetGrouping",
   "jiraItemPicker", "jiraItemPickerButton", "jiraItemPickerValue", "jiraItemPickerDropdown", "jiraItemSearchInput", "jiraItemSearchCount", "jiraItemOptionList", "jiraItemInput", "jiraView", "jiraForm", "jiraNameInput", "jiraSubmitButton", "jiraSubmitLabel",
   "jiraList", "jiraTemplate", "jiraHtmlImport",
-  "jiraCloudTitle", "jiraOAuthBadge", "connectJiraOAuth", "disconnectJiraOAuth", "jiraApiEndpoint", "jiraSyncJql", "saveJiraApiEndpoint", "testJiraConnection", "syncJiraIssues", "jiraAutoWorklog", "jiraCloudStatus",
+  "jiraHeaderMenu", "headerJiraMenuLabel", "headerJiraMenuBadge", "jiraCloudTitle", "jiraOAuthBadge", "connectJiraOAuth", "disconnectJiraOAuth", "jiraCredentialTitle", "jiraCredentialBadge", "jiraCredentialStatus", "jiraCredentialBaseUrl", "jiraCredentialEmail", "jiraCredentialToken", "saveJiraCredentials", "removeJiraCredentials", "jiraSyncJql", "testJiraConnection", "syncJiraIssues", "jiraAutoWorklog", "jiraCloudStatus",
   "jiraSearchInput", "jiraColumnManager", "jiraColumnOptions", "autoFitJiraColumns", "resetJiraColumns", "jiraColumnStatus", "jiraIssueTable", "jiraTableHeaderRow", "jiraTableBody", "jiraItemsView", "jiraRequestsView", "jiraItemsSubtabCount", "jiraRequestsSubtabCount", "jiraRequestsTitle", "jiraRequestsSearch", "jiraRequestTotal", "jiraRequestStatusFilters", "selectAllJiraRequestStatuses", "clearJiraRequestStatuses", "jiraRequestBoardStatus", "jiraRequestsEmpty", "jiraRequestBoard", "effortEditModal", "effortEditModalForm", "modalEntrySelect",
   "modalJiraInput", "modalDateInput", "modalHoursInput", "modalDescriptionInput", "effortEditModalSubmitLabel", "deleteEffortModal",
   "modalRepeatEntryToggleField", "modalRepeatEntryToggle",
-  "peopleView", "peopleTabCount", "syncJiraUsers", "jiraPeopleSyncTitle", "jiraPeopleSyncStatus", "jiraPeopleCount", "manualPeopleCount", "personForm", "personId", "personJiraIdentity", "personJiraIdentityAvatar", "personJiraIdentityName", "personJiraIdentityAccount", "personFullNameInput", "personEmailInput", "personTitleInput", "personRoleInput", "personManagerInput", "personFormMessage", "personFormTitle", "personSubmitLabel", "cancelPersonEdit", "peopleListTitle", "peopleCount", "peopleSearchInput", "peopleSourceFilter", "peopleEmptyState", "peopleFilterEmpty", "peopleList",
-  "organizationView", "organizationLeaderFilter", "organizationTreeTitle", "organizationPeopleCount", "organizationEmptyState", "organizationTree", "organizationWorkloadTitle", "organizationTaskStats", "organizationTaskEmpty", "organizationTaskTableWrap", "organizationTaskList",
+  "teamView", "peopleView", "peopleTabCount", "syncJiraUsers", "jiraPeopleSyncTitle", "jiraPeopleSyncStatus", "jiraPeopleCount", "manualPeopleCount", "personForm", "personId", "personJiraIdentity", "personJiraIdentityAvatar", "personJiraIdentityName", "personJiraIdentityAccount", "personFullNameInput", "personEmailInput", "personTitleInput", "personRoleInput", "personManagerInput", "personFormMessage", "personFormTitle", "personSubmitLabel", "cancelPersonEdit", "peopleListTitle", "peopleCount", "peopleSearchInput", "peopleSourceFilter", "peopleEmptyState", "peopleFilterEmpty", "peopleList",
+  "organizationView", "organizationLeaderFilter", "organizationWorkloadTitle", "organizationTaskStats", "organizationTaskEmpty", "organizationTaskTableWrap", "organizationTaskList",
 ];
 
 for (const id of requiredIds) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `Eksik DOM sözleşmesi: #${id}`);
 }
 
-for (const id of ["taskDetailPageContent", "detailPageTitle", "detailPageTaskType", "detailPagePriority", "detailPageStatus", "detailPageCompleted", "detailPageOverviewTask", "detailPageParent", "detailPageAssignee", "detailPagePriorityValue", "detailPagePlan", "detailPageDueDate", "detailPageStatusValue", "detailPageDescription", "detailPageSubtaskList", "detailPageRevise"]) {
+for (const id of ["taskDetailPageContent", "detailPageTitle", "detailPageTaskType", "detailPagePriority", "detailPageStatus", "detailPageCompleted", "detailPageOverviewTask", "detailPageParent", "detailPageAssignee", "detailPagePriorityValue", "detailPagePlan", "detailPageDueDate", "detailPageStatusValue", "detailPageDescription", "detailPageDocumentCount", "detailPageDocumentList", "detailPageSubtaskList", "detailPageRevise"]) {
   assert.match(taskDetailHtml, new RegExp(`id=["']${id}["']`), `Eksik görev detay sayfası sözleşmesi: #${id}`);
 }
 
@@ -169,6 +171,18 @@ assert.match(aiServer, /oauth\/token\/accessible-resources/, "JIRA OAuth yetkile
 assert.match(aiServer, /api\.atlassian\.com\/ex\/jira\/\$\{encodeURIComponent\(session\.cloudId\)\}/, "JIRA OAuth API çağrıları yetkilendirilen cloudId üzerinden yapılmalı");
 assert.match(aiServer, /JIRA_SESSION_COOKIE[\s\S]*HttpOnly[\s\S]*SameSite=None[\s\S]*Secure/, "JIRA OAuth oturumu HttpOnly ve HTTPS üzerinde cross-site güvenli çerez kullanmalı");
 assert.doesNotMatch(jiraCloudClient, /client_secret|JIRA_OAUTH_CLIENT_SECRET|access_token|refresh_token/, "JIRA OAuth sırları ve tokenları frontend kodunda bulunmamalı");
+assert.match(supabaseCloudClient, /async function invokeJira[\s\S]*functions\.invoke\("jira-proxy"[\s\S]*getSession/, "GitHub Pages JIRA istekleri Supabase oturumuyla Edge Function'a gönderilmeli");
+assert.match(jiraCloudClient, /supabase:jira-proxy[\s\S]*SupabaseCloud\.invokeJira[\s\S]*function saveCredentials[\s\S]*function removeCredentials/, "JIRA istemcisi Supabase proxy ve kullanıcı bağlantı bakımını desteklemeli");
+assert.match(jiraCloudClient, /githubPages[\s\S]*saved\.startsWith\("\/"\)[\s\S]*supabase:jira-proxy/, "GitHub Pages'teki eski göreli backend ayarı otomatik olarak Supabase proxy'ye taşınmalı");
+assert.match(jiraEdgeFunction, /admin\.auth\.getUser\(token\)[\s\S]*get_jira_credentials[\s\S]*save_jira_credentials[\s\S]*delete_jira_credentials/, "JIRA Edge Function Supabase kullanıcısını doğrulayıp kişisel bağlantıyı güvenli RPC üzerinden yönetmeli");
+assert.match(jiraEdgeFunction, /Authorization:\s*`Basic[\s\S]*\/rest\/api\/3\/search\/jql[\s\S]*\/worklog/, "JIRA Edge Function issue ve worklog işlemlerini sunucu tarafında gerçekleştirmeli");
+assert.doesNotMatch(jiraEdgeFunction, /ATATT|sb_secret_[A-Za-z0-9_-]+|JIRA_API_TOKEN\s*=/, "Edge Function kaynak kodunda gerçek bir JIRA veya Supabase sırrı bulunmamalı");
+assert.match(jiraVaultMigration, /private\.jira_credentials[\s\S]*vault\.create_secret[\s\S]*vault\.decrypted_secrets[\s\S]*revoke all[\s\S]*service_role/, "JIRA tokenı Vault'ta şifreli tutulmalı ve yalnızca service_role RPC erişimine açık olmalı");
+assert.match(app, /async function saveJiraCredentials[\s\S]*JiraCloudClient\.saveCredentials[\s\S]*async function removeJiraCredentials[\s\S]*JiraCloudClient\.removeCredentials/, "JIRA bağlantı bilgileri uygulamadan kaydedilip kaldırılabilmeli");
+assert.match(html, /class="header-utility-nav"[\s\S]*id="supabaseHeaderMenu"[\s\S]*id="driveHeaderMenu"[\s\S]*id="jiraHeaderMenu"[\s\S]*id="jiraCredentialTitle"[\s\S]*id="jiraSyncJql"[\s\S]*id="jiraAutoWorklog"/, "JIRA bağlantı ve senkronizasyon ayarları Bulut hesabı ile Yedekleme yanındaki ana menüde bulunmalı");
+assert.doesNotMatch(html, /id="jiraApiEndpoint"|id="saveJiraApiEndpoint"|JIRA servis yöntemi|Adresi kaydet/, "Kullanıcının JIRA servis adresini elle yönetmesine gerek kalmamalı");
+assert.match(app, /function refreshJiraHeaderMenu[\s\S]*headerJiraMenuLabel[\s\S]*is-connected[\s\S]*Ayarlar aktif/, "JIRA ana menüsü etkin bağlantıyı yeşil durumla göstermeli");
+assert.match(css, /header-jira-menu\.is-connected[^{]*\{[^}]*background:\s*#1f9d74[\s\S]*jira-header-popover/, "Bağlı JIRA menüsü yeşil görünmeli ve ayarlar açılır pencerede yer almalı");
 assert.match(app, /function renderJiraOAuthState[\s\S]*jiraOAuthBadge[\s\S]*connectJiraOAuth[\s\S]*disconnectJiraOAuth/, "JIRA OAuth bağlantı durumu arayüzde gösterilmeli");
 assert.match(app, /connectJiraOAuth"\)\.addEventListener\("click"[\s\S]*signInWithJira[\s\S]*disconnectJiraOAuth"\)\.addEventListener\("click"[\s\S]*signOutFromJira/, "JIRA giriş ve çıkış düğmeleri OAuth istemcisine bağlanmalı");
 assert.match(aiServer, /\/rest\/api\/3\/search\/jql[\s\S]*mapJiraIssue/, "Backend JQL ile JIRA maddelerini senkronize etmeli");
@@ -223,7 +237,7 @@ assert.match(taskTypeReportApp, /TaskStore\.TASK_TYPES[\s\S]*filter\(\(task\)[\s
 assert.match(html, /taskPriorityInput[\s\S]*taskYearInput[\s\S]*taskQuarterInput/, "Görev formunda öncelik, yıl ve çeyrek alanları eksik");
 assert.match(html, /taskTypeInput[\s\S]*meeting_organization[\s\S]*management_request/, "Görev tipi seçenekleri eksik");
 assert.match(html, /taskTypeInput[\s\S]*architecture_roadmap/, "Architecture Roadmap görev tipi eksik");
-assert.match(html, /id="taskAssigneeInput"[^>]*>[\s\S]*Atanmamış[\s\S]*Kişileri Kişiler ekranından tanımlayabilirsiniz/, "Görev ataması kişi tanım ekranındaki seçim listesine bağlanmalı");
+assert.match(html, /id="taskAssigneeInput"[^>]*>[\s\S]*Atanmamış[\s\S]*Kişileri Ekip → Kişiler ekranından tanımlayabilirsiniz/, "Görev ataması kişi tanım ekranındaki seçim listesine bağlanmalı");
 assert.doesNotMatch(html, /<thead><tr>[\s\S]*?<th>Görev tipi<\/th>[\s\S]*?<\/tr><\/thead>/, "Görev tipi grup başlığında olduğu için rapor tablosunda yinelenmemeli");
 assert.doesNotMatch(html, /id="taskDueDateInput"[^>]*required/, "Yıl ve çeyrek kullanılan görevlerde teslim tarihi zorunlu olmamalı");
 assert.doesNotMatch(html, /<thead><tr>[^<]*(?:<th[^>]*>[^<]*<\/th>)*<th>Detaylı açıklama<\/th>/, "Görev raporunda detaylı açıklama sütunu olmamalı");
@@ -253,22 +267,28 @@ assert.ok(html.indexOf('src="ai-assistant.js') < html.indexOf('src="app.js'), "A
 assert.match(html, /id="backupToDrive"/, "Drive yedekleme düğmesi eksik");
 assert.match(html, /id="restoreFromDrive"/, "Drive geri yükleme düğmesi eksik");
 assert.match(drive, /drive\.appdata/, "En az yetkili Drive kapsamı kullanılmalı");
+assert.match(drive, /drive\.file/, "Göreve eklenen kullanıcı dosyaları için dar kapsamlı drive.file izni kullanılmalı");
 assert.match(drive, /parents:\s*\["appDataFolder"\]/, "Yedek appDataFolder içine yazılmalı");
+assert.match(drive, /uploadType=resumable[\s\S]*X-Upload-Content-Type[\s\S]*uploadTaskDocuments/, "Görev dokümanları Drive'a resumable upload ile gönderilmeli");
+assert.match(drive, /application\/vnd\.google-apps\.folder[\s\S]*dailyEffortTrackerTaskId/, "Dokümanlar görev kimliğiyle işaretlenmiş ayrı Drive klasörlerinde tutulmalı");
 assert.doesNotMatch(drive, /client_secret/i, "Client Secret tarayıcı kodunda bulunmamalı");
-assert.match(html, /class="drive-toolbar"/, "Drive araç çubuğu eksik");
+assert.match(tasks, /attachments:[\s\S]*normalizeAttachment[\s\S]*MAX_ATTACHMENTS/, "Görev veri modeli yalnızca normalize edilmiş doküman metadatasını saklamalı");
+assert.match(app, /attachments:\s*taskExistingAttachments\.slice\(\)[\s\S]*uploadTaskDocuments[\s\S]*payload\.attachments\s*=\s*\[\.\.\.taskExistingAttachments,\s*\.\.\.uploaded\]/, "Görev formu seçilen dokümanları Drive'a yükleyip görevle ilişkilendirmeli");
+assert.match(taskDetailApp, /safeDocumentUrl[\s\S]*task\.attachments[\s\S]*detailPageDocumentList/, "Görev detay sayfası Drive dokümanlarını güvenli bağlantılarla göstermeli");
+assert.match(html, /class="drive-compact-panel"/, "Kompakt Drive yedekleme paneli eksik");
 const pageHeaderEnd = html.indexOf("</header>");
 const homeViewStart = html.indexOf('id="homeView"');
 const mainMenuStart = html.indexOf('class="main-menu-bar"');
 assert.ok(mainMenuStart > pageHeaderEnd && mainMenuStart < homeViewStart, "Ana navigasyon ve işlem menüleri üst başlığın altında yer almalı");
-assert.ok(html.indexOf('id="appEditMenu"') > pageHeaderEnd && html.indexOf('id="appEditToolbar"') < homeViewStart, "Düzenleme modu kontrolleri ana menüde olmalı");
-assert.ok(html.indexOf('id="driveHeaderMenu"') > pageHeaderEnd && html.indexOf('class="drive-toolbar"') < homeViewStart && html.indexOf('id="restorePrompt"') < homeViewStart, "Drive durumu, ayarları ve geri yükleme çağrısı ana menüde olmalı");
+assert.ok(html.indexOf('id="driveHeaderMenu"') > pageHeaderEnd && html.indexOf('id="driveCompactPanel"') < homeViewStart, "Drive durumu, ayarları ve yedekleme işlemleri tek ana menü panelinde olmalı");
 assert.match(css, /\.main-menu-bar\s*\{[^}]*display:\s*flex/, "Ana menü navigasyon ve işlem kontrollerini aynı satırda toplamalı");
 assert.match(css, /\.header-menu-popover\s*\{[^}]*position:\s*absolute/, "Ana menü işlem kontrolleri kompakt açılır panel olarak stillendirilmeli");
-assert.match(app, /function refreshDriveHeaderMenu[\s\S]*headerDriveMenuBadge[\s\S]*function setRestorePromptVisible[\s\S]*driveHeaderMenu[\s\S]*open\s*=\s*true/, "Bekleyen Drive geri yüklemesi header menüsünde rozet ve otomatik açılma ile belirtilmeli");
-assert.match(app, /headerEditModeLabel[\s\S]*headerUnsavedBadge/, "Header çalışma modu güncel düzenleme ve kaydedilmemiş değişiklik durumunu göstermeli");
+assert.match(app, /function refreshDriveHeaderMenu[\s\S]*configured:\s*"Ayarlar kayıtlı"[\s\S]*driveConnectionBadge/, "Drive paneli kayıtlı ayarı ve bağlantı durumunu göstermeli");
+assert.doesNotMatch(app, /function setRestorePromptVisible/, "Drive paneli sayfa açılışında otomatik açılan geri yükleme çağrısı kullanmamalı");
+assert.doesNotMatch(html, /appEditMenu|Çalışma modu|Görüntüleme modu|Düzenleme modu/, "Çalışma modu menüsü tamamen kaldırılmalı");
 assert.match(app, /backupAndReport\(editing \? "Güncellenen kayıt bekliyor\." : "Yeni kayıt bekliyor\."\)/, "Efor değişiklikleri Drive'a gönderilmek üzere bekleyen olarak işaretlenmeli");
 assert.doesNotMatch(app, /Yeni kayıt Drive’a gönderildi|Timesheet üzerinden eklenen efor Drive’a gönderildi/, "Yeni efor ekleme işlemi Drive yedeği tetiklememeli");
-assert.match(app, /initialRestoreButton.*restoreFromDrive/s, "Açılış geri yükleme çağrısı eksik");
+assert.match(app, /skipInitialRestore"\)\.addEventListener\("click"[\s\S]*driveHeaderMenu"\)\.open\s*=\s*false/, "Şimdilik değil seçeneği Drive panelini kapatmalı");
 assert.match(drive, /LAST_BACKUP_KEY/, "Son Drive sürümü zamanı saklanmalı");
 assert.match(drive, /tasks:\s*Array\.isArray/, "Drive yedeği görevleri de içermeli");
 assert.match(drive, /people:\s*Array\.isArray/, "Drive yedeği kişileri de içermeli");
@@ -298,10 +318,12 @@ assert.match(peopleStore, /Organizasyon yapısında döngü oluşturulamaz/, "Or
 assert.match(app, /function renderPeople[\s\S]*person-card[\s\S]*mailto:[\s\S]*Düzenle[\s\S]*Sil/, "Kişiler ekranı kişi bakım işlemlerini göstermeli");
 assert.match(app, /personForm\.addEventListener\("submit"[\s\S]*PeopleStore\.(?:update|create)[\s\S]*synchronizeTasksForPerson/, "Kişi formu CRUD ve mevcut görev atamalarını koruma akışına bağlanmalı");
 assert.match(app, /currentTaskCount[\s\S]*Önce bu görevleri başka bir kişiye atayın/, "Görev atanmış kişi silinmeye karşı korunmalı");
-assert.match(html, /data-tab="organizationView"[\s\S]*id="organizationView"[\s\S]*id="organizationLeaderFilter"/, "Organizasyon şeması ayrı bir ana sekmede bulunmalı");
-assert.match(app, /function subordinateIds[\s\S]*managerId[\s\S]*function renderOrganizationTree[\s\S]*organization-person/, "Organizasyon ağacı alt ekipleri hiyerarşik göstermeli");
+assert.match(html, /data-tab="teamView"[\s\S]*id="teamView"[\s\S]*data-team-tab="peopleView"[\s\S]*data-team-tab="organizationView"[\s\S]*id="organizationLeaderFilter"/, "Kişiler ve organizasyon Ekip ana sekmesinin alt sekmeleri olmalı");
+assert.doesNotMatch(html, /class="tab-button"[^>]*data-tab="(?:peopleView|organizationView)"/, "Kişiler ve organizasyon ayrı ana menü öğeleri olmamalı");
+assert.match(app, /function activateTeamSubview[\s\S]*team-subtab-button[\s\S]*team-subview/, "Ekip alt sekmeleri bağımsız görünüm değiştirmeli");
 assert.match(app, /function renderOrganization\([\s\S]*teamIds[\s\S]*teamTasks[\s\S]*organizationTaskList/, "Seçilen liderin tüm alt ekibine ait görevler gösterilmeli");
-assert.match(css, /organization-layout[\s\S]*organization-branch[\s\S]*organization-task-table/, "Organizasyon şeması ve ekip iş yükü görünümü stillendirilmeli");
+assert.doesNotMatch(html, /Raporlama hattı|organizationTreeTitle|id="organizationTree"/, "Organizasyon ekranında raporlama hattı ve ekip yapısı paneli bulunmamalı");
+assert.match(css, /organization-layout[^{]*\{[^}]*display:\s*block[\s\S]*organization-task-table/, "Organizasyon ekip iş yükü görünümü tam genişlikte stillendirilmeli");
 assert.match(tasks, /function mergeAll/, "Görev planı toplu içe aktarma desteği eksik");
 assert.match(tasks, /function ensureHierarchy[\s\S]*parentTaskId/, "Ana görev-alt görev veri bağlantısı eksik");
 assert.match(app, /function parseTaskPlanText[\s\S]*priorityMap[\s\S]*quarterEndDate/, "Görev planı TSV ayrıştırıcısı eksik");
@@ -316,7 +338,8 @@ assert.match(taskTypeReportApp, /function detailUrl[\s\S]*new URLSearchParams\(\
 assert.match(app, /function tasksForType[\s\S]*includedIds/, "Görev tipi filtresinde hiyerarşik bağlam korunmalı");
 assert.match(app, /taskTypeFilter[\s\S]*tasksForType[\s\S]*renderTasks/, "Görev tipi filtresi rapora bağlanmalı");
 assert.match(app, /taskType:\s*"architecture_roadmap"/, "Yapıştırılan görev planı Architecture Roadmap olarak işaretlenmeli");
-assert.match(html, /drive-settings-popover[\s\S]*restoreFromDrive[\s\S]*backupToDrive/, "Drive işlemleri Ayarlar içinde olmalı");
+assert.match(html, /driveSettingsSummary[\s\S]*editDriveSettings[\s\S]*driveSettingsEditor[\s\S]*backupToDrive[\s\S]*restoreFromDrive[\s\S]*skipInitialRestore/, "Drive ayarı ve tüm yedekleme işlemleri tek kompakt panelde olmalı");
+assert.match(app, /editDriveSettings"\)\.addEventListener[\s\S]*setDriveSettingsEditing\(true\)[\s\S]*cancelDriveSettings/, "Kayıtlı Drive ayarı yalnızca kullanıcı düzenlemek istediğinde açılmalı");
 assert.match(html, /value="week"[\s\S]*value="month"[\s\S]*value="custom"/, "Timesheet dönem seçenekleri eksik");
 assert.match(app, /getTimesheetRange/, "Timesheet tarih aralığı hesaplaması eksik");
 assert.match(app, /includeWeekends/, "Hafta sonu filtresi eksik");
@@ -371,22 +394,21 @@ assert.match(app, /function beginJiraColumnResize[\s\S]*pointermove[\s\S]*jiraTa
 assert.match(app, /function renderJiraColumnOptions[\s\S]*checkbox[\s\S]*jiraTableLayout\.visible/, "JIRA kolonları görünümden çıkarılıp yeniden eklenebilmeli");
 assert.match(app, /function autoFitJiraColumns[\s\S]*scrollWidth[\s\S]*applyJiraColumnWidths/, "JIRA kolonları içerik genişliğine otomatik sığdırılmalı");
 assert.match(app, /function scheduleJiraAutoFit[\s\S]*requestAnimationFrame[\s\S]*autoFitJiraColumns\(false\)/, "JIRA otomatik sığdırma görünür tablo yerleşiminden sonra çalışmalı");
-assert.match(app, /function activateMainView[\s\S]*viewId === "jiraView"[\s\S]*scheduleJiraAutoFit\(\)[\s\S]*function activateJiraSubview[\s\S]*viewId === "jiraItemsView"[\s\S]*scheduleJiraAutoFit\(\)/, "JIRA Maddeleri tabı ve alt görünümü açıldığında kolonlar yeniden sığdırılmalı");
+assert.match(app, /function activateMainView[\s\S]*mainViewId === "jiraView"[\s\S]*scheduleJiraAutoFit\(\)[\s\S]*function activateJiraSubview[\s\S]*viewId === "jiraItemsView"[\s\S]*scheduleJiraAutoFit\(\)/, "JIRA Maddeleri tabı ve alt görünümü açıldığında kolonlar yeniden sığdırılmalı");
 assert.match(css, /jira-issue-table[^{]*\{[^}]*width:\s*max-content[\s\S]*jira-column-resizer[^{]*\{[^}]*cursor:\s*col-resize/, "JIRA tablosu sıkı içerik genişliği ve kolon boyutlandırma tutamacı kullanmalı");
 assert.match(app, /DOMParser[\s\S]*#issuetable/, "JIRA HTML içe aktarma ayrıştırıcısı eksik");
 assert.match(jira, /mergeAll/, "JIRA HTML kayıtlarını birleştirme desteği eksik");
 assert.match(jira, /normalizeKey[\s\S]*duplicateCount[\s\S]*idRemap/, "JIRA HTML içe aktarımında Key tekilleştirme ve bağlantı eşleme desteği eksik");
 assert.match(app, /function relinkMergedJiraEntries[\s\S]*idRemap\[entry\.jiraId\]/, "Mükerrer JIRA'ya bağlı eforlar korunan JIRA kaydına taşınmalı");
 assert.doesNotMatch(app, /pagehide|visibilitychange/, "Drive yedeği yalnızca kullanıcı Kaydet dediğinde gönderilmeli");
-assert.match(html, /id="appEditToolbar"[\s\S]*id="enterAppEditMode"[\s\S]*id="saveAppChanges"/, "Uygulama Düzenle ve Kaydet araç çubuğunu içermeli");
-assert.match(app, /APP_EDIT_SESSION_KEY[\s\S]*function updateAppEditModeUi[\s\S]*function requireAppEditMode/, "Düzenleme modu oturum boyunca korunmalı ve değişiklik işlemlerini kilitlemeli");
-assert.match(app, /function markAppDirty[\s\S]*APP_DIRTY_KEY/, "Yerel değişiklikler buluta gönderilene kadar kalıcı olarak işaretlenmeli");
-assert.match(app, /function saveAppChangesToCloud[\s\S]*pushToSupabase[\s\S]*setAppEditMode\(false\)/, "Kaydet yerel değişiklikleri Supabase'e gönderip düzenleme modunu kapatmalı");
+assert.doesNotMatch(app, /APP_EDIT_SESSION_KEY|requireAppEditMode|setAppEditMode|EDIT_ACTION_SELECTOR/, "Veri değiştiren kontroller çalışma modu ile kilitlenmemeli");
+assert.doesNotMatch(css, /body:not\(\.app-edit-mode\)/, "Düzenleme işlemleri CSS ile çalışma moduna göre devre dışı bırakılmamalı");
+assert.match(app, /function markLocalChangePending[\s\S]*LOCAL_CHANGES_PENDING_KEY/, "Yerel değişiklikler buluta gönderilene kadar kalıcı olarak işaretlenmeli");
+assert.match(app, /function saveLocalChangesToCloud[\s\S]*pushToSupabase[\s\S]*localChangesPending\s*=\s*false/, "Supabase menüsü yerel değişiklikleri buluta gönderip bekleyen durumunu temizlemeli");
 assert.match(app, /supabaseAuthForm[\s\S]*SupabaseCloud\.signIn[\s\S]*supabaseSignUp[\s\S]*SupabaseCloud\.signUp[\s\S]*supabaseForgotPassword[\s\S]*sendPasswordReset/, "Supabase hesap menüsü giriş, kayıt ve e-posta şifre yenilemeye bağlanmalı");
 assert.match(app, /function pullFromSupabase[\s\S]*replaceLocalBundle[\s\S]*function pushToSupabase[\s\S]*pushBundle\(backupBundle\(\)\)/, "Supabase yükleme ve güvenli yerel veri gönderme akışları eksik");
-assert.match(app, /saveAppChanges"\)\.addEventListener\("click"[\s\S]*runSupabaseAction\(saveAppChangesToCloud\)/, "Ana Kaydet düğmesi Supabase'e göndermeli");
-assert.match(app, /async function backupAndReport[\s\S]*markAppDirty\(\)/, "Eski otomatik yedek çağrıları artık yalnızca yerel değişikliği işaretlemeli");
-assert.match(app, /document\.addEventListener\("click"[\s\S]*EDIT_ACTION_SELECTOR[\s\S]*requireAppEditMode/, "Veri değiştiren kontroller görüntüleme modunda engellenmeli");
+assert.match(app, /supabasePush"\)\.addEventListener\("click"[\s\S]*runSupabaseAction\(saveLocalChangesToCloud\)/, "Supabase gönder düğmesi yerel değişiklikleri buluta göndermeli");
+assert.match(app, /async function backupAndReport[\s\S]*markLocalChangePending\(\)/, "Otomatik yedek çağrıları yalnızca yerel değişikliği işaretlemeli");
 assert.match(drive, /keepalive:\s*Boolean\(options\.keepalive\)/, "Kapanış isteği keepalive kullanmalı");
 
 console.log("✓ frontend DOM/veri katmanı sözleşmesi");
