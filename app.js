@@ -40,7 +40,9 @@
   let savedTaskEditorRange = null;
   let aiConversation = [];
   let aiRequestPending = false;
-  let outlookCalendarEvents = [];
+  let calendarEvents = [];
+  const CALENDAR_PROVIDER_KEY = "daily-effort-tracker.calendar-provider";
+  let activeCalendarProvider = localStorage.getItem(CALENDAR_PROVIDER_KEY) === "outlook" ? "outlook" : "google";
   const selectedJiraRequestStatuses = new Set();
   const knownJiraRequestStatuses = new Set();
   const knownJiraRequestStatusLabels = new Map();
@@ -52,6 +54,7 @@
   let appEditDirty = localStorage.getItem(APP_DIRTY_KEY) === "true";
   const JIRA_AUTO_WORKLOG_KEY = "daily-effort-tracker.jira-auto-worklog";
   const JIRA_TABLE_LAYOUT_KEY = "daily-effort-tracker.jira-table-layout";
+  let jiraAutoFitFrame = 0;
   const JIRA_TABLE_COLUMNS = Object.freeze([
     { id: "issueType", label: "Issue Type", min: 76, max: 170 },
     { id: "key", label: "Key", min: 72, max: 140 },
@@ -751,6 +754,7 @@
       button.setAttribute("aria-selected", String(active));
     });
     document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
+    if (viewId === "jiraView" && !$("#jiraItemsView").classList.contains("hidden")) scheduleJiraAutoFit();
   }
 
   function activateJiraSubview(viewId) {
@@ -760,6 +764,7 @@
       button.setAttribute("aria-selected", String(active));
     });
     document.querySelectorAll(".jira-subview").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
+    if (viewId === "jiraItemsView" && !$("#jiraView").classList.contains("hidden")) scheduleJiraAutoFit();
   }
 
   function renderHomeDashboard() {
@@ -1046,7 +1051,7 @@
     }
   }
 
-  function setOutlookCalendarStatus(message, state = "") {
+  function setCalendarStatus(message, state = "") {
     const status = $("#outlookCalendarStatus");
     status.textContent = message;
     status.classList.toggle("is-success", state === "success");
@@ -1054,13 +1059,28 @@
     status.classList.toggle("is-busy", state === "busy");
   }
 
-  function setOutlookCalendarConnection(account = null, busy = false) {
+  function calendarProviderClient(provider = activeCalendarProvider) {
+    return provider === "google" ? window.GoogleCalendar : window.OutlookCalendar;
+  }
+
+  function calendarProviderLabel(provider = activeCalendarProvider) {
+    return provider === "google" ? "Google Takvim" : "Outlook";
+  }
+
+  function isCalendarConnected(provider = activeCalendarProvider) {
+    return provider === "google"
+      ? Boolean(window.GoogleCalendar?.hasAccessToken())
+      : Boolean(window.OutlookCalendar?.getAccount());
+  }
+
+  function setCalendarConnection(account = null, busy = false) {
+    const connected = activeCalendarProvider === "google" ? isCalendarConnected() : Boolean(account);
     const badge = $("#outlookCalendarConnection");
-    badge.dataset.state = busy ? "busy" : (account ? "connected" : "disconnected");
-    badge.textContent = busy ? "Bağlanıyor…" : (account?.username || account?.name || "Bağlı değil");
-    $("#connectOutlookCalendar").classList.toggle("hidden", Boolean(account));
-    $("#disconnectOutlookCalendar").classList.toggle("hidden", !account);
-    $("#refreshOutlookCalendar").disabled = !account || busy;
+    badge.dataset.state = busy ? "busy" : (connected ? "connected" : "disconnected");
+    badge.textContent = busy ? "Bağlanıyor…" : (account?.username || account?.name || (connected ? "Bağlı" : "Bağlı değil"));
+    $("#connectOutlookCalendar").classList.toggle("hidden", connected);
+    $("#disconnectOutlookCalendar").classList.toggle("hidden", !connected);
+    $("#refreshOutlookCalendar").disabled = !connected || busy;
   }
 
   function outlookEventDate(dateTimeValue, timeZone = "") {
@@ -1070,12 +1090,33 @@
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  function renderOutlookCalendar() {
+  function normalizeCalendarEvent(event, provider = activeCalendarProvider) {
+    if (provider === "google") {
+      return {
+        id: event.id,
+        subject: event.summary || "Başlıksız etkinlik",
+        bodyPreview: event.description || "Google Takvim etkinliği",
+        start: event.start?.dateTime
+          ? { dateTime: event.start.dateTime, timeZone: event.start.timeZone }
+          : { dateTime: `${event.start?.date || ""}T00:00:00`, timeZone: "" },
+        end: event.end?.dateTime
+          ? { dateTime: event.end.dateTime, timeZone: event.end.timeZone }
+          : { dateTime: `${event.end?.date || event.start?.date || ""}T00:00:00`, timeZone: "" },
+        isAllDay: Boolean(event.start?.date && !event.start?.dateTime),
+        location: { displayName: event.location || "" },
+        webLink: event.htmlLink || "",
+        provider: "google"
+      };
+    }
+    return { ...event, provider: "outlook" };
+  }
+
+  function renderCalendar() {
     const list = $("#outlookCalendarList");
     list.replaceChildren();
-    $("#outlookCalendarEmpty").classList.toggle("hidden", outlookCalendarEvents.length > 0);
+    $("#outlookCalendarEmpty").classList.toggle("hidden", calendarEvents.length > 0);
     const groups = new Map();
-    outlookCalendarEvents.forEach((event) => {
+    calendarEvents.forEach((event) => {
       const start = outlookEventDate(event.start?.dateTime, event.start?.timeZone);
       if (!start) return;
       const key = isoFromDate(start);
@@ -1108,7 +1149,7 @@
         const subject = document.createElement("strong");
         subject.textContent = event.subject || "Başlıksız etkinlik";
         const preview = document.createElement("small");
-        preview.textContent = event.bodyPreview || event.organizer?.emailAddress?.name || "Outlook etkinliği";
+        preview.textContent = event.bodyPreview || event.organizer?.emailAddress?.name || `${calendarProviderLabel()} etkinliği`;
         content.append(subject, preview);
         const location = document.createElement("span");
         location.className = "outlook-event-location";
@@ -1121,7 +1162,7 @@
     });
   }
 
-  function updateOutlookCalendarPeriod() {
+  function updateCalendarPeriod() {
     const days = Number($("#outlookCalendarRange").value || 14);
     const start = parseDate(isoToday());
     const end = addDays(start, days);
@@ -1129,69 +1170,113 @@
     return { start, end, days };
   }
 
-  async function refreshOutlookCalendar() {
-    const account = window.OutlookCalendar.getAccount();
-    if (!account) {
-      await connectOutlookCalendar();
+  async function refreshCalendar() {
+    const client = calendarProviderClient();
+    const account = activeCalendarProvider === "outlook" ? client.getAccount() : null;
+    if (!isCalendarConnected()) {
+      await connectCalendar();
       return;
     }
-    const range = updateOutlookCalendarPeriod();
-    setOutlookCalendarConnection(account, true);
-    setOutlookCalendarStatus(`${range.days} günlük Outlook ajandası alınıyor…`, "busy");
+    const range = updateCalendarPeriod();
+    setCalendarConnection(account, true);
+    setCalendarStatus(`${range.days} günlük ${calendarProviderLabel()} ajandası alınıyor…`, "busy");
     try {
-      outlookCalendarEvents = await window.OutlookCalendar.fetchCalendarView(range.start, range.end);
-      renderOutlookCalendar();
-      setOutlookCalendarStatus(`${account.username || account.name}: ${outlookCalendarEvents.length} etkinlik gösteriliyor.`, "success");
+      const rawEvents = await client.fetchCalendarView(range.start, range.end);
+      calendarEvents = rawEvents.map((event) => normalizeCalendarEvent(event));
+      renderCalendar();
+      const accountLabel = account?.username || account?.name;
+      setCalendarStatus(`${accountLabel ? `${accountLabel}: ` : ""}${calendarEvents.length} etkinlik gösteriliyor.`, "success");
     } catch (error) {
-      setOutlookCalendarStatus(`Outlook Takvim alınamadı: ${error.message}`, "error");
+      setCalendarStatus(`${calendarProviderLabel()} alınamadı: ${error.message}`, "error");
     } finally {
-      setOutlookCalendarConnection(window.OutlookCalendar.getAccount());
+      const latestAccount = activeCalendarProvider === "outlook" ? window.OutlookCalendar.getAccount() : null;
+      setCalendarConnection(latestAccount);
     }
   }
 
-  async function connectOutlookCalendar() {
-    const settings = window.OutlookCalendar.getSettings();
-    if (!settings.clientId) {
-      $("#outlookCalendarSettings").open = true;
-      setOutlookCalendarStatus("Önce Microsoft Application (client) ID ve Tenant ID bilgilerini kaydedin.", "error");
-      $("#outlookClientId").focus();
+  async function connectCalendar() {
+    const client = calendarProviderClient();
+    if (activeCalendarProvider === "outlook") {
+      const settings = client.getSettings();
+      if (!settings.clientId) {
+        $("#outlookCalendarSettings").open = true;
+        setCalendarStatus("Önce Microsoft Application (client) ID ve Tenant ID bilgilerini kaydedin.", "error");
+        $("#outlookClientId").focus();
+        return;
+      }
+    } else if (!client.getClientId()) {
+      $("#googleCalendarSettings").open = true;
+      setCalendarStatus("Önce ana menüdeki Google Drive ayarlarından OAuth Client ID’nizi kaydedin.", "error");
       return;
     }
-    setOutlookCalendarConnection(null, true);
-    setOutlookCalendarStatus("Microsoft oturum açma sayfasına yönlendiriliyorsunuz…", "busy");
+    setCalendarConnection(null, true);
+    setCalendarStatus(`${calendarProviderLabel()} oturum açma penceresi hazırlanıyor…`, "busy");
     try {
-      const account = await window.OutlookCalendar.signIn();
-      if (account) {
-        setOutlookCalendarConnection(account);
-        await refreshOutlookCalendar();
-      }
+      const account = activeCalendarProvider === "google" ? (await client.authorize(), null) : await client.signIn();
+      setCalendarConnection(account);
+      if (isCalendarConnected()) await refreshCalendar();
     } catch (error) {
-      setOutlookCalendarConnection(null);
-      setOutlookCalendarStatus(`Outlook bağlantısı kurulamadı: ${error.message}`, "error");
+      setCalendarConnection(null);
+      setCalendarStatus(`${calendarProviderLabel()} bağlantısı kurulamadı: ${error.message}`, "error");
     }
   }
 
-  async function initializeOutlookCalendar() {
+  function updateCalendarProviderUi() {
+    document.querySelectorAll("[data-calendar-provider]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.calendarProvider === activeCalendarProvider));
+    });
+    $("#outlookCalendarSettings").classList.toggle("hidden", activeCalendarProvider !== "outlook");
+    $("#googleCalendarSettings").classList.toggle("hidden", activeCalendarProvider !== "google");
+    $("#connectOutlookCalendar").textContent = activeCalendarProvider === "google" ? "Google’a bağlan" : "Outlook’a bağlan";
+    $("#outlookCalendarEmpty").textContent = `Bu tarih aralığında ${calendarProviderLabel()} etkinliği bulunmuyor.`;
+    const googleConfigured = Boolean(window.GoogleCalendar?.getClientId());
+    $("#googleCalendarClientState").textContent = googleConfigured
+      ? "Google OAuth Client ID hazır."
+      : "Google OAuth Client ID henüz kaydedilmedi.";
+    setCalendarConnection(activeCalendarProvider === "outlook" ? window.OutlookCalendar.getAccount() : null);
+  }
+
+  async function selectCalendarProvider(provider) {
+    if (!['google', 'outlook'].includes(provider) || provider === activeCalendarProvider) return;
+    activeCalendarProvider = provider;
+    localStorage.setItem(CALENDAR_PROVIDER_KEY, provider);
+    calendarEvents = [];
+    renderCalendar();
+    updateCalendarProviderUi();
+    updateCalendarPeriod();
+    if (isCalendarConnected()) await refreshCalendar();
+    else setCalendarStatus(`${calendarProviderLabel()} etkinliklerini görmek için hesabınızla bağlanın.`);
+  }
+
+  async function initializeCalendar() {
     const settings = window.OutlookCalendar.getSettings();
     $("#outlookClientId").value = settings.clientId;
     $("#outlookTenantId").value = settings.tenantId;
     $("#outlookRedirectUri").textContent = window.OutlookCalendar.getRedirectUri();
-    updateOutlookCalendarPeriod();
-    if (!settings.clientId) {
-      setOutlookCalendarConnection(null);
-      $("#outlookCalendarSettings").open = true;
-      renderOutlookCalendar();
+    window.GoogleCalendar.initialize();
+    updateCalendarPeriod();
+    renderCalendar();
+    updateCalendarProviderUi();
+
+    if (activeCalendarProvider === "google") {
+      setCalendarStatus(window.GoogleCalendar.getClientId()
+        ? "Google Takvim etkinliklerini görmek için hesabınızla bağlanın."
+        : "Google OAuth Client ID’nizi ana menüdeki Google Drive ayarlarından kaydedin.");
       return;
     }
-    setOutlookCalendarConnection(null, true);
+    if (!settings.clientId) {
+      setCalendarStatus("Outlook etkinliklerini görmek için önce bağlantı ayarlarını kaydedin.");
+      return;
+    }
+    setCalendarConnection(null, true);
     try {
       const state = await window.OutlookCalendar.initialize();
-      setOutlookCalendarConnection(state.account);
-      if (state.account) await refreshOutlookCalendar();
-      else setOutlookCalendarStatus("Outlook takviminizi görmek için hesabınızla bağlanın.");
+      setCalendarConnection(state.account);
+      if (state.account) await refreshCalendar();
+      else setCalendarStatus("Outlook takviminizi görmek için hesabınızla bağlanın.");
     } catch (error) {
-      setOutlookCalendarConnection(null);
-      setOutlookCalendarStatus(`Outlook başlatılamadı: ${error.message}`, "error");
+      setCalendarConnection(null);
+      setCalendarStatus(`Outlook başlatılamadı: ${error.message}`, "error");
     }
   }
 
@@ -1997,6 +2082,8 @@
     const header = handle.closest("th");
     const startX = event.clientX;
     const startWidth = header.getBoundingClientRect().width;
+    if (jiraAutoFitFrame) cancelAnimationFrame(jiraAutoFitFrame);
+    jiraAutoFitFrame = 0;
     handle.classList.add("is-resizing");
     jiraTableLayout.autoFit = false;
     const resize = (moveEvent) => {
@@ -2107,6 +2194,16 @@
     }
   }
 
+  function scheduleJiraAutoFit() {
+    if (jiraAutoFitFrame) cancelAnimationFrame(jiraAutoFitFrame);
+    jiraAutoFitFrame = requestAnimationFrame(() => {
+      jiraAutoFitFrame = requestAnimationFrame(() => {
+        autoFitJiraColumns(false);
+        jiraAutoFitFrame = 0;
+      });
+    });
+  }
+
   function renderJiraItems() {
     jiraItems = window.JiraStore.list();
     $("#jiraTabCount").textContent = String(jiraItems.length);
@@ -2164,7 +2261,7 @@
       body.append(row);
     });
     applyJiraColumnWidths();
-    if (jiraTableLayout.autoFit) requestAnimationFrame(() => autoFitJiraColumns(false));
+    scheduleJiraAutoFit();
     renderJiraRequests();
   }
 
@@ -2678,6 +2775,9 @@
           effortButton.type = "button";
           effortButton.className = "timesheet-effort-button";
           const entriesForCell = row.entries.filter((entry) => entry.date === iso);
+          const effortDescription = entriesForCell
+            .map((entry) => `${entry.task || entry.description || "Açıklama girilmedi"} (${formatHours(entry.hours)})`)
+            .join("\n");
           const effortHours = document.createElement("span");
           effortHours.className = "timesheet-effort-hours";
           effortHours.textContent = sheetHours(hours);
@@ -2712,7 +2812,8 @@
           const localCount = jiraSyncCounts.local || 0;
           const pendingCount = jiraSyncCounts.pending || 0;
           const failedCount = jiraSyncCounts.failed || 0;
-          effortButton.setAttribute("aria-label", `${row.issueKey} · ${dateFormatter.format(date)} · ${sheetHours(hours)}${syncedCount ? ` · ${syncedCount} JIRA’ya gönderildi` : ""}${importedCount ? ` · ${importedCount} JIRA’dan alındı` : ""}${localCount ? ` · ${localCount} JIRA’ya gönderilmedi` : ""}${pendingCount ? ` · ${pendingCount} gönderim onayı bekliyor` : ""}${failedCount ? ` · ${failedCount} gönderilemedi` : ""}`);
+          effortButton.title = effortDescription;
+          effortButton.setAttribute("aria-label", `${row.issueKey} · ${dateFormatter.format(date)} · ${sheetHours(hours)} · Açıklama: ${effortDescription.replaceAll("\n", " · ")}${syncedCount ? ` · ${syncedCount} JIRA’ya gönderildi` : ""}${importedCount ? ` · ${importedCount} JIRA’dan alındı` : ""}${localCount ? ` · ${localCount} JIRA’ya gönderilmedi` : ""}${pendingCount ? ` · ${pendingCount} gönderim onayı bekliyor` : ""}${failedCount ? ` · ${failedCount} gönderilemedi` : ""}`);
           effortButton.addEventListener("click", () => openEffortEditModal(entriesForCell));
           cell.append(effortButton);
         } else {
@@ -2884,6 +2985,33 @@
     status.textContent = message;
     status.classList.toggle("drive-error", isError);
     $(".drive-toolbar-status").classList.toggle("is-connected", window.DriveSync?.hasAccessToken() && !isError);
+    refreshDriveHeaderMenu();
+  }
+
+  function refreshDriveHeaderMenu() {
+    const menu = $("#driveHeaderMenu");
+    const connected = Boolean(window.DriveSync?.hasAccessToken());
+    const isError = $("#driveStatus").classList.contains("drive-error");
+    const restoreNeeded = !$("#restorePrompt").classList.contains("hidden");
+    menu.classList.toggle("is-connected", connected && !isError);
+    menu.classList.toggle("is-error", isError);
+    menu.classList.toggle("needs-restore", restoreNeeded);
+    $("#headerDriveMenuBadge").classList.toggle("hidden", !restoreNeeded);
+    $("#headerDriveMenuLabel").textContent = restoreNeeded
+      ? "Yedek yükle"
+      : isError
+        ? "Bağlantı hatası"
+        : connected
+          ? "Drive bağlı"
+          : window.DriveSync?.getClientId()
+            ? "Drive hazır"
+            : "Kurulum gerekli";
+  }
+
+  function setRestorePromptVisible(visible, openMenu = visible) {
+    $("#restorePrompt").classList.toggle("hidden", !visible);
+    refreshDriveHeaderMenu();
+    if (visible && openMenu) $("#driveHeaderMenu").open = true;
   }
 
   function updateLastBackupTime(value = window.DriveSync?.getLastBackupTime()) {
@@ -2917,6 +3045,8 @@
     $("#enterAppEditMode").textContent = appEditMode ? "Düzenleme açık" : "Düzenle";
     $("#enterAppEditMode").disabled = appEditMode;
     $("#saveAppChanges").disabled = !appEditDirty;
+    $("#headerEditModeLabel").textContent = appEditMode ? "Düzenleme açık" : "Görüntüleme";
+    $("#headerUnsavedBadge").classList.toggle("hidden", !appEditDirty);
     ["#effortForm", "#taskCreateView", "#peopleView .people-form-panel", "#jiraItemsView .jira-form-panel", "#reminderForm", "#effortEditModalForm"].forEach((selector) => {
       const element = $(selector);
       if (element) element.inert = !appEditMode;
@@ -2937,6 +3067,7 @@
 
   function requireAppEditMode() {
     if (appEditMode) return true;
+    $("#appEditMenu").open = true;
     $("#appEditModeStatus").textContent = "Bu işlem için önce Düzenle’ye basın.";
     $("#appEditToolbar").classList.add("needs-attention");
     setTimeout(() => $("#appEditToolbar").classList.remove("needs-attention"), 1200);
@@ -2958,8 +3089,9 @@
       localStorage.removeItem(APP_DIRTY_KEY);
       updateLastBackupTime(result.modifiedTime);
       setDriveStatus(message);
-      $("#restorePrompt").classList.add("hidden");
+      setRestorePromptVisible(false);
       setAppEditMode(false);
+      $("#appEditMenu").open = false;
       return true;
     } catch (error) {
       setDriveStatus(`Drive yedeklemesi yapılamadı: ${error.message}`, true);
@@ -2972,6 +3104,9 @@
     ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive", "#initialRestoreButton", "#saveAppChanges"].forEach((selector) => {
       $(selector).disabled = busy;
     });
+    $("#driveHeaderMenu").classList.toggle("is-busy", busy);
+    if (busy) $("#headerDriveMenuLabel").textContent = "İşlem yapılıyor";
+    else refreshDriveHeaderMenu();
   }
 
   async function backupAndReport(message = "Kayıt Drive’a otomatik gönderildi.") {
@@ -3004,7 +3139,7 @@
     localStorage.removeItem(APP_DIRTY_KEY);
     updateAppEditModeUi();
     updateLastBackupTime(backup.file.modifiedTime);
-    $("#restorePrompt").classList.add("hidden");
+    setRestorePromptVisible(false);
     setDriveStatus(`${backup.entries.length} efor, ${(backup.tasks || []).length} görev ve ${(backup.people || []).length} kişi Google Drive’dan geri yüklendi.`);
   }
 
@@ -3171,27 +3306,39 @@
   $("#closeReminderModal").addEventListener("click", closeReminderModal);
   $("#cancelReminderEdit").addEventListener("click", closeReminderModal);
   $("#reminderModal").addEventListener("cancel", () => resetReminderForm());
-  $("#connectOutlookCalendar").addEventListener("click", connectOutlookCalendar);
-  $("#refreshOutlookCalendar").addEventListener("click", refreshOutlookCalendar);
+  document.querySelectorAll("[data-calendar-provider]").forEach((button) => {
+    button.addEventListener("click", () => selectCalendarProvider(button.dataset.calendarProvider));
+  });
+  $("#connectOutlookCalendar").addEventListener("click", connectCalendar);
+  $("#refreshOutlookCalendar").addEventListener("click", refreshCalendar);
   $("#disconnectOutlookCalendar").addEventListener("click", async () => {
-    setOutlookCalendarStatus("Microsoft oturumu kapatılıyor…", "busy");
-    try { await window.OutlookCalendar.signOut(); }
-    catch (error) { setOutlookCalendarStatus(`Outlook oturumu kapatılamadı: ${error.message}`, "error"); }
+    const provider = activeCalendarProvider;
+    setCalendarStatus(`${calendarProviderLabel(provider)} bağlantısı kesiliyor…`, "busy");
+    try {
+      if (provider === "google") window.GoogleCalendar.signOut();
+      else await window.OutlookCalendar.signOut();
+      calendarEvents = [];
+      renderCalendar();
+      setCalendarConnection(null);
+      setCalendarStatus(`${calendarProviderLabel(provider)} bağlantısı kesildi.`);
+    } catch (error) {
+      setCalendarStatus(`${calendarProviderLabel(provider)} bağlantısı kesilemedi: ${error.message}`, "error");
+    }
   });
   $("#outlookCalendarRange").addEventListener("change", () => {
-    updateOutlookCalendarPeriod();
-    if (window.OutlookCalendar.getAccount()) refreshOutlookCalendar();
+    updateCalendarPeriod();
+    if (isCalendarConnected()) refreshCalendar();
   });
   $("#saveOutlookSettings").addEventListener("click", async () => {
     try {
       const settings = window.OutlookCalendar.saveSettings($("#outlookClientId").value, $("#outlookTenantId").value);
       $("#outlookClientId").value = settings.clientId;
       $("#outlookTenantId").value = settings.tenantId;
-      setOutlookCalendarStatus("Outlook ayarları kaydedildi. Şimdi Outlook’a bağlanabilirsiniz.", "success");
-      setOutlookCalendarConnection(null);
+      setCalendarStatus("Outlook ayarları kaydedildi. Şimdi Outlook’a bağlanabilirsiniz.", "success");
+      setCalendarConnection(null);
       $("#outlookCalendarSettings").open = false;
     } catch (error) {
-      setOutlookCalendarStatus(error.message, "error");
+      setCalendarStatus(error.message, "error");
     }
   });
   $("#openAiAssistant").addEventListener("click", () => setAiAssistantPanel(true));
@@ -3357,7 +3504,11 @@
   });
 
   document.querySelectorAll("[data-home-target]").forEach((button) => {
-    button.addEventListener("click", () => activateMainView(button.dataset.homeTarget));
+    button.addEventListener("click", () => {
+      const targetView = button.dataset.homeTarget;
+      activateMainView(targetView);
+      if (targetView === "tasksView") activateTaskSubview("taskReportView");
+    });
   });
 
   $("#organizationLeaderFilter").addEventListener("change", renderOrganization);
@@ -3501,12 +3652,17 @@
     try {
       window.DriveSync.setClientId($("#googleClientId").value);
       setDriveStatus("OAuth Client ID kaydedildi. Açılış yedeğini şimdi yükleyebilirsiniz.");
+      updateCalendarProviderUi();
+      if (activeCalendarProvider === "google") setCalendarStatus("Google OAuth Client ID hazır. Şimdi Google Takvim’e bağlanabilirsiniz.", "success");
       $(".drive-settings").open = false;
-      $("#restorePrompt").classList.remove("hidden");
+      setRestorePromptVisible(true);
     } catch (error) { setDriveStatus(error.message, true); }
   });
 
-  $("#enterAppEditMode").addEventListener("click", () => setAppEditMode(true));
+  $("#enterAppEditMode").addEventListener("click", () => {
+    setAppEditMode(true);
+    $("#appEditMenu").open = false;
+  });
   $("#saveAppChanges").addEventListener("click", () => runDriveAction(() => saveAppChangesToDrive()));
 
   document.addEventListener("click", (event) => {
@@ -3529,8 +3685,23 @@
   $("#restoreFromDrive").addEventListener("click", () => runDriveAction(restoreFromDrive));
   $("#initialRestoreButton").addEventListener("click", () => runDriveAction(restoreFromDrive));
   $("#skipInitialRestore").addEventListener("click", () => {
-    $("#restorePrompt").classList.add("hidden");
+    setRestorePromptVisible(false);
     setDriveStatus("Drive geri yüklemesi bu açılış için atlandı.");
+    $("#driveHeaderMenu").open = false;
+  });
+
+  document.querySelectorAll(".header-menu").forEach((menu) => {
+    menu.addEventListener("toggle", () => {
+      if (!menu.open) return;
+      document.querySelectorAll(".header-menu[open]").forEach((otherMenu) => {
+        if (otherMenu !== menu) otherMenu.open = false;
+      });
+    });
+  });
+  document.addEventListener("click", (event) => {
+    document.querySelectorAll(".header-menu[open]").forEach((menu) => {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
   });
 
   $("#todayLabel").textContent = dateFormatter.format(new Date());
@@ -3538,9 +3709,10 @@
   updateLastBackupTime();
   if ($("#googleClientId").value) {
     setDriveStatus("Başlamak için Drive’daki en güncel yedeği yükleyin.");
-    $("#restorePrompt").classList.remove("hidden");
+    setRestorePromptVisible(true);
   } else {
     setDriveStatus("Ayarlar’dan Google OAuth Client ID’nizi kaydedin.");
+    setRestorePromptVisible(false, false);
   }
   fields.date.value = isoToday();
   taskFields.dueDate.value = "";
@@ -3554,7 +3726,7 @@
   $("#jiraAutoWorklog").checked = localStorage.getItem(JIRA_AUTO_WORKLOG_KEY) !== "false";
   renderJiraItems();
   render();
-  initializeOutlookCalendar();
+  initializeCalendar();
   window.TaskStore.ensureHierarchy();
   window.TaskStore.migrateExistingTasksToArchitectureRoadmap();
   renderPeople();

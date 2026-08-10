@@ -16,6 +16,7 @@ const reminders = fs.readFileSync(path.join(root, "reminders-store.js"), "utf8")
 const aiClient = fs.readFileSync(path.join(root, "ai-assistant.js"), "utf8");
 const jiraCloudClient = fs.readFileSync(path.join(root, "jira-cloud.js"), "utf8");
 const outlookCalendarClient = fs.readFileSync(path.join(root, "outlook-calendar.js"), "utf8");
+const googleCalendarClient = fs.readFileSync(path.join(root, "google-calendar.js"), "utf8");
 const aiServer = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 const taskDetailHtml = fs.readFileSync(path.join(root, "task-detail.html"), "utf8");
@@ -31,14 +32,14 @@ const requiredIds = [
   "jiraEffortChart", "homeOpenTaskCount", "homePendingTaskList",
   "reminderPanelTitle", "reminderOpenCount", "openReminderModal", "reminderTickerWindow", "reminderModal", "reminderModalTitle", "closeReminderModal", "reminderForm", "reminderId", "reminderTextInput",
   "reminderDateInput", "reminderImportanceInput", "reminderOptions", "reminderSubmitLabel", "cancelReminderEdit", "reminderFormMessage", "reminderEmptyState", "reminderList",
-  "outlookCalendarTitle", "outlookCalendarConnection", "connectOutlookCalendar", "refreshOutlookCalendar", "disconnectOutlookCalendar", "outlookCalendarRange", "outlookCalendarPeriod", "outlookCalendarSettings", "outlookClientId", "outlookTenantId", "saveOutlookSettings", "outlookRedirectUri", "outlookCalendarStatus", "outlookCalendarEmpty", "outlookCalendarList",
+  "outlookCalendarTitle", "showGoogleCalendar", "showOutlookCalendar", "outlookCalendarConnection", "connectOutlookCalendar", "refreshOutlookCalendar", "disconnectOutlookCalendar", "outlookCalendarRange", "outlookCalendarPeriod", "outlookCalendarSettings", "outlookClientId", "outlookTenantId", "saveOutlookSettings", "outlookRedirectUri", "googleCalendarSettings", "googleCalendarClientState", "outlookCalendarStatus", "outlookCalendarEmpty", "outlookCalendarList",
   "openAiAssistant", "aiAssistantPanel", "aiAssistantTitle", "aiAssistantStatus", "closeAiAssistant",
   "aiAssistantMessages", "aiAssistantForm", "aiAssistantInput", "aiAssistantInputCount", "sendAiAssistantMessage",
   "aiAssistantEndpoint", "saveAiAssistantEndpoint",
   "effortForm", "entryId", "dateInput", "hoursInput",
   "descriptionInput", "filterDateInput", "entryList", "entryTemplate",
-  "dailyTotal", "dailyDays", "effortWeekHours", "effortWeekDays", "effortMonthHours", "effortMonthDays", "grandTotal", "effortTotalDays", "entryCount", "formMessage", "lastBackupTime", "appEditToolbar", "appEditModeDot", "appEditModeLabel", "appEditModeStatus", "enterAppEditMode", "saveAppChanges",
-  "restorePrompt", "initialRestoreButton", "skipInitialRestore",
+  "dailyTotal", "dailyDays", "effortWeekHours", "effortWeekDays", "effortMonthHours", "effortMonthDays", "grandTotal", "effortTotalDays", "entryCount", "formMessage", "lastBackupTime", "appEditMenu", "headerEditModeLabel", "headerUnsavedBadge", "appEditToolbar", "appEditModeDot", "appEditModeLabel", "appEditModeStatus", "enterAppEditMode", "saveAppChanges",
+  "driveHeaderMenu", "headerDriveMenuLabel", "headerDriveMenuBadge", "restorePrompt", "initialRestoreButton", "skipInitialRestore",
   "tasksView", "taskForm", "taskTitleInput", "taskDueDateInput", "taskStatusInput", "taskDescriptionInput",
   "taskParentTaskInput", "taskAssigneeInput", "taskTypeInput", "taskPriorityInput", "taskYearInput", "taskQuarterInput", "taskPlanImport",
   "openTaskPlanPaste", "taskPlanImportModal", "taskPlanPasteForm", "taskPlanTextInput", "taskPlanPasteMessage",
@@ -71,6 +72,7 @@ for (const id of ["taskTypeReportTitle", "taskTypeReportContent", "taskTypeRepor
 
 assert.ok(html.indexOf('src="data-store.js') < html.indexOf('src="app.js'), "Veri katmanı uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="vendor/msal-browser.min.js') < html.indexOf('src="outlook-calendar.js') && html.indexOf('src="outlook-calendar.js') < html.indexOf('src="app.js'), "MSAL ve Outlook Takvim istemcileri uygulamadan önce yüklenmeli");
+assert.ok(html.indexOf('src="drive-sync.js') < html.indexOf('src="google-calendar.js') && html.indexOf('src="google-calendar.js') < html.indexOf('src="app.js'), "Drive ayarları ve Google Takvim istemcisi uygulamadan önce yüklenmeli");
 assert.match(html, /<meta\s+name="viewport"/i, "Mobil viewport tanımı eksik");
 assert.match(css, /@media\s*\(max-width:\s*850px\)/, "Tablet kırılımı eksik");
 assert.match(css, /@media\s*\(max-width:\s*600px\)/, "Mobil kırılımı eksik");
@@ -85,16 +87,31 @@ assert.match(aiServer, /process\.env\.OPENAI_API_KEY/, "AI backend anahtarı ort
 assert.match(aiServer, /api\.openai\.com\/v1\/responses/, "AI backend Responses API'ye bağlanmalı");
 assert.match(aiServer, /store:\s*false[\s\S]*reasoning:\s*\{\s*effort:\s*"low"/, "AI istekleri saklama kapalı ve düşük reasoning eforuyla gönderilmeli");
 assert.match(app, /function renderReminders[\s\S]*ReminderStore\.list/, "Ana Sayfa hatırlatma listesi veri katmanına bağlanmalı");
-assert.match(html, /id="outlookCalendarTitle"[\s\S]*id="connectOutlookCalendar"[\s\S]*id="outlookCalendarList"/, "Ana Sayfada Outlook Takvim ajandası bulunmalı");
+assert.match(html, /id="outlookCalendarTitle"[\s\S]*id="showGoogleCalendar"[\s\S]*id="showOutlookCalendar"[\s\S]*id="connectOutlookCalendar"[\s\S]*id="outlookCalendarList"/, "Ana Sayfada Google ve Outlook sağlayıcılarını destekleyen takvim ajandası bulunmalı");
 assert.match(outlookCalendarClient, /SCOPES\s*=\s*\["Calendars\.ReadBasic"\]/, "Outlook Takvim yalnızca en düşük salt okunur takvim iznini istemeli");
 assert.match(outlookCalendarClient, /createStandardPublicClientApplication[\s\S]*cacheLocation:\s*"sessionStorage"[\s\S]*handleRedirectPromise/, "Outlook OAuth akışı PKCE destekli MSAL SPA istemcisi kullanmalı");
 assert.match(outlookCalendarClient, /startDateTime[\s\S]*endDateTime[\s\S]*graph\.microsoft\.com\/v1\.0\/me\/calendar\/calendarView/, "Outlook etkinlikleri Microsoft Graph calendarView üzerinden tarih aralığıyla alınmalı");
 assert.doesNotMatch(outlookCalendarClient, /clientSecret|CLIENT_SECRET/, "Microsoft client secret tarayıcı kodunda bulunmamalı");
-assert.match(app, /function renderOutlookCalendar[\s\S]*outlook-day-group[\s\S]*outlook-event-time[\s\S]*event\.subject/, "Outlook etkinlikleri tarih ve saat bazlı ajanda olarak gösterilmeli");
-assert.match(app, /function initializeOutlookCalendar[\s\S]*OutlookCalendar\.initialize[\s\S]*refreshOutlookCalendar/, "Outlook oturumu uygulama açılışında geri yüklenip ajanda yenilenmeli");
+assert.match(googleCalendarClient, /SCOPES\s*=\s*\["https:\/\/www\.googleapis\.com\/auth\/calendar\.events\.readonly"\]/, "Google Takvim yalnızca etkinlikleri okumaya yönelik izni istemeli");
+assert.match(googleCalendarClient, /initTokenClient[\s\S]*include_granted_scopes:\s*true[\s\S]*requestAccessToken/, "Google Takvim GIS token modeliyle yetkilendirilmeli");
+assert.match(googleCalendarClient, /singleEvents:\s*"true"[\s\S]*orderBy:\s*"startTime"[\s\S]*calendar\/v3\/calendars\/primary\/events/, "Google etkinlikleri primary takvimden tarih sırasıyla alınmalı");
+assert.doesNotMatch(googleCalendarClient, /clientSecret|CLIENT_SECRET/, "Google client secret tarayıcı kodunda bulunmamalı");
+assert.match(app, /function normalizeCalendarEvent[\s\S]*function renderCalendar[\s\S]*outlook-day-group[\s\S]*outlook-event-time[\s\S]*event\.subject/, "Google ve Outlook etkinlikleri ortak tarih ve saat ajandasında gösterilmeli");
+assert.match(app, /function selectCalendarProvider[\s\S]*CALENDAR_PROVIDER_KEY[\s\S]*function initializeCalendar[\s\S]*OutlookCalendar\.initialize/, "Takvim sağlayıcısı seçilebilmeli ve Outlook oturumu gerektiğinde geri yüklenmeli");
 assert.match(app, /reminderForm\.addEventListener\("submit"[\s\S]*ReminderStore\.(?:update|create)/, "Not ve hatırlatma formu CRUD akışına bağlanmalı");
 assert.match(reminders, /function validate[\s\S]*function replaceAll/, "Hatırlatma veri modeli doğrulama ve yedek geri yükleme sağlamalı");
-assert.ok(html.indexOf('class="panel home-quick-reminder"') < html.indexOf('class="home-kpi-grid"'), "Önemli Notlar ve Hatırlatmalar Ana Sayfanın üst kısmında olmalı");
+const homeSummaryStart = html.indexOf('class="home-summary-panel"');
+const homeWidgetsStart = html.indexOf('class="home-top-widgets"');
+assert.ok(homeSummaryStart < html.indexOf('class="home-kpi-grid"') && html.indexOf('class="home-kpi-grid"') < homeWidgetsStart, "Çalışma özeti ve haftalık göstergeler tek üst bölümde birleştirilmeli");
+assert.doesNotMatch(html.slice(homeSummaryStart, homeWidgetsStart), />\+ Efor ekle<\/button>/, "Çalışma özeti bölümünde Efor ekle düğmesi bulunmamalı");
+assert.match(html.slice(homeSummaryStart, homeWidgetsStart), /class="home-kpi-card home-kpi-primary"[^>]*data-home-target="effortsView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="effortsView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="tasksView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="tasksView"/, "Çalışma özeti kartları ilgili Eforlar ve Görevler bölümlerine bağlanmalı");
+assert.match(css, /home-kpi-card:hover[^{]*\{[^}]*transform:\s*translateY/, "Tıklanabilir çalışma özeti kartları hover geri bildirimi vermeli");
+assert.match(app, /data-home-target[\s\S]*targetView[\s\S]*activateMainView\(targetView\)[\s\S]*targetView === "tasksView"[\s\S]*activateTaskSubview\("taskReportView"\)/, "Görev özet kartları Görevler rapor sayfasını açmalı");
+assert.ok(html.indexOf('class="panel home-quick-reminder"') < html.indexOf('class="home-dashboard-grid"'), "Önemli Notlar ve Hatırlatmalar Ana Sayfanın üst kısmında olmalı");
+assert.ok(html.indexOf('class="home-top-widgets"') < html.indexOf('class="panel outlook-calendar-dashboard"') && html.indexOf('class="panel outlook-calendar-dashboard"') < html.indexOf('class="panel home-quick-reminder"'), "Outlook Takvim solda, Önemli Notlar ve Hatırlatmalar sağda aynı üst bölümde olmalı");
+assert.match(css, /home-top-widgets[^{]*\{[^}]*display:\s*grid[^}]*grid-template-columns:[^}]*1\.15fr[^}]*\.85fr/, "Takvim ve hatırlatma kutuları masaüstünde yan yana grid olarak yerleşmeli");
+assert.match(css, /home-top-widgets[^{]*\{[^}]*align-items:\s*stretch/, "Takvim ve hatırlatma kutularının yükseklikleri eşit olmalı");
+assert.match(css, /@media\s*\(max-width:\s*850px\)[\s\S]*home-top-widgets[^{]*\{[^}]*grid-template-columns:\s*1fr/, "Takvim ve hatırlatma kutuları dar ekranda alt alta geçmeli");
 assert.match(html, /id="openReminderModal"[\s\S]*id="reminderTickerWindow"[\s\S]*id="reminderModal"[\s\S]*id="reminderForm"/, "Hatırlatma ekleme formu Ana Sayfayı kaplamadan popup içinde açılmalı");
 assert.match(app, /openReminderModal"\)\.addEventListener\("click", openReminderCreateModal\)/, "Hatırlatma ekle düğmesi popup formunu açmalı");
 assert.match(app, /classList\.toggle\("is-ticker", reminders\.length > 1\)[\s\S]*cloneNode\(true\)/, "Hatırlatmalar kesintisiz kayan akış için çoğaltılmalı");
@@ -216,6 +233,16 @@ assert.match(drive, /drive\.appdata/, "En az yetkili Drive kapsamı kullanılmal
 assert.match(drive, /parents:\s*\["appDataFolder"\]/, "Yedek appDataFolder içine yazılmalı");
 assert.doesNotMatch(drive, /client_secret/i, "Client Secret tarayıcı kodunda bulunmamalı");
 assert.match(html, /class="drive-toolbar"/, "Drive araç çubuğu eksik");
+const pageHeaderEnd = html.indexOf("</header>");
+const homeViewStart = html.indexOf('id="homeView"');
+const mainMenuStart = html.indexOf('class="main-menu-bar"');
+assert.ok(mainMenuStart > pageHeaderEnd && mainMenuStart < homeViewStart, "Ana navigasyon ve işlem menüleri üst başlığın altında yer almalı");
+assert.ok(html.indexOf('id="appEditMenu"') > pageHeaderEnd && html.indexOf('id="appEditToolbar"') < homeViewStart, "Düzenleme modu kontrolleri ana menüde olmalı");
+assert.ok(html.indexOf('id="driveHeaderMenu"') > pageHeaderEnd && html.indexOf('class="drive-toolbar"') < homeViewStart && html.indexOf('id="restorePrompt"') < homeViewStart, "Drive durumu, ayarları ve geri yükleme çağrısı ana menüde olmalı");
+assert.match(css, /\.main-menu-bar\s*\{[^}]*display:\s*flex/, "Ana menü navigasyon ve işlem kontrollerini aynı satırda toplamalı");
+assert.match(css, /\.header-menu-popover\s*\{[^}]*position:\s*absolute/, "Ana menü işlem kontrolleri kompakt açılır panel olarak stillendirilmeli");
+assert.match(app, /function refreshDriveHeaderMenu[\s\S]*headerDriveMenuBadge[\s\S]*function setRestorePromptVisible[\s\S]*driveHeaderMenu[\s\S]*open\s*=\s*true/, "Bekleyen Drive geri yüklemesi header menüsünde rozet ve otomatik açılma ile belirtilmeli");
+assert.match(app, /headerEditModeLabel[\s\S]*headerUnsavedBadge/, "Header çalışma modu güncel düzenleme ve kaydedilmemiş değişiklik durumunu göstermeli");
 assert.match(app, /backupAndReport\(editing \? "Güncellenen kayıt bekliyor\." : "Yeni kayıt bekliyor\."\)/, "Efor değişiklikleri Drive'a gönderilmek üzere bekleyen olarak işaretlenmeli");
 assert.doesNotMatch(app, /Yeni kayıt Drive’a gönderildi|Timesheet üzerinden eklenen efor Drive’a gönderildi/, "Yeni efor ekleme işlemi Drive yedeği tetiklememeli");
 assert.match(app, /initialRestoreButton.*restoreFromDrive/s, "Açılış geri yükleme çağrısı eksik");
@@ -290,6 +317,7 @@ assert.match(app, /!hasRealJira\s*\?\s*"JIRA-YOK"[\s\S]*description/, "JIRA'sı 
 assert.match(app, /countLabel\.textContent\s*=\s*`\$\{count\}\s*kayıt`/, "Birleşen günlük kayıt sayısı gösterilmeli");
 assert.doesNotMatch(app, /timesheet-row-toggle|expandedTimesheetGroups/, "Timesheet satır kulakçıkları kaldırılmalı");
 assert.match(app, /timesheet-effort-button[\s\S]*openEffortEditModal/, "Timesheet efor düzenleme popup bağlantısı eksik");
+assert.match(app, /const effortDescription\s*=\s*entriesForCell[\s\S]*entry\.task\s*\|\|\s*entry\.description[\s\S]*effortButton\.title\s*=\s*effortDescription/, "Timesheet eforunun üzerine gelindiğinde efor açıklaması gösterilmeli");
 assert.match(app, /jiraSyncCounts[\s\S]*timesheet-jira-sync-summary[\s\S]*"synced", "✓", "JIRA’ya gönderildi"[\s\S]*"imported", "↓", "JIRA’dan alındı"[\s\S]*"local", "○", "JIRA’ya gönderilmedi"[\s\S]*"pending", "↑"[\s\S]*"failed", "!"/, "Timesheet hücreleri JIRA gönderim, içe aktarma ve yerel kayıt durumlarını göstermeli");
 assert.match(css, /timesheet-jira-status\[data-status="synced"\][^{]*\{[^}]*background:\s*#1f9d74/, "Timesheet başarılı JIRA gönderimi yeşil simgeyle gösterilmeli");
 assert.match(css, /timesheet-jira-status\[data-status="imported"\][^{]*\{[^}]*background:\s*#1f9d74/, "Timesheet JIRA’dan alınan eforu yeşil simgeyle göstermeli");
@@ -319,6 +347,8 @@ assert.match(app, /function renderJiraTableHeader[\s\S]*draggable\s*=\s*true[\s\
 assert.match(app, /function beginJiraColumnResize[\s\S]*pointermove[\s\S]*jiraTableLayout\.widths/, "JIRA kolon genişlikleri kullanıcı tarafından değiştirilebilmeli");
 assert.match(app, /function renderJiraColumnOptions[\s\S]*checkbox[\s\S]*jiraTableLayout\.visible/, "JIRA kolonları görünümden çıkarılıp yeniden eklenebilmeli");
 assert.match(app, /function autoFitJiraColumns[\s\S]*scrollWidth[\s\S]*applyJiraColumnWidths/, "JIRA kolonları içerik genişliğine otomatik sığdırılmalı");
+assert.match(app, /function scheduleJiraAutoFit[\s\S]*requestAnimationFrame[\s\S]*autoFitJiraColumns\(false\)/, "JIRA otomatik sığdırma görünür tablo yerleşiminden sonra çalışmalı");
+assert.match(app, /function activateMainView[\s\S]*viewId === "jiraView"[\s\S]*scheduleJiraAutoFit\(\)[\s\S]*function activateJiraSubview[\s\S]*viewId === "jiraItemsView"[\s\S]*scheduleJiraAutoFit\(\)/, "JIRA Maddeleri tabı ve alt görünümü açıldığında kolonlar yeniden sığdırılmalı");
 assert.match(css, /jira-issue-table[^{]*\{[^}]*width:\s*max-content[\s\S]*jira-column-resizer[^{]*\{[^}]*cursor:\s*col-resize/, "JIRA tablosu sıkı içerik genişliği ve kolon boyutlandırma tutamacı kullanmalı");
 assert.match(app, /DOMParser[\s\S]*#issuetable/, "JIRA HTML içe aktarma ayrıştırıcısı eksik");
 assert.match(jira, /mergeAll/, "JIRA HTML kayıtlarını birleştirme desteği eksik");
