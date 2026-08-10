@@ -229,6 +229,33 @@
     };
   }
 
+  async function invokeJira(pathname, options = {}) {
+    const session = await getSession();
+    if (!session?.user) throw new Error("JIRA bağlantısı için önce Supabase hesabınıza giriş yapın.");
+    let body = options.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body || "{}"); }
+      catch { throw new Error("JIRA isteğinin gövdesi geçersiz."); }
+    }
+    const { data, error } = await getClient().functions.invoke("jira-proxy", {
+      body: {
+        pathname: String(pathname || ""),
+        method: String(options.method || "GET").toUpperCase(),
+        body: body && typeof body === "object" ? body : {}
+      }
+    });
+    if (error) {
+      let message = error.message || "Supabase JIRA servisine ulaşılamadı.";
+      try {
+        const details = await error.context?.json?.();
+        if (details?.error) message = details.error;
+      } catch { /* Supabase istemci hatası kullanılır. */ }
+      throw new Error(message);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data || {};
+  }
+
   global.SupabaseCloud = Object.freeze({
     PROJECT_URL,
     TABLES,
@@ -243,6 +270,7 @@
     onAuthStateChange,
     pullBundle,
     pushBundle,
-    getRemoteSummary
+    getRemoteSummary,
+    invokeJira
   });
 })(window);

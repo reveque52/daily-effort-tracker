@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Görev detaylarını görüntüleyin ve yönetin.">
     <title>Görev Detayı · Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260810-5">
-    <script src="tasks-store.js?v=20260806-20" defer></script>
-    <script src="task-detail.js?v=20260810-4" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260811-1">
+    <script src="tasks-store.js?v=20260810-1" defer></script>
+    <script src="task-detail.js?v=20260810-5" defer></script>
   </head>
   <body class="task-detail-page">
     <header class="task-detail-page-header">
@@ -62,6 +62,11 @@
         <section class="task-detail-page-section" aria-labelledby="detailPageDescriptionTitle">
           <div class="task-detail-page-section-heading"><span class="eyebrow">İçerik</span><h3 id="detailPageDescriptionTitle">Detaylı açıklama</h3></div>
           <div id="detailPageDescription" class="task-detail-description"></div>
+        </section>
+
+        <section class="task-detail-page-section" aria-labelledby="detailPageDocumentsTitle">
+          <div class="task-detail-page-section-heading"><span class="eyebrow">Google Drive</span><h3 id="detailPageDocumentsTitle">Dokümanlar <span id="detailPageDocumentCount">0</span></h3></div>
+          <div id="detailPageDocumentList" class="task-detail-page-documents"></div>
         </section>
 
         <section class="task-detail-page-section" aria-labelledby="detailPageSubtasksTitle">

@@ -2,10 +2,17 @@
   "use strict";
 
   const ENDPOINT_KEY = "daily-effort-tracker.jira-api-endpoint";
-  const DEFAULT_ENDPOINT = "/api/jira";
+  const DEFAULT_ENDPOINT = String(global.location?.hostname || "").endsWith("github.io") ? "supabase:jira-proxy" : "/api/jira";
+
+  function usesSupabase(endpoint = getEndpoint()) {
+    return String(endpoint || "").toLowerCase() === "supabase:jira-proxy";
+  }
 
   function getEndpoint() {
-    return global.localStorage.getItem(ENDPOINT_KEY) || DEFAULT_ENDPOINT;
+    const saved = global.localStorage.getItem(ENDPOINT_KEY) || "";
+    const githubPages = String(global.location?.hostname || "").endsWith("github.io");
+    if (githubPages && (!saved || saved.startsWith("/"))) return "supabase:jira-proxy";
+    return saved || DEFAULT_ENDPOINT;
   }
 
   function setEndpoint(value) {
@@ -14,12 +21,16 @@
       global.localStorage.removeItem(ENDPOINT_KEY);
       return DEFAULT_ENDPOINT;
     }
-    if (!endpoint.startsWith("/") && !/^https:\/\//i.test(endpoint)) throw new Error("JIRA servis adresi HTTPS veya aynı origin üzerinde göreli bir adres olmalıdır.");
+    if (!usesSupabase(endpoint) && !endpoint.startsWith("/") && !/^https:\/\//i.test(endpoint)) throw new Error("JIRA servis adresi Supabase, HTTPS veya aynı origin üzerinde göreli bir adres olmalıdır.");
     global.localStorage.setItem(ENDPOINT_KEY, endpoint);
     return endpoint;
   }
 
   async function request(pathname, options = {}) {
+    if (usesSupabase()) {
+      if (!global.SupabaseCloud?.invokeJira) throw new Error("Supabase JIRA istemcisi yüklenemedi.");
+      return global.SupabaseCloud.invokeJira(pathname, options);
+    }
     const response = await global.fetch(`${getEndpoint()}${pathname}`, {
       ...options,
       credentials: "include",
@@ -39,6 +50,7 @@
   }
 
   function getOAuthStartUrl(returnTo = global.location.href) {
+    if (usesSupabase()) throw new Error("Supabase bağlantısında Atlassian yönlendirmesi kullanılmaz; JIRA API tokenınızı bağlantı ayarlarından kaydedin.");
     const endpoint = new URL(getEndpoint(), global.location.href);
     return `${endpoint.toString().replace(/\/$/, "")}/oauth/start?${new URLSearchParams({ returnTo: String(returnTo || global.location.href) })}`;
   }
@@ -49,6 +61,18 @@
 
   function signOutFromJira() {
     return request("/oauth/logout", { method: "POST", body: "{}" });
+  }
+
+  function getCredentialStatus() {
+    return request("/credentials/status", { method: "GET" });
+  }
+
+  function saveCredentials(credentials) {
+    return request("/credentials/save", { method: "POST", body: JSON.stringify(credentials || {}) });
+  }
+
+  function removeCredentials() {
+    return request("/credentials/delete", { method: "DELETE", body: "{}" });
   }
 
   function syncUsers(maxResults = 1000) {
@@ -100,5 +124,5 @@
     });
   }
 
-  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, health, getOAuthStatus, getOAuthStartUrl, signInWithJira, signOutFromJira, syncUsers, syncIssues, getIssue, transitionIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
+  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, usesSupabase, health, getOAuthStatus, getOAuthStartUrl, signInWithJira, signOutFromJira, getCredentialStatus, saveCredentials, removeCredentials, syncUsers, syncIssues, getIssue, transitionIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
 })(window);

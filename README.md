@@ -20,11 +20,17 @@ API anahtarı tarayıcı koduna eklenmez ve `.env` dosyası Git tarafından yok 
 
 ## Kişi tanımları ve görev atama
 
-**Kişiler** ekranında ad-soyad, e-posta, ünvan, organizasyon rolü ve bağlı yönetici bilgileriyle görev atanabilir kişiler oluşturulabilir, düzenlenebilir ve silinebilir. Görev formundaki **Atanan kişi / kimde bekliyor** alanı bu tanımları kullanır. Kişi adı değiştirildiğinde bağlı görevlerin görünen atama bilgisi güncellenir; açık bir görevde kullanılan veya kendisine bağlı ekip üyesi bulunan kişi silinemez. **Organizasyon** ekranında raporlama hattı hiyerarşik gösterilir; seçilen lider kendisi ve tüm alt ekiplerine atanmış görevleri tek görünümde izleyebilir. Kişi tanımları uygulama yedeğine dahil edilir.
+**Ekip → Kişiler** ekranında ad-soyad, e-posta, ünvan, organizasyon rolü ve bağlı yönetici bilgileriyle görev atanabilir kişiler oluşturulabilir, düzenlenebilir ve silinebilir. Görev formundaki **Atanan kişi / kimde bekliyor** alanı bu tanımları kullanır. Kişi adı değiştirildiğinde bağlı görevlerin görünen atama bilgisi güncellenir; açık bir görevde kullanılan veya kendisine bağlı ekip üyesi bulunan kişi silinemez. **Ekip → Organizasyon** ekranında seçilen liderin kendisine ve tüm alt ekibine atanmış görevler tek görünümde izlenebilir. Kişi tanımları uygulama yedeğine dahil edilir.
 
-## Düzenle ve Kaydet modu
+## Yerel kayıt ve bulut senkronizasyonu
 
-Uygulama görüntüleme modunda açılır ve veri değiştiren kontroller kilitli tutulur. **Düzenle** seçildiğinde efor, görev, kişi, hatırlatma ve JIRA işlemleri önce yerel tarayıcı verisine kaydedilir. **Kaydet ve Supabase’e gönder** düğmesi tüm güncel veriyi kullanıcının Supabase çalışma alanına gönderir ve uygulamayı yeniden görüntüleme moduna alır. Google Drive menüsü isteğe bağlı, elle alınan ikinci bir yedek olarak korunur. Supabase'e gönderilmemiş yerel değişiklik bilgisi tarayıcı kapatılsa da korunur.
+Uygulamadaki efor, görev, kişi, hatırlatma ve JIRA bakım alanları her zaman kullanılabilir. Değişiklikler önce yerel tarayıcı verisine kaydedilir. Supabase hesabı menüsündeki **Değişiklikleri gönder** düğmesi güncel veriyi kullanıcının çalışma alanına aktarır. Google Drive menüsü isteğe bağlı, elle alınan ikinci bir yedek olarak korunur. Supabase’e gönderilmemiş yerel değişiklik bilgisi tarayıcı kapatılsa da korunur.
+
+## Görev dokümanları ve Google Drive
+
+**Görevler → Görev Ekle → Dokümanlar** alanından aynı göreve birden fazla dosya bağlanabilir. Yeni dosyalar görev kaydedilirken Google Drive’daki görünür **Günlük Efor Takibi Dokümanları** klasörüne, görev bazında ayrı bir alt klasör oluşturularak yüklenir. Uygulama verisinde dosyanın kendisi değil; Drive dosya kimliği, adı, türü, boyutu ve bağlantısı tutulur. Dokümanlar görev detay sayfasından açılabilir.
+
+İlk doküman yüklemesinde Google yeniden izin ister. Google Cloud Console’daki OAuth izin ekranında hem `drive.appdata` hem de `drive.file` kapsamları tanımlı olmalıdır. `drive.file`, uygulamanın oluşturduğu/seçilen dosyalarla sınırlı dar kapsamdır; tüm Drive içeriğine erişim istemez. Tek seferde en fazla 10 dosya ve dosya başına 100 MB desteklenir. Bir görevi silmek Drive’daki dokümanları otomatik silmez; dosyalar Drive’dan ayrıca yönetilebilir.
 
 ## Supabase hesap, veri ve e-posta kurulumu
 
@@ -75,9 +81,17 @@ JIRA_API_TOKEN=atlassian_api_token_degeriniz
 
 API token'ı [Atlassian hesap güvenliği](https://id.atlassian.com/manage-profile/security/api-tokens) sayfasından oluşturun. Token'ı HTML, JavaScript veya GitHub deposuna yazmayın. Sunucuyu yeniden başlattıktan sonra uygulamadaki **JIRA Maddeleri → Bağlantıyı test et** ve **JIRA'dan senkronize et** düğmelerini kullanın.
 
-**Kişiler → JIRA’dan aktif kullanıcıları getir** işlemi, en fazla 1000 aktif Atlassian hesabını güvenli backend proxy üzerinden alır. Kişiler öncelikle JIRA `accountId`, ardından e-posta adresiyle eşleştirilir; aynı kullanıcı yeniden eklenmez ve mevcut ünvan, organizasyon rolü ile yönetici bağlantısı korunur. JIRA gizlilik ayarı nedeniyle e-posta gelmezse kullanıcı yine eklenir ve kartında e-postanın gizli olduğu gösterilir. Bu işlem yalnızca yerel değişiklik oluşturur; Google Drive yedeği kullanıcı **Kaydet ve Drive’a gönder** dediğinde alınır. JIRA hesabında kullanıcı listesini okuyabilmek için gerekli global yetkinin bulunması gerekir.
+**Ekip → Kişiler → JIRA’dan aktif kullanıcıları getir** işlemi, en fazla 1000 aktif Atlassian hesabını güvenli backend proxy üzerinden alır. Kişiler öncelikle JIRA `accountId`, ardından e-posta adresiyle eşleştirilir; aynı kullanıcı yeniden eklenmez ve mevcut ünvan, organizasyon rolü ile yönetici bağlantısı korunur. JIRA gizlilik ayarı nedeniyle e-posta gelmezse kullanıcı yine eklenir ve kartında e-postanın gizli olduğu gösterilir. Bu işlem yalnızca yerel değişiklik oluşturur; Google Drive yedeği kullanıcı **Kaydet ve Drive’a gönder** dediğinde alınır. JIRA hesabında kullanıcı listesini okuyabilmek için gerekli global yetkinin bulunması gerekir.
 
 Varsayılan JQL yalnızca oturum açan kullanıcıya atanmış, çözülmemiş maddeleri getirir. Senkronizasyon aynı JIRA Key'i bulunan yerel kaydı günceller; diğer yerel kayıtları silmez. Worklog seçeneği açıksa yeni efor, revizyon ve silme işlemlerinde JIRA'ya gönderimden önce kullanıcı onayı istenir; onay verilmeden JIRA verisi değiştirilmez.
+
+### GitHub Pages üzerinde kişisel JIRA bağlantısı
+
+GitHub Pages statik olduğu için yerel `/api/jira` Node servisini çalıştıramaz. Yayındaki uygulama bu nedenle varsayılan olarak `supabase:jira-proxy` yöntemini kullanır. Kullanıcı önce Supabase hesabına giriş yapar, ardından ana menüdeki **JIRA → Kişisel JIRA bağlantısı** alanına Atlassian e-posta adresini ve kendi API tokenını girer.
+
+Token tarayıcı koduna veya herkese açık bir Supabase tablosuna yazılmaz. Supabase Auth JWT'siyle korunan `jira-proxy` Edge Function bağlantıyı JIRA üzerinde doğrular; tokenı Supabase Vault'ta şifreli saklar ve `private.jira_credentials` tablosunda yalnızca Vault secret kimliğiyle kullanıcı eşlemesini tutar. Vault'taki çözülmüş tokenı sadece `service_role` yetkili RPC okuyabilir; `anon` ve `authenticated` rollerinin doğrudan erişimi yoktur. Her kullanıcı yalnızca kendi Supabase kullanıcı kimliğine bağlı JIRA hesabıyla işlem yapar, böylece workloglar doğru Atlassian kullanıcısı adına oluşur.
+
+Yerel geliştirmede `/api/jira`, GitHub Pages üzerinde ise `supabase:jira-proxy` otomatik seçilir; kullanıcıdan servis adresi girmesi istenmez. Senkronizasyon JQL’i ve worklog onay tercihi ana menüdeki **JIRA** düğmesinden yönetilir.
 
 Tek bir madde eklemek için **JIRA Maddeleri → JIRA maddesi ekle** alanına yalnızca `RD-179` biçimindeki Key'i yazın. Issue Type, Summary, URL, Assignee, Reporter, Priority, Status, Resolution ve tarih alanları JIRA Cloud'dan otomatik alınır. Aynı Key zaten varsa mükerrer kayıt oluşturulmaz; yerel madde JIRA'daki son bilgilerle güncellenir.
 
@@ -85,7 +99,7 @@ JIRA ekranındaki **Talepler** alt sekmesi senkronize edilen maddeleri statü ba
 
 Timesheet ekranındaki **JIRA eforlarını getir** düğmesi, seçili tarih aralığında oturum kullanıcısının oluşturduğu worklog kayıtlarını alır. Kayıtlar JIRA worklog kimliğine göre birleştirildiği için tekrar senkronizasyonda mükerrer satır oluşmaz; JIRA'da revize edilen kayıtlar yerelde güncellenir. Gönderimi bekleyen veya başarısız yerel değişikliklerin üzerine otomatik yazılmaz ve bu kayıtlar çakışma olarak raporlanır. Tek istekte en fazla 366 günlük aralık desteklenir.
 
-GitHub Pages yalnızca statik frontend'i barındırır. Pages üzerinden canlı JIRA bağlantısı için `server.js` ayrıca güvenli bir Node.js barındırma ortamına kurulmalı ve ekrandaki **JIRA backend adresi** bu HTTPS servisine yönlendirilmelidir.
+GitHub Pages yalnızca statik frontend'i barındırır. Yayındaki canlı JIRA bağlantısı kullanıcı bazlı Supabase Auth oturumu ve `jira-proxy` Edge Function üzerinden otomatik çalışır; servis adresi arayüzde ayrıca ayarlanmaz.
 
 ## Google ve Outlook Takvim entegrasyonu
 

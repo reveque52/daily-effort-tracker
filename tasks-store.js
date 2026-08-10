@@ -8,6 +8,21 @@
   const QUARTERS = ["", "Q1", "Q2", "Q3", "Q4"];
   const TASK_TYPES = ["standard", "architecture_roadmap", "meeting_organization", "management_request", "other"];
   const MAX_DESCRIPTION_HTML_LENGTH = 50000;
+  const MAX_ATTACHMENTS = 100;
+
+  function normalizeAttachment(input) {
+    const webViewLink = String(input?.webViewLink || "").trim();
+    const webContentLink = String(input?.webContentLink || "").trim();
+    return {
+      id: String(input?.id || "").trim(),
+      name: String(input?.name || "").trim(),
+      mimeType: String(input?.mimeType || "application/octet-stream").trim(),
+      size: Math.max(0, Number(input?.size) || 0),
+      webViewLink: /^https:\/\//i.test(webViewLink) ? webViewLink : "",
+      webContentLink: /^https:\/\//i.test(webContentLink) ? webContentLink : "",
+      uploadedAt: String(input?.uploadedAt || "").trim()
+    };
+  }
 
   function validDate(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
@@ -29,7 +44,8 @@
       quarter: String(input?.quarter || "").trim().toUpperCase(),
       dueDate: String(input?.dueDate || "").trim(),
       status: String(input?.status || "planned"),
-      descriptionHtml: String(input?.descriptionHtml || "").trim()
+      descriptionHtml: String(input?.descriptionHtml || "").trim(),
+      attachments: Array.isArray(input?.attachments) ? input.attachments.map(normalizeAttachment) : []
     };
     const errors = {};
     if (!value.title) errors.title = "Görev başlığı zorunludur.";
@@ -45,6 +61,8 @@
     if (value.dueDate && !validDate(value.dueDate)) errors.dueDate = "Geçerli bir teslim tarihi seçin.";
     if (!STATUSES.includes(value.status)) errors.status = "Geçerli bir görev durumu seçin.";
     if (value.descriptionHtml.length > MAX_DESCRIPTION_HTML_LENGTH) errors.descriptionHtml = "Görev açıklaması en fazla 50.000 karakter olabilir.";
+    if (value.attachments.length > MAX_ATTACHMENTS) errors.attachments = `Bir göreve en fazla ${MAX_ATTACHMENTS} doküman bağlanabilir.`;
+    else if (value.attachments.some((item) => !item.id || !item.name || item.id.length > 200 || item.name.length > 300)) errors.attachments = "Görev dokümanlarından biri geçersiz.";
     return { valid: Object.keys(errors).length === 0, errors, value };
   }
 
@@ -74,7 +92,10 @@
     const result = validate(input);
     if (!result.valid) return result;
     const now = new Date().toISOString();
-    const task = { id: makeId(), ...result.value, createdAt: now, updatedAt: now };
+    const requestedId = String(input?.id || "").trim();
+    if (requestedId.length > 160) return { valid: false, errors: { id: "Görev kimliği geçersiz." } };
+    if (requestedId && readAll().some((task) => task.id === requestedId)) return { valid: false, errors: { id: "Bu görev kimliği zaten kullanılıyor." } };
+    const task = { id: requestedId || makeId(), ...result.value, createdAt: now, updatedAt: now };
     writeAll([...readAll(), task]);
     return { valid: true, errors: {}, value: task };
   }
@@ -136,7 +157,8 @@
         bySignature.set(key, rows.length - 1);
         created += 1;
       } else {
-        rows[index] = { ...rows[index], ...result.value, updatedAt: now };
+        const attachments = Array.isArray(item?.attachments) ? result.value.attachments : (rows[index].attachments || []);
+        rows[index] = { ...rows[index], ...result.value, attachments, updatedAt: now };
         updated += 1;
       }
     }
@@ -161,7 +183,7 @@
       const parent = {
         id: makeId(), title: parentTitle, parentItem: "", parentTaskId: "", assignee: "", assigneeId: "",
         taskType: "standard", priority: "", year: "", quarter: "", dueDate: "",
-        status: "planned", descriptionHtml: "", createdAt: now, updatedAt: now
+        status: "planned", descriptionHtml: "", attachments: [], createdAt: now, updatedAt: now
       };
       rows.push(parent);
       byTitle.set(key, parent);

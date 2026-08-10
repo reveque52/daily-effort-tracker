@@ -17,7 +17,8 @@
     parentTaskId: $("#taskParentTaskInput"), assignee: $("#taskAssigneeInput"), taskType: $("#taskTypeInput"),
     priority: $("#taskPriorityInput"),
     year: $("#taskYearInput"), quarter: $("#taskQuarterInput"),
-    status: $("#taskStatusInput"), descriptionHtml: $("#taskDescriptionInput")
+    status: $("#taskStatusInput"), descriptionHtml: $("#taskDescriptionInput"),
+    documents: $("#taskDocumentsInput")
   };
   const personFields = {
     id: $("#personId"), fullName: $("#personFullNameInput"), email: $("#personEmailInput"),
@@ -38,9 +39,12 @@
   let modalEffortEntries = [];
   let modalEffortMode = "edit";
   let savedTaskEditorRange = null;
+  let taskExistingAttachments = [];
+  let taskPendingDocuments = [];
   let aiConversation = [];
   let aiRequestPending = false;
   let jiraOAuthState = null;
+  let jiraCredentialState = "unconfigured";
   let calendarEvents = [];
   const CALENDAR_PROVIDER_KEY = "daily-effort-tracker.calendar-provider";
   let activeCalendarProvider = localStorage.getItem(CALENDAR_PROVIDER_KEY) === "outlook" ? "outlook" : "google";
@@ -49,14 +53,13 @@
   const knownJiraRequestStatusLabels = new Map();
   let draggedJiraRequestId = "";
   let jiraRequestTransitionPending = false;
-  const APP_EDIT_SESSION_KEY = "daily-effort-tracker.edit-mode";
-  const APP_DIRTY_KEY = "daily-effort-tracker.drive-dirty";
+  const LOCAL_CHANGES_PENDING_KEY = "daily-effort-tracker.drive-dirty";
   const SUPABASE_LAST_SYNC_KEY = "daily-effort-tracker.supabase-last-sync";
-  let appEditMode = sessionStorage.getItem(APP_EDIT_SESSION_KEY) === "true";
-  let appEditDirty = localStorage.getItem(APP_DIRTY_KEY) === "true";
+  let localChangesPending = localStorage.getItem(LOCAL_CHANGES_PENDING_KEY) === "true";
   let supabaseSession = null;
   let supabaseBusy = false;
   const JIRA_AUTO_WORKLOG_KEY = "daily-effort-tracker.jira-auto-worklog";
+  const JIRA_SYNC_JQL_KEY = "daily-effort-tracker.jira-sync-jql";
   const JIRA_TABLE_LAYOUT_KEY = "daily-effort-tracker.jira-table-layout";
   let jiraAutoFitFrame = 0;
   const JIRA_TABLE_COLUMNS = Object.freeze([
@@ -174,22 +177,54 @@
   function setJiraCloudStatus(message, state = "") {
     const status = $("#jiraCloudStatus");
     status.textContent = message;
+    status.dataset.state = state;
     status.classList.toggle("is-success", state === "success");
     status.classList.toggle("is-error", state === "error");
     status.classList.toggle("is-busy", state === "busy");
+    refreshJiraHeaderMenu();
+  }
+
+  function refreshJiraHeaderMenu() {
+    const menu = $("#jiraHeaderMenu");
+    if (!menu) return;
+    const supabaseMode = window.JiraCloudClient.usesSupabase();
+    const connected = Boolean(jiraOAuthState?.connected);
+    const configured = connected || jiraCredentialState === "configured" || (!supabaseMode && Boolean(jiraOAuthState?.configured));
+    const error = jiraCredentialState === "error" || $("#jiraCloudStatus")?.dataset.state === "error";
+    const busy = $("#jiraCloudStatus")?.dataset.state === "busy";
+    const label = $("#headerJiraMenuLabel");
+    const badge = $("#headerJiraMenuBadge");
+
+    menu.classList.toggle("is-connected", configured && !error);
+    menu.classList.toggle("is-error", error);
+    menu.classList.toggle("is-busy", busy && !error);
+    label.textContent = error
+      ? "Bağlantıyı kontrol et"
+      : connected
+        ? "JIRA bağlı"
+        : configured
+          ? "Ayarlar aktif"
+          : supabaseMode && !supabaseSession?.user
+            ? "Bulut girişi gerekli"
+            : "Kurulum gerekli";
+    badge.classList.toggle("hidden", configured && !error);
+    badge.textContent = error ? "Kontrol et" : "Ayarla";
   }
 
   function renderJiraOAuthState(state = jiraOAuthState) {
     const badge = $("#jiraOAuthBadge");
+    const supabaseMode = window.JiraCloudClient.usesSupabase();
     const connectedWithOAuth = Boolean(state?.connected && state?.mode === "oauth");
     const connectedWithToken = Boolean(state?.connected && state?.mode === "api_token");
     badge.dataset.state = connectedWithOAuth || connectedWithToken ? "connected" : (state?.configured ? "disconnected" : "unconfigured");
     badge.textContent = connectedWithOAuth
       ? (state.account?.displayName || "JIRA bağlı")
       : (connectedWithToken ? "API token bağlı" : (state?.configured ? "Oturum kapalı" : "OAuth kurulumu gerekli"));
-    $("#connectJiraOAuth").classList.toggle("hidden", connectedWithOAuth);
-    $("#connectJiraOAuth").disabled = !state?.configured;
+    $("#connectJiraOAuth").textContent = supabaseMode ? "JIRA bağlantısını ayarla" : "JIRA ile giriş yap";
+    $("#connectJiraOAuth").classList.toggle("hidden", connectedWithOAuth || connectedWithToken);
+    $("#connectJiraOAuth").disabled = !supabaseMode && !state?.configured;
     $("#disconnectJiraOAuth").classList.toggle("hidden", !connectedWithOAuth);
+    refreshJiraHeaderMenu();
   }
 
   function consumeJiraOAuthResult() {
@@ -228,15 +263,115 @@
     }
   }
 
+  function setJiraCredentialStatus(message, state = "") {
+    const status = $("#jiraCredentialStatus");
+    status.textContent = message;
+    status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-error", state === "error");
+    const badge = $("#jiraCredentialBadge");
+    jiraCredentialState = state === "success" ? "configured" : state === "error" ? "error" : "unconfigured";
+    badge.dataset.state = jiraCredentialState;
+    badge.textContent = state === "success" ? "Vault’ta kayıtlı" : state === "error" ? "Bağlantı hatası" : "Kayıt gerekli";
+    refreshJiraHeaderMenu();
+  }
+
+  function setJiraCredentialBusy(busy) {
+    $("#saveJiraCredentials").disabled = busy;
+    $("#removeJiraCredentials").disabled = busy;
+    $("#jiraHeaderMenu").classList.toggle("is-busy", busy);
+  }
+
+  async function refreshJiraCredentialStatus() {
+    if (!window.JiraCloudClient.usesSupabase()) {
+      jiraCredentialState = "local";
+      $("#jiraCredentialBadge").dataset.state = "local";
+      $("#jiraCredentialBadge").textContent = "Yerel backend";
+      $("#removeJiraCredentials").classList.add("hidden");
+      $("#jiraCredentialStatus").textContent = "Yerel backend otomatik seçildi. JIRA OAuth ayarları sunucudaki .env dosyasından okunur.";
+      refreshJiraHeaderMenu();
+      return { configured: false };
+    }
+    if (!supabaseSession?.user) {
+      $("#removeJiraCredentials").classList.add("hidden");
+      setJiraCredentialStatus("JIRA bağlantı bilgilerini görmek veya kaydetmek için önce Supabase hesabınıza giriş yapın.");
+      return { configured: false };
+    }
+    try {
+      const result = await window.JiraCloudClient.getCredentialStatus();
+      if (!result.configured) {
+        $("#removeJiraCredentials").classList.add("hidden");
+        setJiraCredentialStatus("Bu Supabase hesabı için henüz JIRA bağlantısı kaydedilmedi.");
+        return result;
+      }
+      $("#jiraCredentialBaseUrl").value = result.baseUrl || "https://fit-global.atlassian.net";
+      $("#jiraCredentialEmail").value = result.email || "";
+      $("#jiraCredentialToken").value = "";
+      $("#removeJiraCredentials").classList.remove("hidden");
+      const savedAt = result.updatedAt ? ` · ${dateTimeFormatter.format(new Date(result.updatedAt))}` : "";
+      setJiraCredentialStatus(`Bağlantı Supabase Vault içinde şifreli olarak kayıtlı${savedAt}. Token tarayıcıya geri gönderilmez.`, "success");
+      return result;
+    } catch (error) {
+      setJiraCredentialStatus(`JIRA bağlantı bilgileri alınamadı: ${error.message}`, "error");
+      return { configured: false };
+    }
+  }
+
+  async function saveJiraCredentials() {
+    const baseUrl = $("#jiraCredentialBaseUrl").value.trim();
+    const email = $("#jiraCredentialEmail").value.trim();
+    const apiToken = $("#jiraCredentialToken").value.trim();
+    if (!supabaseSession?.user) {
+      $("#supabaseHeaderMenu").open = true;
+      setJiraCredentialStatus("Önce Supabase hesabınıza giriş yapın.", "error");
+      return;
+    }
+    if (!baseUrl || !email || !apiToken) {
+      setJiraCredentialStatus("JIRA adresi, Atlassian e-postası ve API token zorunludur.", "error");
+      return;
+    }
+    setJiraCredentialBusy(true);
+    setJiraCredentialStatus("JIRA bağlantısı doğrulanıyor ve token Supabase Vault’a kaydediliyor…");
+    try {
+      window.JiraCloudClient.setEndpoint("supabase:jira-proxy");
+      const result = await window.JiraCloudClient.saveCredentials({ baseUrl, email, apiToken });
+      $("#jiraCredentialToken").value = "";
+      await refreshJiraCredentialStatus();
+      await refreshJiraOAuthStatus();
+      setJiraCloudStatus(`${result.account?.displayName || email} hesabıyla JIRA bağlantısı hazır.`, "success");
+    } catch (error) {
+      setJiraCredentialStatus(`JIRA bağlantısı kaydedilemedi: ${error.message}`, "error");
+    } finally {
+      setJiraCredentialBusy(false);
+    }
+  }
+
+  async function removeJiraCredentials() {
+    if (!confirm("Supabase Vault’taki kişisel JIRA bağlantınız kaldırılsın mı?")) return;
+    setJiraCredentialBusy(true);
+    try {
+      await window.JiraCloudClient.removeCredentials();
+      $("#jiraCredentialEmail").value = "";
+      $("#jiraCredentialToken").value = "";
+      $("#removeJiraCredentials").classList.add("hidden");
+      setJiraCredentialStatus("Kayıtlı JIRA bağlantısı kaldırıldı.");
+      jiraOAuthState = { configured: false, connected: false, mode: "none" };
+      renderJiraOAuthState();
+    } catch (error) {
+      setJiraCredentialStatus(`JIRA bağlantısı kaldırılamadı: ${error.message}`, "error");
+    } finally {
+      setJiraCredentialBusy(false);
+    }
+  }
+
   function setJiraCloudBusy(busy) {
-    ["#testJiraConnection", "#syncJiraIssues", "#saveJiraApiEndpoint"].forEach((selector) => { $(selector).disabled = busy; });
+    ["#testJiraConnection", "#syncJiraIssues"].forEach((selector) => { $(selector).disabled = busy; });
+    refreshJiraHeaderMenu();
   }
 
   async function testJiraCloudConnection() {
     setJiraCloudBusy(true);
     setJiraCloudStatus("FIT Global JIRA bağlantısı test ediliyor…", "busy");
     try {
-      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
       const result = await window.JiraCloudClient.health();
       setJiraCloudStatus(`${result.account?.displayName || "JIRA kullanıcısı"} olarak ${result.site} bağlantısı başarılı.`, "success");
       return true;
@@ -252,7 +387,6 @@
     setJiraCloudBusy(true);
     setJiraCloudStatus("JIRA maddeleri JQL ile alınıyor…", "busy");
     try {
-      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
       const response = await window.JiraCloudClient.syncIssues($("#jiraSyncJql").value);
       const result = window.JiraStore.mergeAll(response.items || []);
       if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "JIRA maddeleri birleştirilemedi.");
@@ -283,7 +417,6 @@
     $("#jiraFormMessage").textContent = `${key} JIRA Cloud’dan alınıyor…`;
     $("#jiraFormMessage").classList.remove("success");
     try {
-      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
       const response = await window.JiraCloudClient.getIssue(key);
       const result = window.JiraStore.mergeAll([response.item]);
       if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "JIRA maddesi kaydedilemedi.");
@@ -327,7 +460,6 @@
     button.disabled = true;
     setTimesheetJiraSyncStatus(`${from} – ${to} arasındaki JIRA eforlarınız alınıyor…`, "busy");
     try {
-      window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
       const response = await window.JiraCloudClient.syncWorklogs(from, to);
       const issueResult = window.JiraStore.mergeAll(response.issues || []);
       if (!issueResult.valid) throw new Error(Object.values(issueResult.errors || {}).join(" ") || "JIRA maddeleri birleştirilemedi.");
@@ -541,7 +673,6 @@
   }
 
   async function deleteEffortEntry(entry) {
-    if (!requireAppEditMode()) return false;
     if (!entry) return false;
     const jiraItem = getJiraItem(entry.jiraId);
     if (!confirm(`“${jiraItem?.name || entry.project}” efor kaydı silinsin mi?`)) return false;
@@ -801,13 +932,26 @@
   }
 
   function activateMainView(viewId) {
+    const teamSubview = ["peopleView", "organizationView"].includes(viewId) ? viewId : "";
+    const mainViewId = teamSubview ? "teamView" : viewId;
     document.querySelectorAll(".tab-button").forEach((button) => {
-      const active = button.dataset.tab === viewId;
+      const active = button.dataset.tab === mainViewId;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", String(active));
     });
-    document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
-    if (viewId === "jiraView" && !$("#jiraItemsView").classList.contains("hidden")) scheduleJiraAutoFit();
+    document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== mainViewId));
+    if (teamSubview) activateTeamSubview(teamSubview);
+    if (mainViewId === "jiraView" && !$("#jiraItemsView").classList.contains("hidden")) scheduleJiraAutoFit();
+  }
+
+  function activateTeamSubview(viewId) {
+    document.querySelectorAll(".team-subtab-button").forEach((button) => {
+      const active = button.dataset.teamTab === viewId;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll(".team-subview").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
+    if (viewId === "organizationView") renderOrganization();
   }
 
   function activateJiraSubview(viewId) {
@@ -1010,7 +1154,6 @@
   }
 
   function startReminderEdit(item) {
-    if (!requireAppEditMode()) return;
     reminderFields.id.value = item.id;
     reminderFields.text.value = item.text;
     reminderFields.remindAt.value = item.remindAt || "";
@@ -1023,7 +1166,6 @@
   }
 
   function openReminderCreateModal() {
-    if (!requireAppEditMode()) return;
     resetReminderForm();
     $("#reminderModal").showModal();
     reminderFields.text.focus();
@@ -1743,7 +1885,6 @@
   }
 
   function startPersonEdit(person) {
-    if (!requireAppEditMode()) return;
     personFields.id.value = person.id;
     personFields.fullName.value = person.fullName;
     personFields.email.value = person.email;
@@ -1790,7 +1931,6 @@
   }
 
   async function syncJiraPeople() {
-    if (!requireAppEditMode()) return;
     const button = $("#syncJiraUsers");
     button.disabled = true;
     setJiraPeopleSyncStatus("JIRA’daki aktif kullanıcılar alınıyor…", "busy");
@@ -1812,9 +1952,7 @@
       setJiraPeopleSyncStatus(`${response.total || response.items?.length || 0} aktif kullanıcı alındı: ${created} yeni kişi, ${updated} güncelleme${skipped ? `, ${skipped} atlanan` : ""}${linkedTasks ? `; ${linkedTasks} görev ataması yenilendi` : ""}.`, "success");
     } catch (error) {
       setJiraPeopleSyncStatus(`JIRA kullanıcıları alınamadı: ${error.message}`, "error");
-    } finally {
-      button.disabled = !appEditMode;
-    }
+    } finally { button.disabled = false; }
   }
 
   function renderPeople() {
@@ -1931,60 +2069,6 @@
     return rows.filter((person) => person.role === "leader" || rows.some((item) => item.managerId === person.id));
   }
 
-  function renderOrganizationTree(rows, selectedPersonId) {
-    const container = $("#organizationTree");
-    container.replaceChildren();
-    const byManager = new Map();
-    rows.forEach((person) => {
-      const managerId = rows.some((item) => item.id === person.managerId) ? person.managerId : "";
-      if (!byManager.has(managerId)) byManager.set(managerId, []);
-      byManager.get(managerId).push(person);
-    });
-    const visited = new Set();
-    const buildBranch = (managerId, depth) => {
-      const branch = document.createElement("div");
-      branch.className = "organization-branch";
-      branch.style.setProperty("--org-depth", String(depth));
-      (byManager.get(managerId) || []).forEach((person) => {
-        if (visited.has(person.id)) return;
-        visited.add(person.id);
-        const reports = byManager.get(person.id) || [];
-        const button = document.createElement("button");
-        const canShowTeam = person.role === "leader" || reports.length > 0;
-        button.type = "button";
-        button.className = "organization-person";
-        button.classList.toggle("selected", person.id === selectedPersonId);
-        button.dataset.role = person.role || "member";
-        button.disabled = !canShowTeam;
-        button.setAttribute("aria-label", canShowTeam ? `${person.fullName} ekip işlerini göster` : `${person.fullName}, ekip üyesi`);
-        const avatar = document.createElement("span");
-        avatar.className = "organization-avatar person-avatar";
-        renderPersonAvatar(avatar, person);
-        const copy = document.createElement("span");
-        copy.className = "organization-person-copy";
-        const name = document.createElement("strong");
-        name.textContent = person.fullName;
-        const meta = document.createElement("small");
-        meta.textContent = `${person.title || (person.role === "leader" ? "Lider" : "Ekip üyesi")} · ${reports.length} doğrudan bağlı`;
-        copy.append(name, meta);
-        const badge = document.createElement("span");
-        badge.className = "organization-role-badge";
-        badge.textContent = person.role === "leader" || reports.length ? "Lider" : "Üye";
-        button.append(avatar, copy, badge);
-        if (canShowTeam) {
-          button.addEventListener("click", () => {
-            $("#organizationLeaderFilter").value = person.id;
-            renderOrganization();
-          });
-        }
-        branch.append(button);
-        if (reports.length) branch.append(buildBranch(person.id, depth + 1));
-      });
-      return branch;
-    };
-    container.append(buildBranch("", 0));
-  }
-
   function renderOrganization() {
     if (!$("#organizationView")) return;
     const rows = window.PeopleStore.list();
@@ -2010,11 +2094,7 @@
     const teamNames = new Set(teamRows.map((person) => normalizePersonName(person.fullName)));
     const teamTasks = window.TaskStore.list().filter((task) => teamIds.has(task.assigneeId) || (!task.assigneeId && teamNames.has(normalizePersonName(task.assignee))));
 
-    $("#organizationPeopleCount").textContent = `${rows.length} kişi`;
-    $("#organizationEmptyState").classList.toggle("hidden", rows.length > 0);
-    $("#organizationTree").classList.toggle("hidden", rows.length === 0);
     $("#organizationWorkloadTitle").textContent = selectedLeader ? `${selectedLeader.fullName} ekibinin işleri` : "Tüm organizasyonun işleri";
-    renderOrganizationTree(rows, selectedLeader?.id || "");
 
     const stats = $("#organizationTaskStats");
     stats.replaceChildren();
@@ -2397,7 +2477,6 @@
   }
 
   async function transitionJiraRequest(itemId, targetStatus) {
-    if (!requireAppEditMode()) return;
     const item = window.JiraStore.get(itemId);
     if (!item || !targetStatus || jiraRequestStatusKey(item.status) === jiraRequestStatusKey(targetStatus)) return;
     if (jiraRequestTransitionPending) {
@@ -2514,7 +2593,7 @@
       groupItems.forEach((item) => {
         const card = document.createElement("article");
         card.className = "jira-request-card";
-        card.draggable = appEditMode && !jiraRequestTransitionPending;
+        card.draggable = !jiraRequestTransitionPending;
         card.setAttribute("aria-label", `${item.name} talebi; başka bir statü sütununa sürükleyebilirsiniz`);
         card.addEventListener("dragstart", (event) => {
           if (jiraRequestTransitionPending) {
@@ -2673,7 +2752,6 @@
   }
 
   function openEffortEditModal(sourceEntries) {
-    if (!requireAppEditMode()) return;
     modalEffortMode = "edit";
     $("#modalRepeatEntryToggle").checked = false;
     $("#modalRepeatEntryToggleField").classList.add("hidden");
@@ -2698,7 +2776,6 @@
   }
 
   function openEffortCreateModal(jiraId, date) {
-    if (!requireAppEditMode()) return;
     modalEffortMode = "create";
     $("#modalRepeatEntryToggleField").classList.remove("hidden");
     $("#modalRepeatEntryToggle").checked = false;
@@ -2940,7 +3017,6 @@
   }
 
   function startTaskEdit(task) {
-    if (!requireAppEditMode()) return;
     activateTaskSubview("taskCreateView");
     taskFields.id.value = task.id;
     populateTaskParentOptions(task.id, task.parentTaskId || "");
@@ -2953,6 +3029,9 @@
     taskFields.dueDate.value = task.dueDate || "";
     taskFields.status.value = task.status;
     taskFields.descriptionHtml.innerHTML = sanitizeTaskHtml(task.descriptionHtml);
+    taskExistingAttachments = Array.isArray(task.attachments) ? task.attachments.slice() : [];
+    taskPendingDocuments = [];
+    renderTaskDocuments();
     $("#taskFormTitle").textContent = "Görevi revize et";
     $("#taskSubmitLabel").textContent = "Değişiklikleri kaydet";
     $("#cancelTaskEdit").classList.remove("hidden");
@@ -2961,7 +3040,6 @@
   }
 
   function startSubtaskCreate(parentTask) {
-    if (!requireAppEditMode()) return;
     resetTaskForm();
     activateTaskSubview("taskCreateView");
     populateTaskParentOptions("", parentTask.id);
@@ -2990,11 +3068,71 @@
     taskFields.dueDate.value = "";
     taskFields.status.value = "planned";
     taskFields.descriptionHtml.replaceChildren();
+    taskExistingAttachments = [];
+    taskPendingDocuments = [];
+    taskFields.documents.value = "";
+    renderTaskDocuments();
     $("#taskFormTitle").textContent = "Görev ekle";
     $("#taskSubmitLabel").textContent = "Görevi ekle";
     $("#cancelTaskEdit").classList.add("hidden");
     $("#taskFormMessage").textContent = "";
     $("#taskFormMessage").classList.remove("success");
+  }
+
+  function formatDocumentSize(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function taskDocumentUrl(attachment) {
+    const value = String(attachment?.webViewLink || attachment?.webContentLink || "").trim();
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" ? url.href : "";
+    } catch { return ""; }
+  }
+
+  function renderTaskDocuments() {
+    const list = $("#taskDocumentList");
+    const summary = $("#taskDocumentSelectionSummary");
+    if (!list || !summary) return;
+    list.replaceChildren();
+    taskExistingAttachments.forEach((attachment) => {
+      const row = document.createElement("div");
+      row.className = "task-document-item is-uploaded";
+      const link = document.createElement("a");
+      const documentUrl = taskDocumentUrl(attachment);
+      if (documentUrl) link.href = documentUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = attachment.name;
+      const meta = document.createElement("span");
+      meta.textContent = `${formatDocumentSize(attachment.size)} · Drive’da`;
+      row.append(link, meta);
+      list.append(row);
+    });
+    taskPendingDocuments.forEach((file, index) => {
+      const row = document.createElement("div");
+      row.className = "task-document-item is-pending";
+      const name = document.createElement("strong");
+      name.textContent = file.name;
+      const meta = document.createElement("span");
+      meta.textContent = `${formatDocumentSize(file.size)} · Yüklenmeyi bekliyor`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "task-document-remove";
+      remove.dataset.pendingDocumentIndex = String(index);
+      remove.textContent = "Kaldır";
+      row.append(name, meta, remove);
+      list.append(row);
+    });
+    const total = taskExistingAttachments.length + taskPendingDocuments.length;
+    summary.textContent = total
+      ? `${total} doküman${taskPendingDocuments.length ? ` · ${taskPendingDocuments.length} yeni` : ""}`
+      : "Doküman seçilmedi";
+    list.classList.toggle("hidden", total === 0);
   }
 
   function applyInitialRoute() {
@@ -3065,30 +3203,55 @@
     refreshDriveHeaderMenu();
   }
 
-  function refreshDriveHeaderMenu() {
-    const menu = $("#driveHeaderMenu");
-    const connected = Boolean(window.DriveSync?.hasAccessToken());
-    const isError = $("#driveStatus").classList.contains("drive-error");
-    const restoreNeeded = !$("#restorePrompt").classList.contains("hidden");
-    menu.classList.toggle("is-connected", connected && !isError);
-    menu.classList.toggle("is-error", isError);
-    menu.classList.toggle("needs-restore", restoreNeeded);
-    $("#headerDriveMenuBadge").classList.toggle("hidden", !restoreNeeded);
-    $("#headerDriveMenuLabel").textContent = restoreNeeded
-      ? "Yedek yükle"
-      : isError
-        ? "Bağlantı hatası"
-        : connected
-          ? "Drive bağlı"
-          : window.DriveSync?.getClientId()
-            ? "Drive hazır"
-            : "Kurulum gerekli";
+  function maskedGoogleClientId(value) {
+    const clientId = String(value || "").trim();
+    if (!clientId) return "Henüz kaydedilmedi";
+    const suffix = ".apps.googleusercontent.com";
+    return `${clientId.slice(0, Math.min(8, clientId.length))}••••${clientId.endsWith(suffix) ? suffix : clientId.slice(-12)}`;
   }
 
-  function setRestorePromptVisible(visible, openMenu = visible) {
-    $("#restorePrompt").classList.toggle("hidden", !visible);
-    refreshDriveHeaderMenu();
-    if (visible && openMenu) $("#driveHeaderMenu").open = true;
+  function setDriveSettingsEditing(editing) {
+    const clientId = window.DriveSync?.getClientId() || "";
+    const showEditor = Boolean(editing || !clientId);
+    $("#driveSettingsEditor").classList.toggle("hidden", !showEditor);
+    $("#driveSettingsSummary").classList.toggle("hidden", showEditor);
+    $("#googleClientId").value = clientId;
+    if (showEditor && editing) $("#googleClientId").focus();
+  }
+
+  function refreshDriveHeaderMenu() {
+    const menu = $("#driveHeaderMenu");
+    const clientId = window.DriveSync?.getClientId() || "";
+    const configured = Boolean(clientId);
+    const connected = Boolean(window.DriveSync?.hasAccessToken());
+    const isError = $("#driveStatus").classList.contains("drive-error");
+    const isBusy = menu.classList.contains("is-busy");
+    menu.classList.toggle("is-connected", connected && !isError);
+    menu.classList.toggle("is-error", isError);
+    $("#driveClientIdPreview").textContent = maskedGoogleClientId(clientId);
+    const state = isError ? "error" : isBusy ? "connecting" : connected ? "connected" : configured ? "configured" : "unconfigured";
+    const labels = {
+      error: "Bağlantı hatası", connecting: "Bağlanıyor…", connected: "Bağlı",
+      configured: "Ayarlar kayıtlı", unconfigured: "Kurulum gerekli"
+    };
+    const badge = $("#driveConnectionBadge");
+    badge.dataset.state = state;
+    badge.textContent = labels[state];
+    $("#headerDriveMenuLabel").textContent = isError
+      ? "Bağlantı hatası"
+      : isBusy
+        ? "Bağlanıyor"
+        : connected
+          ? "Drive bağlı"
+          : configured
+            ? "Drive hazır"
+            : "Kurulum gerekli";
+    const showHeaderBadge = isBusy || isError;
+    $("#headerDriveMenuBadge").classList.toggle("hidden", !showHeaderBadge);
+    $("#headerDriveMenuBadge").textContent = isBusy ? "Bağlanıyor" : "Hata";
+    $(".drive-toolbar-status").classList.toggle("is-connected", connected && !isError);
+    $("#backupToDrive").disabled = isBusy || !configured;
+    $("#restoreFromDrive").disabled = isBusy || !configured;
   }
 
   function updateLastBackupTime(value = window.DriveSync?.getLastBackupTime()) {
@@ -3196,9 +3359,9 @@
     replaceLocalBundle(bundle);
     const syncedAt = bundle.lastModifiedAt || new Date().toISOString();
     localStorage.setItem(SUPABASE_LAST_SYNC_KEY, syncedAt);
-    appEditDirty = false;
-    localStorage.removeItem(APP_DIRTY_KEY);
-    updateAppEditModeUi();
+    localChangesPending = false;
+    localStorage.removeItem(LOCAL_CHANGES_PENDING_KEY);
+    updateDirtyUi();
     updateSupabaseLastSync(syncedAt);
     setSupabaseStatus(`${bundleRecordCount(bundle)} kayıt Supabase’den bu cihaza yüklendi.`, "success");
     return true;
@@ -3216,23 +3379,22 @@
     return true;
   }
 
-  async function saveAppChangesToCloud() {
+  async function saveLocalChangesToCloud() {
     if (!supabaseSession?.user) {
       $("#supabaseHeaderMenu").open = true;
       setSupabaseStatus("Kaydetmek için önce Supabase hesabınıza giriş yapın.", "error");
       return false;
     }
     try {
-      const saved = await pushToSupabase({ confirmOverwrite: false });
+      const saved = await pushToSupabase({ confirmOverwrite: true });
       if (!saved) return false;
-      appEditDirty = false;
-      localStorage.removeItem(APP_DIRTY_KEY);
-      setAppEditMode(false);
-      $("#appEditMenu").open = false;
+      localChangesPending = false;
+      localStorage.removeItem(LOCAL_CHANGES_PENDING_KEY);
+      updateDirtyUi();
       return true;
     } catch (error) {
       setSupabaseStatus(`Supabase kaydı yapılamadı: ${error.message}`, "error");
-      updateAppEditModeUi();
+      updateDirtyUi();
       return false;
     }
   }
@@ -3244,92 +3406,45 @@
     catch (error) {
       setSupabaseStatus(error.message || "Supabase işlemi tamamlanamadı.", "error");
       return false;
-    } finally { setSupabaseBusy(false); updateAppEditModeUi(); }
+    } finally { setSupabaseBusy(false); updateDirtyUi(); }
   }
 
-  const EDIT_ACTION_SELECTOR = [
-    "[data-task-tab=\"taskCreateView\"]", "#openReminderModal", "#addTimesheetEffort", "#syncJiraIssues", "#syncJiraWorklogs", "#syncJiraUsers",
-    ".edit-button", ".delete-button", ".jira-edit-button", ".jira-delete-button", ".reminder-complete-button",
-    ".reminder-row-actions button", ".person-card-actions button", ".task-check", ".timesheet-effort-button", ".timesheet-empty-effort-button"
-  ].join(",");
-  const EDIT_FORM_SELECTOR = "#effortForm,#taskForm,#personForm,#jiraForm,#reminderForm,#taskPlanPasteForm,#effortEditModalForm";
-
-  function updateAppEditModeUi() {
-    document.body.classList.toggle("app-edit-mode", appEditMode);
-    document.body.classList.toggle("app-has-unsaved-changes", appEditDirty);
-    $("#appEditModeLabel").textContent = appEditMode ? "Düzenleme modu" : "Görüntüleme modu";
-    $("#appEditModeStatus").textContent = appEditDirty
-      ? (appEditMode ? "Yerel değişiklikler Supabase’e gönderilmeyi bekliyor." : "Supabase’e gönderilmemiş yerel değişiklikler var.")
-      : (appEditMode ? "Değişiklik yapabilirsiniz. Kaydet verileri Supabase’e gönderir." : "Değişiklik yapmak için Düzenle’ye basın.");
-    $("#enterAppEditMode").textContent = appEditMode ? "Düzenleme açık" : "Düzenle";
-    $("#enterAppEditMode").disabled = appEditMode;
-    $("#saveAppChanges").disabled = !appEditDirty;
-    $("#headerEditModeLabel").textContent = appEditMode ? "Düzenleme açık" : "Görüntüleme";
-    $("#headerUnsavedBadge").classList.toggle("hidden", !appEditDirty);
-    ["#effortForm", "#taskCreateView", "#peopleView .people-form-panel", "#jiraItemsView .jira-form-panel", "#reminderForm", "#effortEditModalForm"].forEach((selector) => {
-      const element = $(selector);
-      if (element) element.inert = !appEditMode;
-    });
-    ["#openReminderModal", "#addTimesheetEffort", "#syncJiraIssues", "#syncJiraWorklogs", "#syncJiraUsers", "#jiraHtmlImport", "#taskPlanImport"].forEach((selector) => {
-      const element = $(selector);
-      if (element) element.disabled = !appEditMode;
-    });
-    document.querySelectorAll(".jira-request-card").forEach((card) => { card.draggable = appEditMode && !jiraRequestTransitionPending; });
+  function updateDirtyUi() {
+    const pushButton = $("#supabasePush");
+    if (pushButton) pushButton.textContent = localChangesPending ? "Değişiklikleri gönder" : "Yerel verileri gönder";
   }
 
-  function setAppEditMode(enabled) {
-    appEditMode = Boolean(enabled);
-    if (appEditMode) sessionStorage.setItem(APP_EDIT_SESSION_KEY, "true");
-    else sessionStorage.removeItem(APP_EDIT_SESSION_KEY);
-    updateAppEditModeUi();
-  }
-
-  function requireAppEditMode() {
-    if (appEditMode) return true;
-    $("#appEditMenu").open = true;
-    $("#appEditModeStatus").textContent = "Bu işlem için önce Düzenle’ye basın.";
-    $("#appEditToolbar").classList.add("needs-attention");
-    setTimeout(() => $("#appEditToolbar").classList.remove("needs-attention"), 1200);
-    return false;
-  }
-
-  function markAppDirty() {
-    appEditDirty = true;
-    localStorage.setItem(APP_DIRTY_KEY, "true");
-    updateAppEditModeUi();
+  function markLocalChangePending() {
+    localChangesPending = true;
+    localStorage.setItem(LOCAL_CHANGES_PENDING_KEY, "true");
+    updateDirtyUi();
     setSupabaseStatus("Değişiklik yerel olarak kaydedildi. Supabase’e göndermek için Kaydet’e basın.");
   }
 
-  async function saveAppChangesToDrive(message = "Değişiklikler Google Drive’a kaydedildi.") {
+  async function backupLocalDataToDrive(message = "Değişiklikler Google Drive’a kaydedildi.") {
     setDriveStatus("Veriler Google Drive’a gönderiliyor…");
     try {
       const result = await window.DriveSync.backup(backupBundle());
-      appEditDirty = false;
-      localStorage.removeItem(APP_DIRTY_KEY);
       updateLastBackupTime(result.modifiedTime);
       setDriveStatus(message);
-      setRestorePromptVisible(false);
-      setAppEditMode(false);
-      $("#appEditMenu").open = false;
       return true;
     } catch (error) {
       setDriveStatus(`Drive yedeklemesi yapılamadı: ${error.message}`, true);
-      updateAppEditModeUi();
       return false;
     }
   }
 
   function setDriveBusy(busy) {
-    ["#saveDriveSettings", "#backupToDrive", "#restoreFromDrive", "#initialRestoreButton"].forEach((selector) => {
+    ["#saveDriveSettings", "#cancelDriveSettings", "#editDriveSettings", "#backupToDrive", "#restoreFromDrive", "#skipInitialRestore"].forEach((selector) => {
       $(selector).disabled = busy;
     });
     $("#driveHeaderMenu").classList.toggle("is-busy", busy);
-    if (busy) $("#headerDriveMenuLabel").textContent = "İşlem yapılıyor";
-    else refreshDriveHeaderMenu();
+    $("#driveCompactPanel").setAttribute("aria-busy", String(Boolean(busy)));
+    refreshDriveHeaderMenu();
   }
 
   async function backupAndReport(message = "Kayıt Drive’a otomatik gönderildi.") {
-    markAppDirty();
+    markLocalChangePending();
     return true;
   }
 
@@ -3354,11 +3469,10 @@
     render();
     renderPeople();
     renderTasks();
-    appEditDirty = false;
-    localStorage.removeItem(APP_DIRTY_KEY);
-    updateAppEditModeUi();
+    localChangesPending = false;
+    localStorage.removeItem(LOCAL_CHANGES_PENDING_KEY);
+    updateDirtyUi();
     updateLastBackupTime(backup.file.modifiedTime);
-    setRestorePromptVisible(false);
     setDriveStatus(`${backup.entries.length} efor, ${(backup.tasks || []).length} görev ve ${(backup.people || []).length} kişi Google Drive’dan geri yüklendi.`);
   }
 
@@ -3366,7 +3480,7 @@
     setDriveBusy(true);
     try { await action(); }
     catch (error) { setDriveStatus(error.message || "Google Drive işlemi tamamlanamadı.", true); }
-    finally { setDriveBusy(false); updateAppEditModeUi(); }
+    finally { setDriveBusy(false); }
   }
 
   form.addEventListener("submit", async (event) => {
@@ -3447,12 +3561,13 @@
     backupAndReport(editingPerson ? "Güncellenen kişi Drive’a gönderildi." : "Yeni kişi Drive’a gönderildi.");
   });
 
-  taskForm.addEventListener("submit", (event) => {
+  taskForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const editing = Boolean(taskFields.id.value);
     const selectedParent = tasks.find((task) => task.id === taskFields.parentTaskId.value) || null;
     const creatingSubtask = !editing && Boolean(selectedParent);
     const assignment = selectedTaskAssignment();
+    const taskId = taskFields.id.value || window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const payload = {
       title: taskFields.title.value.trim(),
       parentTaskId: selectedParent?.id || "",
@@ -3465,21 +3580,67 @@
       quarter: taskFields.quarter.value,
       dueDate: taskFields.dueDate.value,
       status: taskFields.status.value,
-      descriptionHtml: sanitizeTaskHtml(taskFields.descriptionHtml.innerHTML)
+      descriptionHtml: sanitizeTaskHtml(taskFields.descriptionHtml.innerHTML),
+      attachments: taskExistingAttachments.slice()
     };
-    const result = editing ? window.TaskStore.update(taskFields.id.value, payload) : window.TaskStore.create(payload);
-    if (!result.valid) {
-      $("#taskFormMessage").textContent = Object.values(result.errors || {}).join(" ");
+    const validation = window.TaskStore.validate(payload);
+    if (!validation.valid) {
+      $("#taskFormMessage").textContent = Object.values(validation.errors || {}).join(" ");
       $("#taskFormMessage").classList.remove("success");
       return;
     }
-    if (creatingSubtask && selectedParent) expandedTaskIds.add(selectedParent.id);
-    resetTaskForm();
-    $("#taskFormMessage").textContent = editing ? "Görev güncellendi." : (creatingSubtask ? "Alt görev eklendi." : "Görev eklendi.");
-    $("#taskFormMessage").classList.add("success");
-    renderTasks();
-    activateTaskSubview("taskReportView");
-    backupAndReport(editing ? "Güncellenen görev Drive’a gönderildi." : "Yeni görev Drive’a gönderildi.");
+    const submitButton = taskForm.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    taskFields.documents.disabled = true;
+    try {
+      if (taskPendingDocuments.length) {
+        if (!window.DriveSync?.getClientId()) {
+          $("#driveHeaderMenu").open = true;
+          throw new Error("Doküman yüklemek için önce Ayarlar > Google Drive bölümünden OAuth Client ID’nizi kaydedin.");
+        }
+        const uploaded = await window.DriveSync.uploadTaskDocuments(
+          { taskId, title: payload.title },
+          taskPendingDocuments,
+          ({ current, total, file }) => {
+            $("#taskFormMessage").textContent = `${current}/${total} · “${file.name}” Google Drive’a yükleniyor…`;
+            $("#taskFormMessage").classList.remove("success");
+          }
+        );
+        payload.attachments = [...taskExistingAttachments, ...uploaded];
+      }
+      const result = editing ? window.TaskStore.update(taskFields.id.value, payload) : window.TaskStore.create({ id: taskId, ...payload });
+      if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" "));
+      if (creatingSubtask && selectedParent) expandedTaskIds.add(selectedParent.id);
+      resetTaskForm();
+      $("#taskFormMessage").textContent = editing ? "Görev güncellendi." : (creatingSubtask ? "Alt görev eklendi." : "Görev eklendi.");
+      $("#taskFormMessage").classList.add("success");
+      renderTasks();
+      activateTaskSubview("taskReportView");
+      backupAndReport(editing ? "Güncellenen görev Drive’a gönderildi." : "Yeni görev Drive’a gönderildi.");
+    } catch (error) {
+      $("#taskFormMessage").textContent = `Görev kaydedilmedi: ${error.message}`;
+      $("#taskFormMessage").classList.remove("success");
+    } finally {
+      submitButton.disabled = false;
+      taskFields.documents.disabled = false;
+    }
+  });
+
+  taskFields.documents.addEventListener("change", () => {
+    const selected = Array.from(taskFields.documents.files || []);
+    selected.forEach((file) => {
+      const duplicate = taskPendingDocuments.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified);
+      if (!duplicate) taskPendingDocuments.push(file);
+    });
+    taskFields.documents.value = "";
+    renderTaskDocuments();
+  });
+
+  $("#taskDocumentList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-pending-document-index]");
+    if (!button) return;
+    taskPendingDocuments.splice(Number(button.dataset.pendingDocumentIndex), 1);
+    renderTaskDocuments();
   });
 
   reminderForm.addEventListener("submit", (event) => {
@@ -3613,8 +3774,15 @@
   });
   $("#connectJiraOAuth").addEventListener("click", () => {
     try {
-      const endpoint = window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
-      $("#jiraApiEndpoint").value = endpoint;
+      if (window.JiraCloudClient.usesSupabase()) {
+        $("#jiraHeaderMenu").open = true;
+        if (!supabaseSession?.user) $("#supabaseHeaderMenu").open = true;
+        if (supabaseSession?.user) $("#jiraCredentialToken").focus();
+        setJiraCredentialStatus(supabaseSession?.user
+          ? "JIRA adresinizi, Atlassian e-postanızı ve API tokenınızı girerek bağlantıyı kaydedin."
+          : "Önce Supabase hesabınıza giriş yapın, ardından kişisel JIRA bağlantınızı kaydedin.");
+        return;
+      }
       setJiraCloudStatus("Atlassian giriş sayfasına yönlendiriliyorsunuz…", "busy");
       window.JiraCloudClient.signInWithJira();
     } catch (error) {
@@ -3631,18 +3799,16 @@
       setJiraCloudStatus(`JIRA oturumu kapatılamadı: ${error.message}`, "error");
     }
   });
-  $("#saveJiraApiEndpoint").addEventListener("click", async () => {
-    try {
-      const endpoint = window.JiraCloudClient.setEndpoint($("#jiraApiEndpoint").value);
-      $("#jiraApiEndpoint").value = endpoint;
-      setJiraCloudStatus("JIRA backend adresi kaydedildi.", "success");
-      await refreshJiraOAuthStatus();
-    } catch (error) {
-      setJiraCloudStatus(error.message, "error");
-    }
-  });
+  $("#saveJiraCredentials").addEventListener("click", saveJiraCredentials);
+  $("#removeJiraCredentials").addEventListener("click", removeJiraCredentials);
   $("#testJiraConnection").addEventListener("click", testJiraCloudConnection);
   $("#syncJiraIssues").addEventListener("click", syncJiraCloudIssues);
+  $("#jiraSyncJql").addEventListener("change", (event) => {
+    const value = event.target.value.trim();
+    if (value) localStorage.setItem(JIRA_SYNC_JQL_KEY, value);
+    else localStorage.removeItem(JIRA_SYNC_JQL_KEY);
+    setJiraCloudStatus("JIRA senkronizasyon tercihi kaydedildi.", "success");
+  });
   $("#jiraAutoWorklog").addEventListener("change", (event) => {
     localStorage.setItem(JIRA_AUTO_WORKLOG_KEY, String(event.target.checked));
     setJiraCloudStatus(event.target.checked ? "JIRA worklog gönderimi için kayıt sonrası onay istenecek." : "JIRA worklog gönderimi kapatıldı.", "success");
@@ -3741,6 +3907,10 @@
 
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.addEventListener("click", () => activateMainView(button.dataset.tab));
+  });
+
+  document.querySelectorAll(".team-subtab-button").forEach((button) => {
+    button.addEventListener("click", () => activateTeamSubview(button.dataset.teamTab));
   });
 
   document.querySelectorAll("[data-home-target]").forEach((button) => {
@@ -3894,19 +4064,19 @@
   $("#saveDriveSettings").addEventListener("click", () => {
     try {
       window.DriveSync.setClientId($("#googleClientId").value);
-      setDriveStatus("OAuth Client ID kaydedildi. Açılış yedeğini şimdi yükleyebilirsiniz.");
+      setDriveSettingsEditing(false);
+      setDriveStatus("Ayarlar kayıtlı. Yedeklemek veya yüklemek için aşağıdan bir işlem seçin.");
       updateCalendarProviderUi();
       if (activeCalendarProvider === "google") setCalendarStatus("Google OAuth Client ID hazır. Şimdi Google Takvim’e bağlanabilirsiniz.", "success");
-      $(".drive-settings").open = false;
-      setRestorePromptVisible(true);
     } catch (error) { setDriveStatus(error.message, true); }
   });
-
-  $("#enterAppEditMode").addEventListener("click", () => {
-    setAppEditMode(true);
-    $("#appEditMenu").open = false;
+  $("#editDriveSettings").addEventListener("click", () => setDriveSettingsEditing(true));
+  $("#cancelDriveSettings").addEventListener("click", () => {
+    setDriveSettingsEditing(false);
+    setDriveStatus(window.DriveSync?.getClientId()
+      ? "Ayar değişikliği iptal edildi. Kayıtlı ayarlar kullanılmaya devam edecek."
+      : "Yedeklemeyi kullanmak için Google OAuth Client ID kaydedin.");
   });
-  $("#saveAppChanges").addEventListener("click", () => runSupabaseAction(saveAppChangesToCloud));
 
   $("#supabaseAuthForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -3947,40 +4117,26 @@
   });
 
   $("#supabasePull").addEventListener("click", () => runSupabaseAction(pullFromSupabase));
-  $("#supabasePush").addEventListener("click", () => runSupabaseAction(() => pushToSupabase({ confirmOverwrite: true })));
+  $("#supabasePush").addEventListener("click", () => runSupabaseAction(saveLocalChangesToCloud));
   $("#supabaseSignOut").addEventListener("click", () => runSupabaseAction(async () => {
     await window.SupabaseCloud.signOut();
     await refreshSupabaseAccount(null);
   }));
 
-  document.addEventListener("click", (event) => {
-    if (appEditMode || !event.target.closest(EDIT_ACTION_SELECTOR)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    requireAppEditMode();
-  }, true);
-  document.addEventListener("submit", (event) => {
-    if (appEditMode || !event.target.matches(EDIT_FORM_SELECTOR)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    requireAppEditMode();
-  }, true);
-
   $("#backupToDrive").addEventListener("click", () => runDriveAction(async () => {
-    await saveAppChangesToDrive("Yedek Google Drive’a kaydedildi.");
+    await backupLocalDataToDrive("Yedek Google Drive’a kaydedildi.");
   }));
 
   $("#restoreFromDrive").addEventListener("click", () => runDriveAction(restoreFromDrive));
-  $("#initialRestoreButton").addEventListener("click", () => runDriveAction(restoreFromDrive));
   $("#skipInitialRestore").addEventListener("click", () => {
-    setRestorePromptVisible(false);
-    setDriveStatus("Drive geri yüklemesi bu açılış için atlandı.");
+    setDriveStatus("Bu açılış için yedekleme işlemi yapılmadı.");
     $("#driveHeaderMenu").open = false;
   });
 
   document.querySelectorAll(".header-menu").forEach((menu) => {
     menu.addEventListener("toggle", () => {
       if (!menu.open) return;
+      if (menu.id === "driveHeaderMenu") refreshDriveHeaderMenu();
       document.querySelectorAll(".header-menu[open]").forEach((otherMenu) => {
         if (otherMenu !== menu) otherMenu.open = false;
       });
@@ -4000,10 +4156,13 @@
         $("#supabaseRecoveryForm").classList.remove("hidden");
         setSupabaseStatus("Yeni şifrenizi belirleyin.", "success");
       }
-      refreshSupabaseAccount(session);
+      refreshSupabaseAccount(session).then(() => {
+        refreshJiraCredentialStatus();
+        refreshJiraOAuthStatus();
+      });
     });
     window.SupabaseCloud.getSession()
-      .then((session) => refreshSupabaseAccount(session))
+      .then((session) => refreshSupabaseAccount(session).then(() => refreshJiraCredentialStatus()))
       .catch((error) => setSupabaseStatus(`Supabase oturumu alınamadı: ${error.message}`, "error"));
   } catch (error) {
     setSupabaseStatus(`Supabase başlatılamadı: ${error.message}`, "error");
@@ -4011,13 +4170,12 @@
 
   $("#todayLabel").textContent = dateFormatter.format(new Date());
   $("#googleClientId").value = window.DriveSync?.getClientId() || "";
+  setDriveSettingsEditing(false);
   updateLastBackupTime();
   if ($("#googleClientId").value) {
-    setDriveStatus("Başlamak için Drive’daki en güncel yedeği yükleyin.");
-    setRestorePromptVisible(true);
+    setDriveStatus("Ayarlar kayıtlı. Yedeklemek veya yüklemek için Yedekleme menüsünü kullanın.");
   } else {
-    setDriveStatus("Ayarlar’dan Google OAuth Client ID’nizi kaydedin.");
-    setRestorePromptVisible(false, false);
+    setDriveStatus("Yedeklemeyi kullanmak için Google OAuth Client ID kaydedin.");
   }
   fields.date.value = isoToday();
   taskFields.dueDate.value = "";
@@ -4027,9 +4185,9 @@
   $("#timesheetStartDate").value = isoFromDate(rangeMonday);
   $("#timesheetEndDate").value = isoFromDate(addDays(rangeMonday, 6));
   $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
-  $("#jiraApiEndpoint").value = window.JiraCloudClient.getEndpoint();
   const jiraOAuthResult = consumeJiraOAuthResult();
   refreshJiraOAuthStatus(!jiraOAuthResult);
+  $("#jiraSyncJql").value = localStorage.getItem(JIRA_SYNC_JQL_KEY) || $("#jiraSyncJql").value;
   $("#jiraAutoWorklog").checked = localStorage.getItem(JIRA_AUTO_WORKLOG_KEY) !== "false";
   renderJiraItems();
   render();
@@ -4038,6 +4196,6 @@
   window.TaskStore.migrateExistingTasksToArchitectureRoadmap();
   renderPeople();
   renderTasks();
-  updateAppEditModeUi();
+  updateDirtyUi();
   applyInitialRoute();
 })();

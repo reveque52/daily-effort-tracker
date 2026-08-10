@@ -5,22 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260810-6">
+    <link rel="stylesheet" href="styles.css?v=20260811-2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="data-store.js?v=20260807-22" defer></script>
-    <script src="tasks-store.js?v=20260806-20" defer></script>
+    <script src="tasks-store.js?v=20260810-1" defer></script>
     <script src="people-store.js?v=20260807-2" defer></script>
     <script src="jira-store.js?v=20260807-24" defer></script>
     <script src="reminders-store.js?v=20260806-22" defer></script>
     <script src="ai-assistant.js?v=20260806-23" defer></script>
-    <script src="jira-cloud.js?v=20260810-1" defer></script>
-    <script src="drive-sync.js?v=20260806-22" defer></script>
+    <script src="jira-cloud.js?v=20260811-1" defer></script>
+    <script src="drive-sync.js?v=20260810-1" defer></script>
     <script src="vendor/msal-browser.min.js?v=5.18.0" defer></script>
     <script src="outlook-calendar.js?v=20260807-1" defer></script>
     <script src="google-calendar.js?v=20260810-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
-    <script src="supabase-cloud.js?v=20260810-1" defer></script>
-    <script src="app.js?v=20260810-6" defer></script>
+    <script src="supabase-cloud.js?v=20260811-1" defer></script>
+    <script src="app.js?v=20260811-2" defer></script>
   </head>
   <body>
     <header class="page-header">
@@ -42,26 +42,11 @@
           <button class="tab-button" type="button" data-tab="effortsView" aria-selected="false">Eforlar</button>
           <button class="tab-button" type="button" data-tab="timesheetView" aria-selected="false">Timesheet</button>
           <button class="tab-button" type="button" data-tab="tasksView" aria-selected="false">Görevler <span id="taskTabCount">0</span></button>
-          <button class="tab-button" type="button" data-tab="peopleView" aria-selected="false">Kişiler <span id="peopleTabCount">0</span></button>
-          <button class="tab-button" type="button" data-tab="organizationView" aria-selected="false">Organizasyon</button>
+          <button class="tab-button" type="button" data-tab="teamView" aria-selected="false">Ekip <span id="peopleTabCount">0</span></button>
           <button class="tab-button" type="button" data-tab="jiraView" aria-selected="false">JIRA Maddeleri <span id="jiraTabCount">0</span></button>
         </nav>
 
-        <nav class="header-utility-nav" aria-label="Uygulama ve yedekleme menüleri">
-          <details id="appEditMenu" class="header-menu header-mode-menu">
-            <summary>
-              <span class="header-menu-icon header-mode-icon" aria-hidden="true">✎</span>
-              <span class="header-menu-copy"><small>Çalışma modu</small><strong id="headerEditModeLabel">Görüntüleme</strong></span>
-              <span id="headerUnsavedBadge" class="header-menu-badge hidden">Kaydedilmedi</span>
-            </summary>
-            <div class="header-menu-popover">
-              <section id="appEditToolbar" class="app-edit-toolbar" aria-label="Uygulama düzenleme modu">
-                <div class="app-edit-status"><span id="appEditModeDot" aria-hidden="true"></span><div><strong id="appEditModeLabel">Görüntüleme modu</strong><p id="appEditModeStatus" role="status" aria-live="polite">Değişiklik yapmak için Düzenle’ye basın.</p></div></div>
-                <div class="app-edit-actions"><button id="enterAppEditMode" class="button secondary" type="button">Düzenle</button><button id="saveAppChanges" class="button primary" type="button" disabled>Kaydet ve Supabase’e gönder</button></div>
-              </section>
-            </div>
-          </details>
-
+        <nav class="header-utility-nav" aria-label="Bulut, yedekleme ve entegrasyon menüleri">
           <details id="supabaseHeaderMenu" class="header-menu header-supabase-menu">
             <summary>
               <span class="header-menu-icon" aria-hidden="true">S</span>
@@ -118,46 +103,78 @@
               <span id="headerDriveMenuBadge" class="header-menu-badge hidden">Yedek yükle</span>
             </summary>
             <div class="header-menu-popover drive-header-popover">
-              <nav class="drive-toolbar" aria-label="Google Drive araçları">
-                <div class="drive-toolbar-status">
-                  <span class="sync-dot" aria-hidden="true"></span>
-                  <div>
-                    <strong>Google Drive</strong>
-                    <p id="driveStatus" aria-live="polite">Drive bağlantısı bekleniyor.</p>
+              <section id="driveCompactPanel" class="drive-compact-panel" aria-labelledby="driveCompactTitle">
+                <header class="drive-compact-heading">
+                  <div class="drive-toolbar-status">
+                    <span class="sync-dot" aria-hidden="true"></span>
+                    <div><span class="eyebrow">Google Drive</span><h2 id="driveCompactTitle">Yedekleme</h2></div>
+                  </div>
+                  <span id="driveConnectionBadge" class="drive-connection-badge" data-state="unconfigured">Kurulum gerekli</span>
+                </header>
+
+                <p id="driveStatus" class="drive-compact-status" aria-live="polite">Drive bağlantısı bekleniyor.</p>
+
+                <div id="driveSettingsSummary" class="drive-settings-summary">
+                  <div><small>OAuth ayarı</small><strong id="driveClientIdPreview">Henüz kaydedilmedi</strong></div>
+                  <button id="editDriveSettings" class="button secondary" type="button">Ayarı değiştir</button>
+                </div>
+
+                <div id="driveSettingsEditor" class="drive-settings-editor hidden">
+                  <label class="drive-client-field">
+                    <span>Google OAuth Client ID</span>
+                    <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
+                  </label>
+                  <div class="drive-settings-editor-actions">
+                    <button id="saveDriveSettings" class="button primary" type="button">Ayarı kaydet</button>
+                    <button id="cancelDriveSettings" class="button secondary" type="button">Vazgeç</button>
                   </div>
                 </div>
-                <div class="last-backup">
+
+                <div class="drive-last-backup">
                   <span>Drive’daki son sürüm</span>
                   <strong id="lastBackupTime">Henüz yedeklenmedi</strong>
                 </div>
-                <div class="drive-toolbar-actions">
-                  <details class="drive-settings">
-                    <summary class="button secondary">Ayarlar</summary>
-                    <div class="drive-settings-popover">
-                      <label class="drive-client-field">
-                        <span>Google OAuth Client ID</span>
-                        <input id="googleClientId" type="text" inputmode="url" autocomplete="off" placeholder="...apps.googleusercontent.com">
-                      </label>
-                      <button id="saveDriveSettings" class="button primary" type="button">Ayarı kaydet</button>
-                      <div class="drive-settings-actions">
-                        <button id="restoreFromDrive" class="button secondary" type="button">Drive’dan yükle</button>
-                        <button id="backupToDrive" class="button primary" type="button">Şimdi yedekle</button>
-                      </div>
-                    </div>
-                  </details>
-                </div>
-              </nav>
 
-              <section id="restorePrompt" class="restore-prompt hidden" aria-labelledby="restorePromptTitle">
-                <div class="restore-prompt-icon" aria-hidden="true">↻</div>
+                <div class="drive-compact-actions">
+                  <button id="backupToDrive" class="button primary" type="button">Yedekle</button>
+                  <button id="restoreFromDrive" class="button secondary" type="button">Yedekten yükle</button>
+                  <button id="skipInitialRestore" class="button link-button" type="button">Şimdilik değil</button>
+                </div>
+              </section>
+            </div>
+          </details>
+
+          <details id="jiraHeaderMenu" class="header-menu header-jira-menu">
+            <summary>
+              <span class="header-menu-icon" aria-hidden="true">J</span>
+              <span class="header-menu-copy"><small>Canlı entegrasyon</small><strong id="headerJiraMenuLabel">Kurulum gerekli</strong></span>
+              <span id="headerJiraMenuBadge" class="header-menu-badge">Ayarla</span>
+            </summary>
+            <div class="header-menu-popover jira-header-popover">
+              <section class="jira-credential-panel" aria-labelledby="jiraCredentialTitle">
+                <div class="jira-credential-heading">
+                  <div><span class="eyebrow">Supabase Vault</span><h2 id="jiraCredentialTitle">Kişisel JIRA bağlantısı</h2></div>
+                  <span id="jiraCredentialBadge" class="jira-credential-badge" data-state="unconfigured">Kayıt gerekli</span>
+                </div>
+                <p id="jiraCredentialStatus" class="jira-credential-status" role="status" aria-live="polite">Her kullanıcı kendi JIRA API tokenını bir kez kaydeder. Token tarayıcıya geri gönderilmez ve Supabase Vault içinde şifreli tutulur.</p>
+                <div class="jira-credential-grid">
+                  <label class="field"><span>JIRA adresi</span><input id="jiraCredentialBaseUrl" type="url" value="https://fit-global.atlassian.net" autocomplete="url" placeholder="https://firma.atlassian.net"></label>
+                  <label class="field"><span>Atlassian e-posta adresi</span><input id="jiraCredentialEmail" type="email" autocomplete="username" placeholder="adiniz@firma.com"></label>
+                  <label class="field"><span>JIRA API token</span><input id="jiraCredentialToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="Atlassian API tokenınızı yapıştırın"></label>
+                </div>
+                <div class="jira-credential-actions">
+                  <button id="saveJiraCredentials" class="button primary" type="button">Bağlantıyı doğrula ve kaydet</button>
+                  <button id="removeJiraCredentials" class="button secondary hidden" type="button">Kayıtlı bağlantıyı kaldır</button>
+                </div>
+              </section>
+              <section class="jira-sync-settings" aria-labelledby="jiraSyncSettingsTitle">
                 <div>
-                  <h2 id="restorePromptTitle">Drive yedeğini yükleyerek başla</h2>
-                  <p>En güncel efor, görev, kişi, JIRA ve hatırlatma kayıtlarını bu cihaza almak için Google Drive yedeğini yükleyin.</p>
+                  <span class="eyebrow">Senkronizasyon</span>
+                  <h3 id="jiraSyncSettingsTitle">Canlı JIRA tercihleri</h3>
                 </div>
-                <div class="restore-prompt-actions">
-                  <button id="initialRestoreButton" class="button primary" type="button">Drive’dan geri yükle</button>
-                  <button id="skipInitialRestore" class="button secondary" type="button">Şimdilik geç</button>
-                </div>
+                <label class="field"><span>Senkronizasyon JQL’i</span><input id="jiraSyncJql" type="text" value="assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"></label>
+                <label class="jira-auto-worklog"><input id="jiraAutoWorklog" type="checkbox" checked><span>Efor kaydından sonra JIRA worklog gönderimi için onay iste</span></label>
+                <small class="jira-settings-note">JQL ve worklog tercihi bu tarayıcıda otomatik kaydedilir.</small>
               </section>
             </div>
           </details>
@@ -427,13 +444,23 @@
                 <label class="field field-wide"><span>Başlık / alt madde</span><input id="taskTitleInput" type="text" maxlength="300" placeholder="Yapılacak işi yazın" required></label>
                 <label class="field field-wide"><span>Ana görev</span><select id="taskParentTaskInput"><option value="">Ana görev yok — bağımsız görev</option></select><small>Bu kayıt bir alt görevse bağlı olduğu ana görevi seçin.</small></label>
                 <label class="field"><span>Görev tipi</span><select id="taskTypeInput" required><option value="architecture_roadmap" selected>Architecture Roadmap</option><option value="standard">Standart görev</option><option value="meeting_organization">Toplantı organizasyonu</option><option value="management_request">Yönetim talebi</option><option value="other">Diğer</option></select></label>
-                <label class="field"><span>Atanan kişi / kimde bekliyor</span><select id="taskAssigneeInput"><option value="">Atanmamış</option></select><small>Kişileri Kişiler ekranından tanımlayabilirsiniz.</small></label>
+                <label class="field"><span>Atanan kişi / kimde bekliyor</span><select id="taskAssigneeInput"><option value="">Atanmamış</option></select><small>Kişileri Ekip → Kişiler ekranından tanımlayabilirsiniz.</small></label>
                 <label class="field"><span>Öncelik</span><select id="taskPriorityInput"><option value="">Belirtilmedi</option><option value="high">Yüksek</option><option value="medium">Orta</option><option value="low">Düşük</option></select></label>
                 <label class="field"><span>Yıl</span><input id="taskYearInput" type="number" min="2000" max="2100" step="1" inputmode="numeric" placeholder="Örn. 2026"></label>
                 <label class="field"><span>Planlanan çeyrek</span><select id="taskQuarterInput"><option value="">Belirtilmedi</option><option value="Q1">Q1</option><option value="Q2">Q2</option><option value="Q3">Q3</option><option value="Q4">Q4</option></select></label>
                 <label class="field"><span>Teslim tarihi (opsiyonel)</span><input id="taskDueDateInput" type="date"></label>
                 <label class="field"><span>Durum</span><select id="taskStatusInput" required><option value="planned">Planlandı</option><option value="in_progress">Devam ediyor</option><option value="completed">Tamamlandı</option></select></label>
                 <div class="field field-wide"><span>Detaylı açıklama</span><div class="task-editor-toolbar" role="toolbar" aria-label="Açıklama biçimlendirme"><button type="button" data-task-command="bold" aria-label="Kalın"><strong>B</strong></button><button type="button" data-task-command="italic" aria-label="İtalik"><em>I</em></button><button type="button" data-task-command="insertUnorderedList" aria-label="Madde işaretli liste">• Liste</button><button type="button" data-task-command="insertOrderedList" aria-label="Numaralı liste">1. Liste</button><button type="button" data-task-command="removeFormat">Biçimi temizle</button></div><div id="taskDescriptionInput" class="task-html-editor" contenteditable="true" role="textbox" aria-label="Detaylı açıklama" aria-multiline="true" data-placeholder="Metin, liste, bağlantı veya biçimlendirilmiş HTML içeriği yapıştırın..."></div><small>Yapıştırdığınız güvenli biçimlendirme görev kartında korunur.</small></div>
+                <div class="field field-wide task-documents-field">
+                  <span>Dokümanlar</span>
+                  <div class="task-document-picker">
+                    <label class="button secondary" for="taskDocumentsInput">Doküman seç</label>
+                    <input id="taskDocumentsInput" class="sr-only" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,image/*">
+                    <strong id="taskDocumentSelectionSummary">Doküman seçilmedi</strong>
+                  </div>
+                  <div id="taskDocumentList" class="task-document-list hidden" aria-live="polite"></div>
+                  <small>Yeni dokümanlar görev kaydedilirken Google Drive’daki “Günlük Efor Takibi Dokümanları” klasörüne yüklenir. Tek seferde en fazla 10 dosya, dosya başına 100 MB.</small>
+                </div>
               </div>
               <p id="taskFormMessage" class="form-message" role="alert" aria-live="polite"></p>
               <div class="form-actions"><button class="button primary" type="submit"><span id="taskSubmitLabel">Görevi ekle</span></button><button id="cancelTaskEdit" class="button secondary hidden" type="button">Vazgeç</button></div>
@@ -463,7 +490,13 @@
         </div>
       </section>
 
-      <section id="peopleView" class="tab-view hidden">
+      <section id="teamView" class="tab-view hidden">
+        <nav class="team-subtabs" aria-label="Ekip sayfaları">
+          <button class="team-subtab-button active" type="button" data-team-tab="peopleView" aria-selected="true">Kişiler</button>
+          <button class="team-subtab-button" type="button" data-team-tab="organizationView" aria-selected="false">Organizasyon</button>
+        </nav>
+        <div class="team-pages">
+      <section id="peopleView" class="team-subview">
         <header class="people-intro">
           <div><span class="eyebrow">Kişi ve atama yönetimi</span><h2>Ekip Rehberi</h2><p>JIRA’daki aktif kullanıcıları alın; görev atamalarını ve organizasyon bağlarını tek yerden yönetin.</p></div>
           <button id="syncJiraUsers" class="button primary" type="button"><span aria-hidden="true">↻</span> JIRA’dan aktif kullanıcıları getir</button>
@@ -507,17 +540,12 @@
         </div>
       </section>
 
-      <section id="organizationView" class="tab-view hidden">
+      <section id="organizationView" class="team-subview hidden">
         <header class="organization-intro">
           <div><span class="eyebrow">Organizasyon görünümü</span><h2>Organizasyon Şeması</h2><p>Lideri seçerek kendisine ve tüm alt ekibine atanmış işleri görüntüleyin.</p></div>
           <label class="field organization-leader-filter"><span>Ekip görünümü</span><select id="organizationLeaderFilter"><option value="">Tüm organizasyon</option></select></label>
         </header>
         <div class="organization-layout">
-          <section class="panel organization-tree-panel" aria-labelledby="organizationTreeTitle">
-            <div class="panel-heading"><div><span class="eyebrow">Raporlama hattı</span><h2 id="organizationTreeTitle">Ekip yapısı</h2></div><strong id="organizationPeopleCount" class="task-count-badge">0 kişi</strong></div>
-            <div id="organizationEmptyState" class="empty-state"><div aria-hidden="true">♙</div><h3>Organizasyon henüz tanımlanmadı</h3><p>Kişiler ekranından kişileri ve bağlı oldukları yöneticileri tanımlayın.</p></div>
-            <div id="organizationTree" class="organization-tree" aria-live="polite"></div>
-          </section>
           <section class="panel organization-workload-panel" aria-labelledby="organizationWorkloadTitle">
             <div class="panel-heading organization-workload-heading"><div><span class="eyebrow">Ekip iş yükü</span><h2 id="organizationWorkloadTitle">Tüm organizasyonun işleri</h2></div><div id="organizationTaskStats" class="organization-task-stats"></div></div>
             <div id="organizationTaskEmpty" class="empty-state"><div aria-hidden="true">✓</div><h3>Gösterilecek görev yok</h3><p>Seçili ekip üyelerine atanmış görev bulunmuyor.</p></div>
@@ -525,6 +553,8 @@
               <table class="organization-task-table"><thead><tr><th>Görev</th><th>Atanan kişi</th><th>Durum</th><th>Teslim</th></tr></thead><tbody id="organizationTaskList"></tbody></table>
             </div>
           </section>
+        </div>
+      </section>
         </div>
       </section>
 
@@ -540,13 +570,7 @@
               <button id="syncJiraIssues" class="button primary" type="button">JIRA’dan senkronize et</button>
             </div>
           </div>
-          <div class="jira-cloud-settings">
-            <label class="field"><span>JIRA backend adresi</span><input id="jiraApiEndpoint" type="text" placeholder="/api/jira"></label>
-            <label class="field"><span>Senkronizasyon JQL’i</span><input id="jiraSyncJql" type="text" value="assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC"></label>
-            <button id="saveJiraApiEndpoint" class="button secondary" type="button">Adresi kaydet</button>
-            <label class="jira-auto-worklog"><input id="jiraAutoWorklog" type="checkbox" checked><span>Efor kaydından sonra JIRA worklog gönderimi için onay iste</span></label>
-          </div>
-          <p id="jiraCloudStatus" class="jira-cloud-status" role="status" aria-live="polite">Kendi hesabınızla çalışmak için JIRA ile giriş yapın. OAuth tokenları yalnızca backend oturumunda tutulur.</p>
+          <p id="jiraCloudStatus" class="jira-cloud-status" role="status" aria-live="polite">GitHub Pages üzerinde JIRA kullanmak için önce Supabase hesabınıza giriş yapın ve kişisel JIRA bağlantınızı kaydedin.</p>
         </section>
         <nav class="jira-subtabs" aria-label="JIRA sayfaları">
           <button class="jira-subtab-button active" type="button" data-jira-tab="jiraItemsView" aria-selected="true">JIRA Maddeleri <span id="jiraItemsSubtabCount">0</span></button>
