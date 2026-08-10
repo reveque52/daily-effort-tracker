@@ -21,6 +21,12 @@ function loadStore(initialValue) {
     fs.readFileSync(path.join(__dirname, "..", "data-store.js"), "utf8"),
     { window, Date, Math, JSON, Number, Object, Array },
   );
+  if (initialValue !== undefined) {
+    try {
+      const rows = JSON.parse(initialValue);
+      if (Array.isArray(rows)) window.EffortStore.replaceAll(rows);
+    } catch { /* Geçersiz eski tarayıcı verisi artık dikkate alınmaz. */ }
+  }
   return { store: window.EffortStore, values };
 }
 
@@ -40,12 +46,12 @@ test("zorunlu alanları ve saat sınırlarını doğrular", () => {
   assert.equal(store.validate({ date: "2026-08-05", project: "P", task: "A".repeat(1001), jiraId: "jira-1", hours: 1 }).valid, false);
 });
 
-test("CRUD akışı veriyi localStorage içinde kalıcı tutar", () => {
+test("CRUD akışı veriyi yalnızca çalışma belleğinde tutar", () => {
   const { store, values } = loadStore();
   const created = store.create({ date: "2026-08-05", project: "PROJ-1", task: "Test", jiraId: "jira-1", hours: 2, notes: " Not " });
   assert.equal(created.valid, true);
   assert.equal(store.get("test-id").notes, "Not");
-  assert.equal(JSON.parse(values.get(store.STORAGE_KEY)).length, 1);
+  assert.equal(values.has(store.STORAGE_KEY), false);
 
   const updated = store.update("test-id", { date: "2026-08-05", project: "PROJ-2", task: "Test 2", jiraId: "jira-2", hours: 3.5 });
   assert.equal(updated.valid, true);
@@ -71,7 +77,7 @@ test("filtreleme, sıralama ve özet hesapları doğrudur", () => {
   assert.equal(summary.byProject.Alpha, 3.75);
 });
 
-test("bozuk localStorage içeriğini güvenle boş liste kabul eder", () => {
+test("eski veya bozuk localStorage içeriğini kullanmaz", () => {
   assert.equal(loadStore("not-json").store.list().length, 0);
   assert.equal(loadStore("{}").store.list().length, 0);
 });

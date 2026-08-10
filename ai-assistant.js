@@ -1,8 +1,8 @@
 ((global) => {
   "use strict";
 
-  const ENDPOINT_KEY = "daily-effort-tracker.ai-endpoint";
   const DEFAULT_ENDPOINT = "/api/assistant";
+  let endpointValue = DEFAULT_ENDPOINT;
 
   function normalizeEndpoint(value) {
     const endpoint = String(value || "").trim() || DEFAULT_ENDPOINT;
@@ -13,13 +13,12 @@
   }
 
   function getEndpoint() {
-    return global.localStorage.getItem(ENDPOINT_KEY) || DEFAULT_ENDPOINT;
+    return endpointValue;
   }
 
   function setEndpoint(value) {
     const endpoint = normalizeEndpoint(value);
-    if (endpoint === DEFAULT_ENDPOINT) global.localStorage.removeItem(ENDPOINT_KEY);
-    else global.localStorage.setItem(ENDPOINT_KEY, endpoint);
+    endpointValue = endpoint;
     return endpoint;
   }
 

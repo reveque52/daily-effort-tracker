@@ -5,6 +5,7 @@
   const MAX_PROJECT_LENGTH = 120;
   const MAX_TASK_LENGTH = 1000;
   const MAX_NOTES_LENGTH = 1000;
+  let fallbackRows = [];
 
   function cleanText(value) {
     return typeof value === "string" ? value.trim() : "";
@@ -59,20 +60,13 @@
   }
 
   function readAll() {
-    try {
-      const parsed = JSON.parse(global.localStorage.getItem(STORAGE_KEY) || "[]");
-      return Array.isArray(parsed) ? parsed.filter(function (item) { return validate(item, { allowLegacy: true }).valid && item.id; }) : [];
-    } catch (_error) {
-      return [];
-    }
+    const rows = global.CloudDataRuntime ? global.CloudDataRuntime.read("entries") : JSON.parse(JSON.stringify(fallbackRows));
+    return rows.filter(function (item) { return validate(item, { allowLegacy: true }).valid && item.id; });
   }
 
   function writeAll(entries) {
-    try {
-      global.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    } catch (error) {
-      throw new Error("Kayıtlar tarayıcıda saklanamadı: " + error.message);
-    }
+    if (global.CloudDataRuntime) global.CloudDataRuntime.write("entries", entries);
+    else fallbackRows = JSON.parse(JSON.stringify(entries));
   }
 
   function makeId() {

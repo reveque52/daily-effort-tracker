@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "daily-effort-tracker.reminders.v1";
   const IMPORTANCE_LEVELS = ["normal", "important"];
+  let fallbackRows = [];
 
   function validReminderDate(value) {
     if (!value) return true;
@@ -26,14 +27,12 @@
   }
 
   function readAll() {
-    try {
-      const rows = JSON.parse(global.localStorage.getItem(STORAGE_KEY) || "[]");
-      return Array.isArray(rows) ? rows : [];
-    } catch { return []; }
+    return global.CloudDataRuntime ? global.CloudDataRuntime.read("reminders") : JSON.parse(JSON.stringify(fallbackRows));
   }
 
   function writeAll(rows) {
-    global.localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+    if (global.CloudDataRuntime) global.CloudDataRuntime.write("reminders", rows);
+    else fallbackRows = JSON.parse(JSON.stringify(rows));
   }
 
   function makeId() {

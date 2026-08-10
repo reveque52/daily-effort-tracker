@@ -138,7 +138,32 @@
       }
     }
 
-    return { ...bundle, context, lastModifiedAt };
+    const settings = await getUserSettings(context);
+    return { ...bundle, settings, context, lastModifiedAt };
+  }
+
+  async function getUserSettings(context = null) {
+    const activeContext = context || await getContext();
+    const { data, error } = await getClient()
+      .from("user_settings")
+      .select("payload")
+      .eq("user_id", activeContext.user.id)
+      .maybeSingle();
+    throwIfError(error);
+    return data?.payload && typeof data.payload === "object" ? { ...data.payload } : {};
+  }
+
+  async function updateUserSettings(patch = {}) {
+    const context = await getContext();
+    const current = await getUserSettings(context);
+    const payload = { ...current, ...(patch && typeof patch === "object" ? patch : {}) };
+    const { error } = await getClient().from("user_settings").upsert({
+      user_id: context.user.id,
+      organization_id: context.organizationId,
+      payload
+    }, { onConflict: "user_id" });
+    throwIfError(error);
+    return payload;
   }
 
   function sourceTimestamp(item) {
@@ -196,6 +221,69 @@
     return { saved: rows.length, removed: removableIds.length, skipped };
   }
 
+  async function applyChanges(change = {}) {
+    const collection = String(change.collection || "");
+    const table = TABLES[collection];
+    if (!table) throw new Error("Supabase koleksiyonu geçersiz.");
+    const context = await getContext();
+    const upserts = Array.isArray(change.upserts) ? change.upserts : [];
+    const deletedIds = Array.isArray(change.deletedIds) ? change.deletedIds.map(String).filter(Boolean) : [];
+    const affectedIds = [...new Set([...upserts.map((item) => String(item?.id || "").trim()), ...deletedIds].filter(Boolean))];
+    const remoteById = new Map();
+
+    if (affectedIds.length) {
+      const { data, error } = await getClient()
+        .from(table)
+        .select("id,created_by")
+        .eq("organization_id", context.organizationId)
+        .in("id", affectedIds);
+      throwIfError(error);
+      (data || []).forEach((row) => remoteById.set(String(row.id), row));
+    }
+
+    let skipped = 0;
+    const rows = upserts.map((item) => {
+      const id = String(item?.id || "").trim();
+      if (!id) throw new Error(`${table} tablosunda kimliği olmayan kayıt var.`);
+      const existing = remoteById.get(id);
+      if (existing && !context.isLeader && existing.created_by !== context.user.id) {
+        skipped += 1;
+        return null;
+      }
+      return {
+        organization_id: context.organizationId,
+        id,
+        created_by: existing?.created_by || context.user.id,
+        payload: item,
+        source_updated_at: sourceTimestamp(item)
+      };
+    }).filter(Boolean);
+
+    if (rows.length) {
+      const { error } = await getClient().from(table).upsert(rows, { onConflict: "organization_id,id" });
+      throwIfError(error);
+    }
+
+    const removableIds = deletedIds.filter((id) => {
+      const existing = remoteById.get(id);
+      if (!existing) return false;
+      if (context.isLeader || existing.created_by === context.user.id) return true;
+      skipped += 1;
+      return false;
+    });
+    if (removableIds.length) {
+      const { error } = await getClient()
+        .from(table)
+        .delete()
+        .eq("organization_id", context.organizationId)
+        .in("id", removableIds);
+      throwIfError(error);
+    }
+
+    const syncedAt = new Date().toISOString();
+    return { saved: rows.length, removed: removableIds.length, skipped, syncedAt, context };
+  }
+
   async function pushBundle(bundle) {
     const context = await getContext();
     const totals = { saved: 0, removed: 0, skipped: 0 };
@@ -208,12 +296,6 @@
     }
 
     const syncedAt = new Date().toISOString();
-    const { error } = await getClient().from("user_settings").upsert({
-      user_id: context.user.id,
-      organization_id: context.organizationId,
-      payload: { lastCloudSyncAt: syncedAt }
-    }, { onConflict: "user_id" });
-    throwIfError(error);
 
     return { ...totals, syncedAt, context };
   }
@@ -269,6 +351,9 @@
     updatePassword,
     onAuthStateChange,
     pullBundle,
+    getUserSettings,
+    updateUserSettings,
+    applyChanges,
     pushBundle,
     getRemoteSummary,
     invokeJira

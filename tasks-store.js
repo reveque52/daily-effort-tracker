@@ -2,13 +2,14 @@
   "use strict";
 
   const STORAGE_KEY = "daily-effort-tracker.tasks.v1";
-  const ARCHITECTURE_MIGRATION_KEY = "daily-effort-tracker.tasks.architecture-roadmap.v1";
   const STATUSES = ["planned", "in_progress", "completed"];
   const PRIORITIES = ["", "high", "medium", "low"];
   const QUARTERS = ["", "Q1", "Q2", "Q3", "Q4"];
   const TASK_TYPES = ["standard", "architecture_roadmap", "meeting_organization", "management_request", "other"];
   const MAX_DESCRIPTION_HTML_LENGTH = 50000;
   const MAX_ATTACHMENTS = 100;
+  let fallbackRows = [];
+  let architectureMigrationDone = false;
 
   function normalizeAttachment(input) {
     const webViewLink = String(input?.webViewLink || "").trim();
@@ -67,13 +68,13 @@
   }
 
   function readAll() {
-    try {
-      const rows = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      return Array.isArray(rows) ? rows : [];
-    } catch { return []; }
+    return global.CloudDataRuntime ? global.CloudDataRuntime.read("tasks") : JSON.parse(JSON.stringify(fallbackRows));
   }
 
-  function writeAll(rows) { localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); }
+  function writeAll(rows) {
+    if (global.CloudDataRuntime) global.CloudDataRuntime.write("tasks", rows);
+    else fallbackRows = JSON.parse(JSON.stringify(rows));
+  }
   function makeId() { return global.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
   function list() {
@@ -204,7 +205,7 @@
 
   function migrateExistingTasksToArchitectureRoadmap() {
     const rows = readAll();
-    if (localStorage.getItem(ARCHITECTURE_MIGRATION_KEY) === "done") {
+    if (architectureMigrationDone) {
       return { updated: 0, total: rows.length };
     }
     const now = new Date().toISOString();
@@ -216,7 +217,7 @@
       updated += 1;
     });
     if (updated) writeAll(rows);
-    localStorage.setItem(ARCHITECTURE_MIGRATION_KEY, "done");
+    architectureMigrationDone = true;
     return { updated, total: rows.length };
   }
 

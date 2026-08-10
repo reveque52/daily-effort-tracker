@@ -5,9 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Görev tipine göre detaylı görev raporu.">
     <title>Görev Tipi Raporu · Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260810-5">
-    <script src="tasks-store.js?v=20260806-20" defer></script>
-    <script src="task-type-report.js?v=20260810-2" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260811-3">
+    <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
+    <script src="tasks-store.js?v=20260811-1" defer></script>
+    <script src="vendor/supabase.js?v=2.112.2" defer></script>
+    <script src="supabase-cloud.js?v=20260811-3" defer></script>
+    <script src="task-type-report.js?v=20260811-1" defer></script>
   </head>
   <body class="task-detail-page task-type-report-page">
     <header class="task-detail-page-header">
@@ -21,8 +24,8 @@
 
     <main class="task-detail-page-main">
       <section id="taskTypeReportError" class="panel task-detail-page-error hidden" role="alert">
-        <h2>Görev tipi bulunamadı</h2>
-        <p>Rapor bağlantısı geçerli değil.</p>
+        <h2 id="taskTypeReportErrorTitle">Görev tipi bulunamadı</h2>
+        <p id="taskTypeReportErrorMessage">Rapor bağlantısı geçerli değil.</p>
         <a class="button primary" href="index.html?view=tasks">Görev tiplerine dön</a>
       </section>
 

@@ -1,26 +1,18 @@
 (() => {
   "use strict";
 
-  const SETTINGS_KEY = "daily-effort-tracker.outlook-calendar-settings";
   const SCOPES = ["Calendars.ReadBasic"];
   let client = null;
   let clientSignature = "";
   let initializePromise = null;
+  let settingsValue = { clientId: "", tenantId: "organizations" };
 
   function currentRedirectUri() {
     return `${window.location.origin}${window.location.pathname}`;
   }
 
   function readSettings() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-      return {
-        clientId: String(parsed.clientId || "").trim(),
-        tenantId: String(parsed.tenantId || "organizations").trim() || "organizations"
-      };
-    } catch (_) {
-      return { clientId: "", tenantId: "organizations" };
-    }
+    return { ...settingsValue };
   }
 
   function saveSettings(clientId, tenantId) {
@@ -28,7 +20,7 @@
     const normalizedTenantId = String(tenantId || "organizations").trim() || "organizations";
     if (normalizedClientId && !/^[0-9a-f-]{36}$/i.test(normalizedClientId)) throw new Error("Geçerli bir Microsoft Application (client) ID girin.");
     if (!/^(organizations|common|consumers|[0-9a-f-]{36})$/i.test(normalizedTenantId)) throw new Error("Tenant ID bir GUID veya organizations/common/consumers olmalıdır.");
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ clientId: normalizedClientId, tenantId: normalizedTenantId }));
+    settingsValue = { clientId: normalizedClientId, tenantId: normalizedTenantId };
     client = null;
     clientSignature = "";
     initializePromise = null;

@@ -5,22 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260811-2">
+    <link rel="stylesheet" href="styles.css?v=20260811-3">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="data-store.js?v=20260807-22" defer></script>
-    <script src="tasks-store.js?v=20260810-1" defer></script>
-    <script src="people-store.js?v=20260807-2" defer></script>
-    <script src="jira-store.js?v=20260807-24" defer></script>
-    <script src="reminders-store.js?v=20260806-22" defer></script>
-    <script src="ai-assistant.js?v=20260806-23" defer></script>
-    <script src="jira-cloud.js?v=20260811-1" defer></script>
-    <script src="drive-sync.js?v=20260810-1" defer></script>
+    <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
+    <script src="data-store.js?v=20260811-1" defer></script>
+    <script src="tasks-store.js?v=20260811-1" defer></script>
+    <script src="people-store.js?v=20260811-1" defer></script>
+    <script src="jira-store.js?v=20260811-1" defer></script>
+    <script src="reminders-store.js?v=20260811-1" defer></script>
+    <script src="ai-assistant.js?v=20260811-1" defer></script>
+    <script src="jira-cloud.js?v=20260811-2" defer></script>
+    <script src="drive-sync.js?v=20260811-1" defer></script>
     <script src="vendor/msal-browser.min.js?v=5.18.0" defer></script>
-    <script src="outlook-calendar.js?v=20260807-1" defer></script>
+    <script src="outlook-calendar.js?v=20260811-1" defer></script>
     <script src="google-calendar.js?v=20260810-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
-    <script src="supabase-cloud.js?v=20260811-1" defer></script>
-    <script src="app.js?v=20260811-2" defer></script>
+    <script src="supabase-cloud.js?v=20260811-3" defer></script>
+    <script src="app.js?v=20260811-4" defer></script>
   </head>
   <body>
     <header class="page-header">
@@ -63,7 +64,7 @@
                   <span id="supabaseConnectionBadge" class="supabase-connection-badge" data-state="signed-out">Bağlı değil</span>
                 </div>
 
-                <p id="supabaseStatus" class="supabase-status" role="status" aria-live="polite">Verilerinizi cihazlar arasında kullanmak için giriş yapın.</p>
+                <p id="supabaseStatus" class="supabase-status" role="status" aria-live="polite">Uygulama verilerini açmak için giriş yapın.</p>
 
                 <form id="supabaseAuthForm" class="supabase-auth-form">
                   <label><span>E-posta</span><input id="supabaseEmail" type="email" autocomplete="email" required placeholder="adiniz@firma.com"></label>
@@ -85,10 +86,9 @@
                     <div><small>Hesap</small><strong id="supabaseUserEmail">-</strong></div>
                     <div><small>Çalışma alanı</small><strong id="supabaseOrganizationName">-</strong></div>
                   </div>
-                  <p id="supabaseLastSync">Henüz Supabase senkronizasyonu yapılmadı.</p>
+                  <p id="supabaseLastSync">Bulut verileri henüz yüklenmedi.</p>
                   <div class="supabase-sync-actions">
-                    <button id="supabasePull" class="button secondary" type="button">Supabase’den yükle</button>
-                    <button id="supabasePush" class="button primary" type="button">Yerel verileri gönder</button>
+                    <button id="supabasePull" class="button secondary" type="button">Buluttan yenile</button>
                     <button id="supabaseSignOut" class="button link-button" type="button">Çıkış yap</button>
                   </div>
                 </div>
@@ -180,6 +180,12 @@
           </details>
         </nav>
       </div>
+
+      <section id="cloudDataGate" class="cloud-data-gate" role="status" aria-live="polite">
+        <span class="cloud-data-gate-icon" aria-hidden="true">S</span>
+        <div><strong id="cloudDataGateTitle">Supabase bağlantısı kontrol ediliyor</strong><small id="cloudDataGateMessage">Uygulama verileri buluttan hazırlanıyor.</small></div>
+        <button id="openSupabaseFromGate" class="button secondary" type="button">Bulut hesabını aç</button>
+      </section>
 
       <section id="homeView" class="tab-view">
         <section class="home-summary-panel" aria-labelledby="homeSummaryTitle">

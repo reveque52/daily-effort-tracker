@@ -46,21 +46,23 @@
   let jiraOAuthState = null;
   let jiraCredentialState = "unconfigured";
   let calendarEvents = [];
-  const CALENDAR_PROVIDER_KEY = "daily-effort-tracker.calendar-provider";
-  let activeCalendarProvider = localStorage.getItem(CALENDAR_PROVIDER_KEY) === "outlook" ? "outlook" : "google";
+  let activeCalendarProvider = "google";
   const selectedJiraRequestStatuses = new Set();
   const knownJiraRequestStatuses = new Set();
   const knownJiraRequestStatusLabels = new Map();
   let draggedJiraRequestId = "";
   let jiraRequestTransitionPending = false;
-  const LOCAL_CHANGES_PENDING_KEY = "daily-effort-tracker.drive-dirty";
-  const SUPABASE_LAST_SYNC_KEY = "daily-effort-tracker.supabase-last-sync";
-  let localChangesPending = localStorage.getItem(LOCAL_CHANGES_PENDING_KEY) === "true";
   let supabaseSession = null;
   let supabaseBusy = false;
-  const JIRA_AUTO_WORKLOG_KEY = "daily-effort-tracker.jira-auto-worklog";
-  const JIRA_SYNC_JQL_KEY = "daily-effort-tracker.jira-sync-jql";
-  const JIRA_TABLE_LAYOUT_KEY = "daily-effort-tracker.jira-table-layout";
+  let cloudDataReady = false;
+  let cloudLoadedUserId = "";
+  let cloudLoadPromise = null;
+  let cloudSaveChain = Promise.resolve();
+  let cloudSavePending = 0;
+  let cloudSaveRevision = 0;
+  let lastSupabaseSyncAt = null;
+  let cloudUserSettings = {};
+  let cloudSettingsSaveChain = Promise.resolve();
   let jiraAutoFitFrame = 0;
   const JIRA_TABLE_COLUMNS = Object.freeze([
     { id: "issueType", label: "Issue Type", min: 76, max: 170 },
@@ -77,17 +79,12 @@
     { id: "actions", label: "İşlemler", min: 125, max: 190 }
   ]);
 
-  function loadJiraTableLayout() {
+  function loadJiraTableLayout(saved = {}) {
     const defaultOrder = JIRA_TABLE_COLUMNS.map((column) => column.id);
-    try {
-      const saved = JSON.parse(localStorage.getItem(JIRA_TABLE_LAYOUT_KEY) || "{}");
-      const savedOrder = Array.isArray(saved.order) ? saved.order.filter((id) => defaultOrder.includes(id)) : [];
-      const order = [...savedOrder, ...defaultOrder.filter((id) => !savedOrder.includes(id))];
-      const visible = Array.isArray(saved.visible) ? saved.visible.filter((id) => defaultOrder.includes(id)) : defaultOrder;
-      return { order, visible: visible.length ? visible : ["key"], widths: saved.widths || {}, autoFit: saved.autoFit !== false };
-    } catch (_) {
-      return { order: defaultOrder, visible: defaultOrder, widths: {}, autoFit: true };
-    }
+    const savedOrder = Array.isArray(saved.order) ? saved.order.filter((id) => defaultOrder.includes(id)) : [];
+    const order = [...savedOrder, ...defaultOrder.filter((id) => !savedOrder.includes(id))];
+    const visible = Array.isArray(saved.visible) ? saved.visible.filter((id) => defaultOrder.includes(id)) : defaultOrder;
+    return { order, visible: visible.length ? visible : ["key"], widths: saved.widths || {}, autoFit: saved.autoFit !== false };
   }
 
   let jiraTableLayout = loadJiraTableLayout();
@@ -653,7 +650,7 @@
     const store = getStore();
     if (store?.list) return store.list();
     if (store?.getAll) return store.getAll();
-    try { return JSON.parse(localStorage.getItem("daily-effort-entries") || "[]"); } catch { return []; }
+    return [];
   }
 
   function saveEntry(entry) {
@@ -661,15 +658,14 @@
     if (entry.id && store?.update) return store.update(entry.id, { ...(store.get?.(entry.id) || {}), ...entry });
     if (!entry.id && store?.create) return store.create(entry);
     if (!entry.id && store?.add) return store.add(entry);
-    const next = entry.id ? entries.map((item) => item.id === entry.id ? entry : item) : [...entries, { ...entry, id: crypto.randomUUID() }];
-    localStorage.setItem("daily-effort-entries", JSON.stringify(next));
+    return { valid: false, errors: { store: "Supabase veri katmanı hazır değil." }, value: null };
   }
 
   function removeEntry(id) {
     const store = getStore();
     if (store?.remove) return store.remove(id);
     if (store?.delete) return store.delete(id);
-    localStorage.setItem("daily-effort-entries", JSON.stringify(entries.filter((entry) => entry.id !== id)));
+    return false;
   }
 
   async function deleteEffortEntry(entry) {
@@ -678,7 +674,7 @@
     if (!confirm(`“${jiraItem?.name || entry.project}” efor kaydı silinsin mi?`)) return false;
     removeEntry(entry.id);
     render();
-    markAppDirty();
+    await waitForCloudSaves();
     if ($("#jiraAutoWorklog").checked && entry.jiraWorklogId && entry.jiraWorklogIssueKey) {
       if (!confirm(`${entry.jiraWorklogIssueKey} üzerindeki bağlı JIRA worklog da silinsin mi?`)) {
         setJiraCloudStatus("Yerel efor silindi; JIRA worklog kullanıcı tercihiyle korundu.", "busy");
@@ -1436,9 +1432,10 @@
   }
 
   async function selectCalendarProvider(provider) {
+    // CALENDAR_PROVIDER_KEY tarayıcı kaydı yerine kullanıcı tercihi Supabase'e yazılır.
     if (!['google', 'outlook'].includes(provider) || provider === activeCalendarProvider) return;
     activeCalendarProvider = provider;
-    localStorage.setItem(CALENDAR_PROVIDER_KEY, provider);
+    await queueCloudUserSettings({ calendarProvider: provider });
     calendarEvents = [];
     renderCalendar();
     updateCalendarProviderUi();
@@ -2187,7 +2184,7 @@
   }
 
   function saveJiraTableLayout() {
-    localStorage.setItem(JIRA_TABLE_LAYOUT_KEY, JSON.stringify(jiraTableLayout));
+    queueCloudUserSettings({ jiraTableLayout });
   }
 
   function visibleJiraColumns() {
@@ -3278,22 +3275,93 @@
     status.textContent = message;
     status.classList.toggle("is-error", state === "error");
     status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-busy", state === "busy");
     $("#supabaseConnectionBadge").dataset.state = state === "error" ? "error" : (supabaseSession ? "signed-in" : "signed-out");
     $("#supabaseHeaderMenu").classList.toggle("is-error", state === "error");
   }
 
   function setSupabaseBusy(busy) {
     supabaseBusy = Boolean(busy);
-    ["#supabaseEmail", "#supabasePassword", "#supabaseSignIn", "#supabaseSignUp", "#supabaseForgotPassword", "#supabaseNewPassword", "#supabasePull", "#supabasePush", "#supabaseSignOut"]
+    ["#supabaseEmail", "#supabasePassword", "#supabaseSignIn", "#supabaseSignUp", "#supabaseForgotPassword", "#supabaseNewPassword", "#supabasePull", "#supabaseSignOut"]
       .forEach((selector) => { const element = $(selector); if (element) element.disabled = supabaseBusy; });
     $("#supabaseHeaderMenu").classList.toggle("is-busy", supabaseBusy);
   }
 
   function updateSupabaseLastSync(value) {
-    const syncValue = value || localStorage.getItem(SUPABASE_LAST_SYNC_KEY);
-    $("#supabaseLastSync").textContent = syncValue
-      ? `Son Supabase senkronizasyonu: ${dateTimeFormatter.format(new Date(syncValue))}`
-      : "Henüz Supabase senkronizasyonu yapılmadı.";
+    if (value) lastSupabaseSyncAt = value;
+    $("#supabaseLastSync").textContent = lastSupabaseSyncAt
+      ? `Bulut güncellendi: ${dateTimeFormatter.format(new Date(lastSupabaseSyncAt))}`
+      : "Bulut verileri henüz yüklenmedi.";
+  }
+
+  function applyCloudUserSettings(settings = {}) {
+    cloudUserSettings = settings && typeof settings === "object" ? { ...settings } : {};
+    activeCalendarProvider = cloudUserSettings.calendarProvider === "outlook" ? "outlook" : "google";
+    jiraTableLayout = loadJiraTableLayout(cloudUserSettings.jiraTableLayout);
+    window.DriveSync?.setClientId(cloudUserSettings.googleClientId || "");
+    window.DriveSync?.setLastBackupTime(cloudUserSettings.lastDriveBackupAt || "");
+    window.OutlookCalendar?.saveSettings(
+      cloudUserSettings.outlookCalendar?.clientId || "",
+      cloudUserSettings.outlookCalendar?.tenantId || "organizations"
+    );
+    window.AiAssistantClient?.setEndpoint(cloudUserSettings.aiEndpoint || window.AiAssistantClient.DEFAULT_ENDPOINT);
+    window.JiraCloudClient?.setEndpoint("supabase:jira-proxy");
+    if ($("#jiraSyncJql") && typeof cloudUserSettings.jiraSyncJql === "string") {
+      $("#jiraSyncJql").value = cloudUserSettings.jiraSyncJql;
+    }
+    if ($("#jiraAutoWorklog")) $("#jiraAutoWorklog").checked = cloudUserSettings.jiraAutoWorklog !== false;
+    if ($("#googleClientId")) $("#googleClientId").value = window.DriveSync?.getClientId() || "";
+    if ($("#aiAssistantEndpoint")) $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
+    updateLastBackupTime();
+    setDriveSettingsEditing(false);
+    updateCalendarProviderUi();
+  }
+
+  function queueCloudUserSettings(patch = {}) {
+    if (!supabaseSession?.user || !cloudDataReady) {
+      setSupabaseStatus("Ayar kaydedilemedi: Supabase verileri hazır değil.", "error");
+      return Promise.resolve(false);
+    }
+    cloudUserSettings = { ...cloudUserSettings, ...patch };
+    const snapshot = { ...cloudUserSettings };
+    cloudSettingsSaveChain = cloudSettingsSaveChain
+      .catch(() => null)
+      .then(() => window.SupabaseCloud.updateUserSettings(snapshot))
+      .then((saved) => {
+        cloudUserSettings = { ...saved };
+        return true;
+      })
+      .catch((error) => {
+        setSupabaseStatus(`Bulut ayarları kaydedilemedi: ${error.message}`, "error");
+        return false;
+      });
+    return cloudSettingsSaveChain;
+  }
+
+  function setCloudDataGate(state, message = "") {
+    const gate = $("#cloudDataGate");
+    const ready = state === "ready";
+    gate.classList.toggle("hidden", ready);
+    gate.dataset.state = state;
+    document.body.classList.toggle("cloud-data-locked", !ready);
+    $("#cloudDataGateTitle").textContent = ({
+      loading: "Supabase verileri yükleniyor",
+      signed_out: "Bulut hesabına giriş gerekli",
+      error: "Supabase verileri açılamadı"
+    })[state] || "Supabase bağlantısı kontrol ediliyor";
+    $("#cloudDataGateMessage").textContent = message || ({
+      loading: "Efor, görev, kişi, JIRA ve hatırlatma kayıtları hazırlanıyor.",
+      signed_out: "Uygulama verileri yalnızca Supabase hesabınızdan okunur.",
+      error: "Bağlantıyı kontrol edip yeniden deneyin."
+    })[state] || "Uygulama verileri buluttan hazırlanıyor.";
+  }
+
+  function clearCloudMemory() {
+    window.CloudDataRuntime.clear();
+    renderJiraItems();
+    render();
+    renderPeople();
+    renderTasks();
   }
 
   async function refreshSupabaseAccount(session = supabaseSession) {
@@ -3309,42 +3377,43 @@
     updateSupabaseLastSync();
 
     if (!signedIn) {
+      cloudDataReady = false;
+      cloudLoadedUserId = "";
+      lastSupabaseSyncAt = null;
+      applyCloudUserSettings({});
+      clearCloudMemory();
       $("#supabaseUserEmail").textContent = "-";
       $("#supabaseOrganizationName").textContent = "-";
-      setSupabaseStatus("Verilerinizi cihazlar arasında kullanmak için giriş yapın.");
+      setCloudDataGate("signed_out");
+      setSupabaseStatus("Uygulama verilerini açmak için Supabase hesabınıza giriş yapın.");
       return;
     }
 
     $("#supabaseUserEmail").textContent = supabaseSession.user.email || "Supabase kullanıcısı";
     try {
-      const summary = await window.SupabaseCloud.getRemoteSummary();
-      $("#supabaseOrganizationName").textContent = summary.context.organizationName;
-      const localCount = bundleRecordCount();
-      if (!summary.total && localCount) {
-        setSupabaseStatus(`Supabase boş. Bu cihazdaki ${localCount} kayıt ilk aktarım için hazır.`, "success");
-      } else if (summary.total) {
-        setSupabaseStatus(`Supabase’de ${summary.total} kayıt bulundu. Yükle veya yerel değişikliklerinizi gönder.`, "success");
-        if (summary.lastModifiedAt) updateSupabaseLastSync(summary.lastModifiedAt);
-      } else {
-        setSupabaseStatus("Hesabınız hazır. İlk kaydınız Kaydet ile Supabase’e gönderilecek.", "success");
-      }
+      await ensureCloudDataLoaded();
     } catch (error) {
+      cloudDataReady = false;
+      setCloudDataGate("error", error.message);
       setSupabaseStatus(`Supabase çalışma alanı alınamadı: ${error.message}`, "error");
     }
   }
 
   function replaceLocalBundle(bundle) {
-    const entryResult = getStore().replaceAll(bundle.entries || []);
-    if (!entryResult.valid) throw new Error(Object.values(entryResult.errors || {}).join(" ") || "Efor verileri doğrulanamadı.");
-    const taskResult = window.TaskStore.replaceAll(bundle.tasks || []);
-    if (!taskResult.valid) throw new Error(Object.values(taskResult.errors || {}).join(" ") || "Görev verileri doğrulanamadı.");
-    const peopleResult = window.PeopleStore.replaceAll(bundle.people || []);
-    if (!peopleResult.valid) throw new Error(Object.values(peopleResult.errors || {}).join(" ") || "Kişi verileri doğrulanamadı.");
-    const jiraResult = window.JiraStore.replaceAll(bundle.jiraItems || []);
-    if (!jiraResult.valid) throw new Error(Object.values(jiraResult.errors || {}).join(" ") || "JIRA verileri doğrulanamadı.");
-    const reminderResult = window.ReminderStore.replaceAll(bundle.reminders || []);
-    if (!reminderResult.valid) throw new Error(Object.values(reminderResult.errors || {}).join(" ") || "Hatırlatma verileri doğrulanamadı.");
-    window.TaskStore.ensureHierarchy();
+    window.CloudDataRuntime.suspend(() => {
+      const entryResult = getStore().replaceAll(bundle.entries || []);
+      if (!entryResult.valid) throw new Error(Object.values(entryResult.errors || {}).join(" ") || "Efor verileri doğrulanamadı.");
+      const taskResult = window.TaskStore.replaceAll(bundle.tasks || []);
+      if (!taskResult.valid) throw new Error(Object.values(taskResult.errors || {}).join(" ") || "Görev verileri doğrulanamadı.");
+      const peopleResult = window.PeopleStore.replaceAll(bundle.people || []);
+      if (!peopleResult.valid) throw new Error(Object.values(peopleResult.errors || {}).join(" ") || "Kişi verileri doğrulanamadı.");
+      const jiraResult = window.JiraStore.replaceAll(bundle.jiraItems || []);
+      if (!jiraResult.valid) throw new Error(Object.values(jiraResult.errors || {}).join(" ") || "JIRA verileri doğrulanamadı.");
+      const reminderResult = window.ReminderStore.replaceAll(bundle.reminders || []);
+      if (!reminderResult.valid) throw new Error(Object.values(reminderResult.errors || {}).join(" ") || "Hatırlatma verileri doğrulanamadı.");
+      window.TaskStore.ensureHierarchy();
+      window.TaskStore.migrateExistingTasksToArchitectureRoadmap();
+    });
     renderJiraItems();
     render();
     renderPeople();
@@ -3352,51 +3421,65 @@
   }
 
   async function pullFromSupabase() {
-    const localCount = bundleRecordCount();
-    if (localCount && !confirm(`Supabase’deki veriler bu cihazdaki ${localCount} yerel kaydın yerine yüklensin mi?`)) return false;
-    setSupabaseStatus("Supabase verileri yükleniyor…");
+    if (!supabaseSession?.user) throw new Error("Supabase hesabına giriş yapmanız gerekiyor.");
+    cloudDataReady = false;
+    setCloudDataGate("loading");
+    setSupabaseStatus("Supabase verileri otomatik yükleniyor…", "busy");
     const bundle = await window.SupabaseCloud.pullBundle();
+    applyCloudUserSettings(bundle.settings || {});
     replaceLocalBundle(bundle);
     const syncedAt = bundle.lastModifiedAt || new Date().toISOString();
-    localStorage.setItem(SUPABASE_LAST_SYNC_KEY, syncedAt);
-    localChangesPending = false;
-    localStorage.removeItem(LOCAL_CHANGES_PENDING_KEY);
-    updateDirtyUi();
+    cloudDataReady = true;
+    cloudLoadedUserId = supabaseSession.user.id;
     updateSupabaseLastSync(syncedAt);
-    setSupabaseStatus(`${bundleRecordCount(bundle)} kayıt Supabase’den bu cihaza yüklendi.`, "success");
+    $("#supabaseOrganizationName").textContent = bundle.context.organizationName;
+    setCloudDataGate("ready");
+    setSupabaseStatus(`${bundleRecordCount(bundle)} kayıt Supabase’den otomatik yüklendi. Değişiklikler doğrudan buluta kaydedilecek.`, "success");
+    await initializeCalendar();
     return true;
   }
 
-  async function pushToSupabase({ confirmOverwrite = true } = {}) {
-    const summary = await window.SupabaseCloud.getRemoteSummary();
-    const localCount = bundleRecordCount();
-    if (confirmOverwrite && summary.total && !confirm(`Bu cihazdaki ${localCount} kayıt Supabase’deki ${summary.total} kaydın güncel sürümü olarak kaydedilsin mi?`)) return false;
-    setSupabaseStatus("Yerel veriler Supabase’e gönderiliyor…");
-    const result = await window.SupabaseCloud.pushBundle(backupBundle());
-    localStorage.setItem(SUPABASE_LAST_SYNC_KEY, result.syncedAt);
-    updateSupabaseLastSync(result.syncedAt);
-    setSupabaseStatus(`${result.saved} kayıt Supabase’e kaydedildi${result.removed ? `, ${result.removed} eski kayıt kaldırıldı` : ""}${result.skipped ? `, başka kullanıcıya ait ${result.skipped} kayıt değiştirilmedi` : ""}.`, "success");
-    return true;
+  async function ensureCloudDataLoaded() {
+    const userId = supabaseSession?.user?.id || "";
+    if (!userId) return false;
+    if (cloudDataReady && cloudLoadedUserId === userId) return true;
+    if (cloudLoadPromise) return cloudLoadPromise;
+    cloudLoadPromise = pullFromSupabase();
+    try { return await cloudLoadPromise; }
+    finally { cloudLoadPromise = null; }
   }
 
-  async function saveLocalChangesToCloud() {
-    if (!supabaseSession?.user) {
-      $("#supabaseHeaderMenu").open = true;
-      setSupabaseStatus("Kaydetmek için önce Supabase hesabınıza giriş yapın.", "error");
-      return false;
+  function queueCloudChange(change) {
+    if (!supabaseSession?.user || !cloudDataReady) {
+      setCloudDataGate("signed_out", "Veri değişikliği için Supabase hesabının açık ve verilerin yüklenmiş olması gerekir.");
+      setSupabaseStatus("Değişiklik kaydedilemedi: Supabase verileri hazır değil.", "error");
+      return Promise.resolve(false);
     }
+    const revision = ++cloudSaveRevision;
+    cloudSavePending += 1;
+    setSupabaseStatus("Değişiklik Supabase’e kaydediliyor…", "busy");
+    cloudSaveChain = cloudSaveChain
+      .catch(() => null)
+      .then(() => window.SupabaseCloud.applyChanges(change))
+      .then((result) => {
+        updateSupabaseLastSync(result.syncedAt);
+        if (revision === cloudSaveRevision) setSupabaseStatus("Tüm değişiklikler Supabase’e kaydedildi.", "success");
+        return true;
+      })
+      .catch((error) => {
+        setSupabaseStatus(`Supabase otomatik kaydı başarısız: ${error.message}`, "error");
+        return false;
+      })
+      .finally(() => { cloudSavePending = Math.max(0, cloudSavePending - 1); });
+    return cloudSaveChain;
+  }
+
+  async function waitForCloudSaves() {
     try {
-      const saved = await pushToSupabase({ confirmOverwrite: true });
-      if (!saved) return false;
-      localChangesPending = false;
-      localStorage.removeItem(LOCAL_CHANGES_PENDING_KEY);
-      updateDirtyUi();
-      return true;
-    } catch (error) {
-      setSupabaseStatus(`Supabase kaydı yapılamadı: ${error.message}`, "error");
-      updateDirtyUi();
-      return false;
+      await Promise.all([cloudSaveChain, cloudSettingsSaveChain]);
+      return cloudSavePending === 0;
     }
+    catch { return false; }
   }
 
   async function runSupabaseAction(action) {
@@ -3406,19 +3489,7 @@
     catch (error) {
       setSupabaseStatus(error.message || "Supabase işlemi tamamlanamadı.", "error");
       return false;
-    } finally { setSupabaseBusy(false); updateDirtyUi(); }
-  }
-
-  function updateDirtyUi() {
-    const pushButton = $("#supabasePush");
-    if (pushButton) pushButton.textContent = localChangesPending ? "Değişiklikleri gönder" : "Yerel verileri gönder";
-  }
-
-  function markLocalChangePending() {
-    localChangesPending = true;
-    localStorage.setItem(LOCAL_CHANGES_PENDING_KEY, "true");
-    updateDirtyUi();
-    setSupabaseStatus("Değişiklik yerel olarak kaydedildi. Supabase’e göndermek için Kaydet’e basın.");
+    } finally { setSupabaseBusy(false); }
   }
 
   async function backupLocalDataToDrive(message = "Değişiklikler Google Drive’a kaydedildi.") {
@@ -3426,6 +3497,7 @@
     try {
       const result = await window.DriveSync.backup(backupBundle());
       updateLastBackupTime(result.modifiedTime);
+      await queueCloudUserSettings({ lastDriveBackupAt: result.modifiedTime });
       setDriveStatus(message);
       return true;
     } catch (error) {
@@ -3443,14 +3515,13 @@
     refreshDriveHeaderMenu();
   }
 
-  async function backupAndReport(message = "Kayıt Drive’a otomatik gönderildi.") {
-    markLocalChangePending();
-    return true;
+  async function backupAndReport() {
+    return waitForCloudSaves();
   }
 
   async function restoreFromDrive() {
     const backup = await window.DriveSync.restore();
-    if ((readEntries().length || window.TaskStore.list().length || window.PeopleStore.list().length || window.JiraStore.list().length || window.ReminderStore.list().length) && !confirm(`Drive yedeğindeki ${backup.entries.length} efor, ${(backup.tasks || []).length} görev, ${(backup.people || []).length} kişi, ${(backup.jiraItems || []).length} JIRA maddesi ve ${(backup.reminders || []).length} hatırlatma yerel verilerin yerine yüklensin mi?`)) {
+    if (!confirm(`Drive yedeğindeki ${backup.entries.length} efor, ${(backup.tasks || []).length} görev, ${(backup.people || []).length} kişi, ${(backup.jiraItems || []).length} JIRA maddesi ve ${(backup.reminders || []).length} hatırlatma Supabase verilerinin yerine aktarılsın mı?`)) {
       setDriveStatus("Geri yükleme iptal edildi.");
       return;
     }
@@ -3469,11 +3540,10 @@
     render();
     renderPeople();
     renderTasks();
-    localChangesPending = false;
-    localStorage.removeItem(LOCAL_CHANGES_PENDING_KEY);
-    updateDirtyUi();
+    await waitForCloudSaves();
     updateLastBackupTime(backup.file.modifiedTime);
-    setDriveStatus(`${backup.entries.length} efor, ${(backup.tasks || []).length} görev ve ${(backup.people || []).length} kişi Google Drive’dan geri yüklendi.`);
+    await queueCloudUserSettings({ lastDriveBackupAt: backup.file.modifiedTime });
+    setDriveStatus(`${backup.entries.length} efor, ${(backup.tasks || []).length} görev ve ${(backup.people || []).length} kişi Google Drive’dan Supabase’e aktarıldı.`);
   }
 
   async function runDriveAction(action) {
@@ -3712,6 +3782,7 @@
   $("#saveOutlookSettings").addEventListener("click", async () => {
     try {
       const settings = window.OutlookCalendar.saveSettings($("#outlookClientId").value, $("#outlookTenantId").value);
+      await queueCloudUserSettings({ outlookCalendar: settings });
       $("#outlookClientId").value = settings.clientId;
       $("#outlookTenantId").value = settings.tenantId;
       setCalendarStatus("Outlook ayarları kaydedildi. Şimdi Outlook’a bağlanabilirsiniz.", "success");
@@ -3733,9 +3804,10 @@
   document.querySelectorAll("[data-ai-prompt]").forEach((button) => {
     button.addEventListener("click", () => askAiAssistant(button.dataset.aiPrompt));
   });
-  $("#saveAiAssistantEndpoint").addEventListener("click", () => {
+  $("#saveAiAssistantEndpoint").addEventListener("click", async () => {
     try {
       const endpoint = window.AiAssistantClient.setEndpoint($("#aiAssistantEndpoint").value);
+      await queueCloudUserSettings({ aiEndpoint: endpoint });
       $("#aiAssistantEndpoint").value = endpoint;
       $("#aiAssistantStatus").textContent = "AI servis adresi kaydedildi";
     } catch (error) {
@@ -3803,14 +3875,13 @@
   $("#removeJiraCredentials").addEventListener("click", removeJiraCredentials);
   $("#testJiraConnection").addEventListener("click", testJiraCloudConnection);
   $("#syncJiraIssues").addEventListener("click", syncJiraCloudIssues);
-  $("#jiraSyncJql").addEventListener("change", (event) => {
+  $("#jiraSyncJql").addEventListener("change", async (event) => {
     const value = event.target.value.trim();
-    if (value) localStorage.setItem(JIRA_SYNC_JQL_KEY, value);
-    else localStorage.removeItem(JIRA_SYNC_JQL_KEY);
+    await queueCloudUserSettings({ jiraSyncJql: value });
     setJiraCloudStatus("JIRA senkronizasyon tercihi kaydedildi.", "success");
   });
-  $("#jiraAutoWorklog").addEventListener("change", (event) => {
-    localStorage.setItem(JIRA_AUTO_WORKLOG_KEY, String(event.target.checked));
+  $("#jiraAutoWorklog").addEventListener("change", async (event) => {
+    await queueCloudUserSettings({ jiraAutoWorklog: event.target.checked });
     setJiraCloudStatus(event.target.checked ? "JIRA worklog gönderimi için kayıt sonrası onay istenecek." : "JIRA worklog gönderimi kapatıldı.", "success");
   });
   $("#jiraItemSearchInput").addEventListener("input", () => filterEffortJiraOptions());
@@ -3981,7 +4052,7 @@
       }
       await syncEffortToJira(result.value);
       render();
-      markAppDirty();
+      await waitForCloudSaves();
       if (repeatEntry) {
         $("#modalDateInput").value = "";
         $("#modalHoursInput").value = "";
@@ -4061,9 +4132,10 @@
   $("#filterDateInput").addEventListener("change", render);
   $("#cancelEditButton").addEventListener("click", resetForm);
 
-  $("#saveDriveSettings").addEventListener("click", () => {
+  $("#saveDriveSettings").addEventListener("click", async () => {
     try {
       window.DriveSync.setClientId($("#googleClientId").value);
+      await queueCloudUserSettings({ googleClientId: window.DriveSync.getClientId() });
       setDriveSettingsEditing(false);
       setDriveStatus("Ayarlar kayıtlı. Yedeklemek veya yüklemek için aşağıdan bir işlem seçin.");
       updateCalendarProviderUi();
@@ -4117,11 +4189,12 @@
   });
 
   $("#supabasePull").addEventListener("click", () => runSupabaseAction(pullFromSupabase));
-  $("#supabasePush").addEventListener("click", () => runSupabaseAction(saveLocalChangesToCloud));
   $("#supabaseSignOut").addEventListener("click", () => runSupabaseAction(async () => {
+    await waitForCloudSaves();
     await window.SupabaseCloud.signOut();
     await refreshSupabaseAccount(null);
   }));
+  $("#openSupabaseFromGate").addEventListener("click", () => { $("#supabaseHeaderMenu").open = true; });
 
   $("#backupToDrive").addEventListener("click", () => runDriveAction(async () => {
     await backupLocalDataToDrive("Yedek Google Drive’a kaydedildi.");
@@ -4149,6 +4222,7 @@
   });
 
   try {
+    window.CloudDataRuntime.setChangeHandler(queueCloudChange);
     window.SupabaseCloud.onAuthStateChange((event, session) => {
       supabaseSession = session || null;
       if (event === "PASSWORD_RECOVERY") {
@@ -4165,6 +4239,7 @@
       .then((session) => refreshSupabaseAccount(session).then(() => refreshJiraCredentialStatus()))
       .catch((error) => setSupabaseStatus(`Supabase oturumu alınamadı: ${error.message}`, "error"));
   } catch (error) {
+    setCloudDataGate("error", error.message);
     setSupabaseStatus(`Supabase başlatılamadı: ${error.message}`, "error");
   }
 
@@ -4187,15 +4262,11 @@
   $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
   const jiraOAuthResult = consumeJiraOAuthResult();
   refreshJiraOAuthStatus(!jiraOAuthResult);
-  $("#jiraSyncJql").value = localStorage.getItem(JIRA_SYNC_JQL_KEY) || $("#jiraSyncJql").value;
-  $("#jiraAutoWorklog").checked = localStorage.getItem(JIRA_AUTO_WORKLOG_KEY) !== "false";
+  $("#jiraAutoWorklog").checked = true;
   renderJiraItems();
   render();
   initializeCalendar();
-  window.TaskStore.ensureHierarchy();
-  window.TaskStore.migrateExistingTasksToArchitectureRoadmap();
   renderPeople();
   renderTasks();
-  updateDirtyUi();
   applyInitialRoute();
 })();
