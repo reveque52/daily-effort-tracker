@@ -133,6 +133,91 @@ function close(server) {
     await close(server);
   }
 
+  const oauthCalls = [];
+  const oauthServer = createAssistantServer({
+    rootDir: path.join(__dirname, ".."),
+    jiraBaseUrl: "https://fit-global.atlassian.net",
+    jiraEmail: "",
+    jiraApiToken: "",
+    jiraOAuthClientId: "oauth-client-id",
+    jiraOAuthClientSecret: "oauth-client-secret",
+    jiraOAuthRedirectUri: "http://localhost:8080/api/jira/oauth/callback",
+    allowedOrigins: "http://localhost:8080",
+    fetchImpl: async (url, options = {}) => {
+      oauthCalls.push({ url, options });
+      if (url === "https://auth.atlassian.com/oauth/token") {
+        return Response.json({ access_token: "oauth-access-token", refresh_token: "oauth-refresh-token", expires_in: 3600, scope: "read:jira-work read:jira-user write:jira-work offline_access" });
+      }
+      if (url === "https://api.atlassian.com/oauth/token/accessible-resources") {
+        return Response.json([{ id: "cloud-123", name: "FIT Global", url: "https://fit-global.atlassian.net", scopes: ["read:jira-work", "read:jira-user", "write:jira-work"] }]);
+      }
+      if (url === "https://api.atlassian.com/ex/jira/cloud-123/rest/api/3/myself") {
+        return Response.json({ accountId: "oauth-account-1", displayName: "OAuth User" });
+      }
+      return Response.json({ errorMessages: ["Beklenmeyen OAuth JIRA isteği"] }, { status: 500 });
+    }
+  });
+  const oauthPort = await listen(oauthServer);
+  const oauthBaseUrl = `http://127.0.0.1:${oauthPort}`;
+  try {
+    const initialStatus = await fetch(`${oauthBaseUrl}/api/jira/oauth/status`, { headers: { Origin: "http://localhost:8080" } });
+    const initialPayload = await initialStatus.json();
+    assert.equal(initialPayload.configured, true);
+    assert.equal(initialPayload.connected, false);
+    assert.equal(initialStatus.headers.get("access-control-allow-credentials"), "true");
+
+    const returnTo = "http://localhost:8080/?screen=jira";
+    const startResponse = await fetch(`${oauthBaseUrl}/api/jira/oauth/start?returnTo=${encodeURIComponent(returnTo)}`, { redirect: "manual" });
+    assert.equal(startResponse.status, 302);
+    const authorizeUrl = new URL(startResponse.headers.get("location"));
+    assert.equal(authorizeUrl.origin, "https://auth.atlassian.com");
+    assert.equal(authorizeUrl.pathname, "/authorize");
+    assert.equal(authorizeUrl.searchParams.get("client_id"), "oauth-client-id");
+    assert.equal(authorizeUrl.searchParams.get("redirect_uri"), "http://localhost:8080/api/jira/oauth/callback");
+    assert.match(authorizeUrl.searchParams.get("scope"), /read:jira-work/);
+    assert.match(authorizeUrl.searchParams.get("scope"), /offline_access/);
+    assert.equal(authorizeUrl.searchParams.get("prompt"), "consent");
+    assert.ok(authorizeUrl.searchParams.get("state").length >= 32);
+    const stateCookie = startResponse.headers.get("set-cookie").split(";")[0];
+    assert.match(stateCookie, /daily_effort_jira_oauth_state=/);
+
+    const callbackResponse = await fetch(`${oauthBaseUrl}/api/jira/oauth/callback?code=test-code&state=${encodeURIComponent(authorizeUrl.searchParams.get("state"))}`, { redirect: "manual", headers: { Cookie: stateCookie } });
+    assert.equal(callbackResponse.status, 302);
+    assert.match(callbackResponse.headers.get("location"), /jiraAuth=success/);
+    const setCookie = callbackResponse.headers.get("set-cookie");
+    assert.match(setCookie, /daily_effort_jira_session=/);
+    assert.match(setCookie, /HttpOnly/i);
+    assert.match(setCookie, /SameSite=Lax/i);
+    const sessionCookie = setCookie.split(";")[0];
+
+    const oauthStatus = await fetch(`${oauthBaseUrl}/api/jira/oauth/status`, { headers: { Cookie: sessionCookie, Origin: "http://localhost:8080" } }).then((response) => response.json());
+    assert.equal(oauthStatus.connected, true);
+    assert.equal(oauthStatus.mode, "oauth");
+    assert.equal(oauthStatus.account.displayName, "OAuth User");
+    assert.equal(oauthStatus.site, "https://fit-global.atlassian.net");
+
+    const oauthHealth = await fetch(`${oauthBaseUrl}/api/jira/health`, { headers: { Cookie: sessionCookie, Origin: "http://localhost:8080" } }).then((response) => response.json());
+    assert.equal(oauthHealth.ok, true);
+    assert.equal(oauthHealth.mode, "oauth");
+    assert.equal(oauthHealth.account.accountId, "oauth-account-1");
+    const oauthJiraCalls = oauthCalls.filter((call) => call.url.includes("/ex/jira/cloud-123/"));
+    assert.ok(oauthJiraCalls.length >= 2);
+    assert.ok(oauthJiraCalls.every((call) => call.options.headers.Authorization === "Bearer oauth-access-token"));
+    const tokenBody = JSON.parse(oauthCalls.find((call) => call.url === "https://auth.atlassian.com/oauth/token").options.body);
+    assert.equal(tokenBody.grant_type, "authorization_code");
+    assert.equal(tokenBody.client_secret, "oauth-client-secret");
+
+    const logoutResponse = await fetch(`${oauthBaseUrl}/api/jira/oauth/logout`, { method: "POST", headers: { Cookie: sessionCookie, Origin: "http://localhost:8080", "Content-Type": "application/json" }, body: "{}" });
+    assert.equal(logoutResponse.status, 200);
+    assert.match(logoutResponse.headers.get("set-cookie"), /Max-Age=0/i);
+    const signedOutStatus = await fetch(`${oauthBaseUrl}/api/jira/oauth/status`, { headers: { Cookie: sessionCookie } }).then((response) => response.json());
+    assert.equal(signedOutStatus.connected, false);
+    assert.ok(!JSON.stringify({ initialPayload, oauthStatus, oauthHealth }).includes("oauth-client-secret"));
+    assert.ok(!JSON.stringify({ initialPayload, oauthStatus, oauthHealth }).includes("oauth-access-token"));
+  } finally {
+    await close(oauthServer);
+  }
+
   const unconfigured = createAssistantServer({ rootDir: path.join(__dirname, ".."), jiraEmail: "", jiraApiToken: "" });
   const unconfiguredPort = await listen(unconfigured);
   try {

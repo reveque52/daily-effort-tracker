@@ -22,6 +22,7 @@
   async function request(pathname, options = {}) {
     const response = await global.fetch(`${getEndpoint()}${pathname}`, {
       ...options,
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...(options.headers || {}) }
     });
     const payload = await response.json().catch(() => ({}));
@@ -31,6 +32,23 @@
 
   function health() {
     return request("/health", { method: "GET" });
+  }
+
+  function getOAuthStatus() {
+    return request("/oauth/status", { method: "GET" });
+  }
+
+  function getOAuthStartUrl(returnTo = global.location.href) {
+    const endpoint = new URL(getEndpoint(), global.location.href);
+    return `${endpoint.toString().replace(/\/$/, "")}/oauth/start?${new URLSearchParams({ returnTo: String(returnTo || global.location.href) })}`;
+  }
+
+  function signInWithJira() {
+    global.location.assign(getOAuthStartUrl());
+  }
+
+  function signOutFromJira() {
+    return request("/oauth/logout", { method: "POST", body: "{}" });
   }
 
   function syncUsers(maxResults = 1000) {
@@ -82,5 +100,5 @@
     });
   }
 
-  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, health, syncUsers, syncIssues, getIssue, transitionIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
+  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, health, getOAuthStatus, getOAuthStartUrl, signInWithJira, signOutFromJira, syncUsers, syncIssues, getIssue, transitionIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
 })(window);

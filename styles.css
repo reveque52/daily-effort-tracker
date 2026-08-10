@@ -715,7 +715,10 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .jira-cloud-panel { margin-bottom: 1rem; padding: 1.1rem 1.25rem; overflow: visible; }
 .jira-cloud-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .jira-cloud-heading h2 { margin: .2rem 0 0; font-size: 1.05rem; }
-.jira-cloud-actions { display: flex; gap: .5rem; }
+.jira-cloud-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: end; gap: .5rem; }
+.jira-oauth-badge { padding: .3rem .55rem; border-radius: 999px; color: #765414; background: #fff1cc; font-size: .67rem; font-weight: 850; white-space: nowrap; }
+.jira-oauth-badge[data-state="connected"] { color: #137052; background: #e1f5ed; }
+.jira-oauth-badge[data-state="unconfigured"] { color: #6b7280; background: #edf0f5; }
 .jira-cloud-settings { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(320px, 1.3fr) auto; align-items: end; gap: .75rem; margin-top: 1rem; }
 .jira-cloud-settings input { padding: .6rem .7rem; font-size: .78rem; }
 .jira-cloud-settings .button { white-space: nowrap; }

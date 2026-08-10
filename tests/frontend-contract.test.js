@@ -50,7 +50,7 @@ const requiredIds = [
   "timesheetGrouping",
   "jiraItemPicker", "jiraItemPickerButton", "jiraItemPickerValue", "jiraItemPickerDropdown", "jiraItemSearchInput", "jiraItemSearchCount", "jiraItemOptionList", "jiraItemInput", "jiraView", "jiraForm", "jiraNameInput", "jiraSubmitButton", "jiraSubmitLabel",
   "jiraList", "jiraTemplate", "jiraHtmlImport",
-  "jiraCloudTitle", "jiraApiEndpoint", "jiraSyncJql", "saveJiraApiEndpoint", "testJiraConnection", "syncJiraIssues", "jiraAutoWorklog", "jiraCloudStatus",
+  "jiraCloudTitle", "jiraOAuthBadge", "connectJiraOAuth", "disconnectJiraOAuth", "jiraApiEndpoint", "jiraSyncJql", "saveJiraApiEndpoint", "testJiraConnection", "syncJiraIssues", "jiraAutoWorklog", "jiraCloudStatus",
   "jiraSearchInput", "jiraColumnManager", "jiraColumnOptions", "autoFitJiraColumns", "resetJiraColumns", "jiraColumnStatus", "jiraIssueTable", "jiraTableHeaderRow", "jiraTableBody", "jiraItemsView", "jiraRequestsView", "jiraItemsSubtabCount", "jiraRequestsSubtabCount", "jiraRequestsTitle", "jiraRequestsSearch", "jiraRequestTotal", "jiraRequestStatusFilters", "selectAllJiraRequestStatuses", "clearJiraRequestStatuses", "jiraRequestBoardStatus", "jiraRequestsEmpty", "jiraRequestBoard", "effortEditModal", "effortEditModalForm", "modalEntrySelect",
   "modalJiraInput", "modalDateInput", "modalHoursInput", "modalDescriptionInput", "effortEditModalSubmitLabel", "deleteEffortModal",
   "modalRepeatEntryToggleField", "modalRepeatEntryToggle",
@@ -147,7 +147,18 @@ assert.match(app, /function setEffortJiraPickerOpen[\s\S]*jiraItemPickerDropdown
 assert.match(app, /project:\s*selectedJira\.name/, "Eforun proje karşılığı seçilen JIRA anahtarından türetilmeli");
 assert.ok(html.indexOf('src="jira-cloud.js') < html.indexOf('src="app.js'), "JIRA Cloud istemcisi uygulamadan önce yüklenmeli");
 assert.doesNotMatch(jiraCloudClient, /JIRA_API_TOKEN|Authorization:\s*`Basic/, "JIRA API token tarayıcı kodunda bulunmamalı");
+assert.match(jiraCloudClient, /credentials:\s*"include"/, "JIRA OAuth oturum çerezi backend isteklerinde güvenli biçimde gönderilmeli");
+assert.match(jiraCloudClient, /function getOAuthStatus[\s\S]*\/oauth\/status[\s\S]*function getOAuthStartUrl[\s\S]*\/oauth\/start[\s\S]*function signOutFromJira[\s\S]*\/oauth\/logout/, "JIRA istemcisi giriş durumu, yönlendirme ve çıkış akışlarını desteklemeli");
 assert.match(aiServer, /process\.env\.JIRA_API_TOKEN[\s\S]*Basic \$\{Buffer\.from/, "JIRA API token yalnızca backend kimlik doğrulamasında kullanılmalı");
+assert.match(aiServer, /JIRA_OAUTH_CLIENT_ID[\s\S]*JIRA_OAUTH_CLIENT_SECRET[\s\S]*JIRA_OAUTH_REDIRECT_URI/, "JIRA OAuth sırları yalnızca backend ortam ayarlarından okunmalı");
+assert.match(aiServer, /\/api\/jira\/oauth\/start[\s\S]*crypto\.randomBytes[\s\S]*auth\.atlassian\.com\/authorize[\s\S]*state[\s\S]*prompt:\s*"consent"/, "JIRA OAuth başlangıcı tahmin edilemez state ve Atlassian consent yönlendirmesi kullanmalı");
+assert.match(aiServer, /auth\.atlassian\.com\/oauth\/token[\s\S]*grant_type:\s*"refresh_token"[\s\S]*session\.refreshToken = token\.refresh_token/, "JIRA rotating refresh token her yenilemede güvenli biçimde değiştirilmelidir");
+assert.match(aiServer, /oauth\/token\/accessible-resources/, "JIRA OAuth yetkilendirilen siteleri accessible-resources üzerinden almalı");
+assert.match(aiServer, /api\.atlassian\.com\/ex\/jira\/\$\{encodeURIComponent\(session\.cloudId\)\}/, "JIRA OAuth API çağrıları yetkilendirilen cloudId üzerinden yapılmalı");
+assert.match(aiServer, /JIRA_SESSION_COOKIE[\s\S]*HttpOnly[\s\S]*SameSite=None[\s\S]*Secure/, "JIRA OAuth oturumu HttpOnly ve HTTPS üzerinde cross-site güvenli çerez kullanmalı");
+assert.doesNotMatch(jiraCloudClient, /client_secret|JIRA_OAUTH_CLIENT_SECRET|access_token|refresh_token/, "JIRA OAuth sırları ve tokenları frontend kodunda bulunmamalı");
+assert.match(app, /function renderJiraOAuthState[\s\S]*jiraOAuthBadge[\s\S]*connectJiraOAuth[\s\S]*disconnectJiraOAuth/, "JIRA OAuth bağlantı durumu arayüzde gösterilmeli");
+assert.match(app, /connectJiraOAuth"\)\.addEventListener\("click"[\s\S]*signInWithJira[\s\S]*disconnectJiraOAuth"\)\.addEventListener\("click"[\s\S]*signOutFromJira/, "JIRA giriş ve çıkış düğmeleri OAuth istemcisine bağlanmalı");
 assert.match(aiServer, /\/rest\/api\/3\/search\/jql[\s\S]*mapJiraIssue/, "Backend JQL ile JIRA maddelerini senkronize etmeli");
 assert.match(aiServer, /singleJiraIssueMatch[\s\S]*\/rest\/api\/3\/issue\/\$\{encodeURIComponent\(issueKey\)\}\?fields=[\s\S]*mapJiraIssue/, "Backend tek bir JIRA Key ile tüm issue alanlarını almalı");
 assert.match(jiraCloudClient, /function getIssue\(issueKey\)[\s\S]*request\(`\/issues\/\$\{encodeURIComponent\(key\)\}`/, "JIRA istemcisi Key ile tekil madde sorgulamalı");
