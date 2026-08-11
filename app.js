@@ -45,6 +45,7 @@
   let jiraOAuthState = null;
   let jiraCredentialState = "unconfigured";
   let calendarEvents = [];
+  let calendarViewDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
   let activeCalendarProvider = "google";
   let homeEffortChartPeriod = "week";
   const DEFAULT_WEATHER_LOCATION = Object.freeze({ name: "İstanbul", detail: "Türkiye", latitude: 41.0082, longitude: 28.9784, timezone: "Europe/Istanbul" });
@@ -74,6 +75,11 @@
   let taskAssigneeSearchTimer = 0;
   let taskAssigneeSearchRequest = 0;
   let taskAssigneeRemoteUsers = [];
+  let jiraAssigneeFilter = null;
+  let jiraAssigneeFilterSearchTimer = 0;
+  let jiraAssigneeFilterSearchRequest = 0;
+  let jiraAssigneeFilterSyncRequest = 0;
+  let jiraAssigneeFilterRemoteUsers = [];
   const effortJiraPickerSearchState = {
     main: { timer: 0, request: 0, remote: [] },
     modal: { timer: 0, request: 0, remote: [] }
@@ -117,6 +123,7 @@
   });
 
   const dateFormatter = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long", year: "numeric" });
+  const calendarMonthFormatter = new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" });
   const numberFormatter = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 2 });
   const dateTimeFormatter = new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" });
   const isoToday = () => new Date().toLocaleDateString("en-CA");
@@ -1230,7 +1237,8 @@
     document.querySelectorAll(".jira-subview").forEach((view) => view.classList.toggle("hidden", view.id !== viewId));
     if (viewId === "jiraItemsView" && !$("#jiraView").classList.contains("hidden")) {
       scheduleJiraAutoFit();
-      refreshJiraNavigatorFromWorklogs();
+      if (jiraAssigneeFilter) refreshSelectedJiraAssigneeIssues();
+      else refreshJiraNavigatorFromWorklogs();
     }
   }
 
@@ -1654,62 +1662,108 @@
   }
 
   function renderCalendar() {
-    const list = $("#outlookCalendarList");
-    list.replaceChildren();
-    $("#outlookCalendarEmpty").classList.toggle("hidden", calendarEvents.length > 0);
-    const groups = new Map();
+    const calendar = $("#outlookCalendarList");
+    calendar.replaceChildren();
+    const range = updateCalendarPeriod();
+    const eventGroups = new Map();
     calendarEvents.forEach((event) => {
       const start = outlookEventDate(event.start?.dateTime, event.start?.timeZone);
       if (!start) return;
       const key = isoFromDate(start);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push({ event, start, end: outlookEventDate(event.end?.dateTime, event.end?.timeZone) });
+      if (!eventGroups.has(key)) eventGroups.set(key, []);
+      eventGroups.get(key).push({ event, start, end: outlookEventDate(event.end?.dateTime, event.end?.timeZone) });
     });
-    groups.forEach((dayEvents, dateKey) => {
-      const section = document.createElement("section");
-      section.className = "outlook-day-group";
-      const heading = document.createElement("header");
-      heading.className = "outlook-day-heading";
-      heading.textContent = dateFormatter.format(parseDate(dateKey));
-      const events = document.createElement("div");
-      events.className = "outlook-day-events";
-      dayEvents.forEach(({ event, start, end }) => {
-        const row = event.webLink ? document.createElement("a") : document.createElement("article");
-        row.className = "outlook-event";
+    eventGroups.forEach((events) => events.sort((left, right) => left.start - right.start));
+
+    const weekdayRow = document.createElement("div");
+    weekdayRow.className = "calendar-weekday-row";
+    weekdayRow.setAttribute("role", "row");
+    ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"].forEach((label, index) => {
+      const weekday = document.createElement("span");
+      weekday.className = "calendar-weekday";
+      weekday.setAttribute("role", "columnheader");
+      weekday.classList.toggle("is-weekend", index > 4);
+      weekday.textContent = label;
+      weekdayRow.append(weekday);
+    });
+    calendar.append(weekdayRow);
+
+    const grid = document.createElement("div");
+    grid.className = "calendar-date-grid";
+    grid.setAttribute("role", "rowgroup");
+    const todayIso = isoToday();
+    let visibleMonthEventCount = 0;
+    for (let index = 0; index < 42; index += 1) {
+      const date = addDays(range.start, index);
+      const dateKey = isoFromDate(date);
+      const dayEvents = eventGroups.get(dateKey) || [];
+      const inCurrentMonth = date.getMonth() === calendarViewDate.getMonth() && date.getFullYear() === calendarViewDate.getFullYear();
+      if (inCurrentMonth) visibleMonthEventCount += dayEvents.length;
+
+      const cell = document.createElement("div");
+      cell.className = "calendar-day-cell";
+      cell.setAttribute("role", "gridcell");
+      cell.setAttribute("aria-label", `${dateFormatter.format(date)}${dayEvents.length ? `, ${dayEvents.length} etkinlik` : ", etkinlik yok"}`);
+      cell.classList.toggle("is-outside-month", !inCurrentMonth);
+      cell.classList.toggle("is-weekend", date.getDay() === 0 || date.getDay() === 6);
+      cell.classList.toggle("is-today", dateKey === todayIso);
+
+      const dayNumber = document.createElement("time");
+      dayNumber.className = "calendar-day-number";
+      dayNumber.dateTime = dateKey;
+      dayNumber.textContent = String(date.getDate());
+      cell.append(dayNumber);
+
+      const eventList = document.createElement("div");
+      eventList.className = "calendar-day-events";
+      dayEvents.slice(0, 2).forEach(({ event, start }) => {
+        const row = event.webLink ? document.createElement("a") : document.createElement("span");
+        row.className = "calendar-event-chip";
+        row.dataset.provider = event.provider || activeCalendarProvider;
         if (event.webLink) {
           row.href = event.webLink;
           row.target = "_blank";
           row.rel = "noopener noreferrer";
         }
-        const time = document.createElement("span");
-        time.className = "outlook-event-time";
-        time.textContent = event.isAllDay
-          ? "Tüm gün"
-          : `${start.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}${end ? ` – ${end.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}` : ""}`;
-        const content = document.createElement("span");
-        content.className = "outlook-event-content";
+        const timeLabel = event.isAllDay ? "Tüm gün" : start.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+        row.title = `${timeLabel} · ${event.subject || "Başlıksız etkinlik"}${event.location?.displayName ? ` · ${event.location.displayName}` : ""}`;
+        const time = document.createElement("small");
+        time.textContent = timeLabel;
         const subject = document.createElement("strong");
         subject.textContent = event.subject || "Başlıksız etkinlik";
-        const preview = document.createElement("small");
-        preview.textContent = event.bodyPreview || event.organizer?.emailAddress?.name || `${calendarProviderLabel()} etkinliği`;
-        content.append(subject, preview);
-        const location = document.createElement("span");
-        location.className = "outlook-event-location";
-        location.textContent = event.location?.displayName || event.showAs || "";
-        row.append(time, content, location);
-        events.append(row);
+        row.append(time, subject);
+        eventList.append(row);
       });
-      section.append(heading, events);
-      list.append(section);
-    });
+      if (dayEvents.length > 2) {
+        const more = document.createElement("span");
+        more.className = "calendar-event-more";
+        more.textContent = `+${dayEvents.length - 2} etkinlik`;
+        eventList.append(more);
+      }
+      cell.append(eventList);
+      grid.append(cell);
+    }
+    calendar.append(grid);
+    $("#outlookCalendarEmpty").classList.toggle("hidden", visibleMonthEventCount > 0);
   }
 
   function updateCalendarPeriod() {
-    const days = Number($("#outlookCalendarRange").value || 14);
-    const start = parseDate(isoToday());
-    const end = addDays(start, days);
-    $("#outlookCalendarPeriod").textContent = `${dateFormatter.format(start)} – ${dateFormatter.format(addDays(end, -1))}`;
-    return { start, end, days };
+    const monthStart = new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth(), 1, 12);
+    const leadingDays = (monthStart.getDay() + 6) % 7;
+    const start = addDays(monthStart, -leadingDays);
+    const end = addDays(start, 42);
+    const monthLabel = calendarMonthFormatter.format(monthStart);
+    $("#outlookCalendarPeriod").textContent = monthLabel.charAt(0).toLocaleUpperCase("tr-TR") + monthLabel.slice(1);
+    return { start, end, days: 42, monthLabel };
+  }
+
+  async function changeCalendarMonth(offset = 0, returnToToday = false) {
+    const base = returnToToday ? new Date() : calendarViewDate;
+    calendarViewDate = new Date(base.getFullYear(), base.getMonth() + (returnToToday ? 0 : offset), 1, 12);
+    calendarEvents = [];
+    renderCalendar();
+    if (isCalendarConnected()) await refreshCalendar();
+    else setCalendarStatus(`${calendarMonthFormatter.format(calendarViewDate)} etkinliklerini görmek için ${calendarProviderLabel()} hesabınızla bağlanın.`);
   }
 
   async function refreshCalendar() {
@@ -1721,13 +1775,13 @@
     }
     const range = updateCalendarPeriod();
     setCalendarConnection(account, true);
-    setCalendarStatus(`${range.days} günlük ${calendarProviderLabel()} ajandası alınıyor…`, "busy");
+    setCalendarStatus(`${range.monthLabel} ${calendarProviderLabel()} etkinlikleri alınıyor…`, "busy");
     try {
       const rawEvents = await client.fetchCalendarView(range.start, range.end);
       calendarEvents = rawEvents.map((event) => normalizeCalendarEvent(event));
       renderCalendar();
       const accountLabel = account?.username || account?.name;
-      setCalendarStatus(`${accountLabel ? `${accountLabel}: ` : ""}${calendarEvents.length} etkinlik gösteriliyor.`, "success");
+      setCalendarStatus(`${accountLabel ? `${accountLabel}: ` : ""}${range.monthLabel} için ${calendarEvents.length} etkinlik gösteriliyor.`, "success");
     } catch (error) {
       setCalendarStatus(`${calendarProviderLabel()} alınamadı: ${error.message}`, "error");
     } finally {
@@ -1770,7 +1824,7 @@
     $("#outlookCalendarSettings").classList.toggle("hidden", activeCalendarProvider !== "outlook");
     $("#googleCalendarSettings").classList.toggle("hidden", activeCalendarProvider !== "google");
     $("#connectOutlookCalendar").textContent = activeCalendarProvider === "google" ? "Google’a bağlan" : "Outlook’a bağlan";
-    $("#outlookCalendarEmpty").textContent = `Bu tarih aralığında ${calendarProviderLabel()} etkinliği bulunmuyor.`;
+    $("#outlookCalendarEmpty").textContent = `Bu ay ${calendarProviderLabel()} etkinliği bulunmuyor.`;
     const googleConfigured = Boolean(window.GoogleCalendar?.getClientId());
     $("#googleCalendarClientState").textContent = googleConfigured
       ? "Google OAuth Client ID hazır."
@@ -2207,6 +2261,7 @@
     badge.textContent = person.jiraAccountId || source === "jira" ? "JIRA" : "Kayıtlı";
     button.append(avatar, copy, badge);
     list.append(button);
+    return button;
   }
 
   function renderTaskAssigneeOptions(query = "", remoteUsers = taskAssigneeRemoteUsers, statusMessage = "") {
@@ -2316,6 +2371,200 @@
     const person = window.PeopleStore.get(value);
     if (person) return { assignee: person.fullName, assigneeId: person.id };
     return { assignee: legacyAssigneeName(value), assigneeId: "" };
+  }
+
+  function jiraAssigneeFilterUi(scope = "items") {
+    const prefix = scope === "requests" ? "jiraRequestsAssigneeFilter" : "jiraAssigneeFilter";
+    return {
+      scope,
+      picker: $(`#${prefix}Picker`),
+      button: $(`#${prefix}Button`),
+      value: $(`#${prefix}Value`),
+      dropdown: $(`#${prefix}Dropdown`),
+      search: $(`#${prefix}Search`),
+      searchStatus: $(`#${prefix}SearchStatus`),
+      options: $(`#${prefix}Options`),
+      status: $(`#${prefix}Status`),
+      clear: $(`#clear${scope === "requests" ? "JiraRequests" : "Jira"}AssigneeFilter`)
+    };
+  }
+
+  function setJiraAssigneeFilterStatus(message, state = "") {
+    [jiraAssigneeFilterUi("items"), jiraAssigneeFilterUi("requests")].forEach(({ status }) => {
+      status.textContent = message;
+      status.classList.toggle("is-busy", state === "busy");
+      status.classList.toggle("is-success", state === "success");
+      status.classList.toggle("is-error", state === "error");
+    });
+  }
+
+  function jiraAssigneeFilterLabel(person = jiraAssigneeFilter) {
+    if (!person) return "Tüm kullanıcılar";
+    return `${person.fullName}${person.email ? ` — ${person.email}` : ""}`;
+  }
+
+  function updateJiraAssigneeFilterLabel() {
+    [jiraAssigneeFilterUi("items"), jiraAssigneeFilterUi("requests")].forEach(({ value, clear }) => {
+      value.textContent = jiraAssigneeFilterLabel();
+      clear.classList.toggle("hidden", !jiraAssigneeFilter);
+    });
+  }
+
+  function jiraItemMatchesAssigneeFilter(item) {
+    if (!jiraAssigneeFilter) return true;
+    const selectedAccountId = String(jiraAssigneeFilter.jiraAccountId || "").trim();
+    const itemAccountId = String(item?.assigneeAccountId || "").trim();
+    if (selectedAccountId && itemAccountId) return selectedAccountId === itemAccountId;
+    return normalizePersonName(item?.assignee) === normalizePersonName(jiraAssigneeFilter.fullName);
+  }
+
+  function appendJiraAssigneeFilterOption(list, person, source) {
+    const selected = taskAssigneeIdentity(person) === taskAssigneeIdentity(jiraAssigneeFilter);
+    const button = appendTaskAssigneeOption(list, person, source, selected);
+    button.classList.add("jira-assignee-filter-option");
+    return button;
+  }
+
+  function renderJiraAssigneeFilterOptions(query = "", remoteUsers = jiraAssigneeFilterRemoteUsers, statusMessage = "", scope = "items") {
+    const ui = jiraAssigneeFilterUi(scope);
+    const list = ui.options;
+    const localMatches = localTaskAssigneeMatches(query);
+    const localIdentities = new Set(localMatches.map(taskAssigneeIdentity));
+    const uniqueRemote = remoteUsers.filter((person, index, rows) => {
+      const identity = taskAssigneeIdentity(person);
+      return identity && !localIdentities.has(identity) && rows.findIndex((item) => taskAssigneeIdentity(item) === identity) === index;
+    });
+    list.replaceChildren();
+
+    const all = document.createElement("button");
+    all.type = "button";
+    all.className = "jira-picker-option task-assignee-unassigned jira-assignee-filter-all";
+    all.dataset.source = "all";
+    all.setAttribute("role", "option");
+    all.setAttribute("aria-selected", String(!jiraAssigneeFilter));
+    all.textContent = "Tüm kullanıcılar";
+    list.append(all);
+
+    localMatches.forEach((person) => appendJiraAssigneeFilterOption(list, person, "local"));
+    uniqueRemote.forEach((person) => appendJiraAssigneeFilterOption(list, person, "jira"));
+    if (!localMatches.length && !uniqueRemote.length && query.length >= 2) {
+      const empty = document.createElement("div");
+      empty.className = "jira-picker-empty";
+      empty.textContent = "Eşleşen aktif JIRA kullanıcısı bulunamadı.";
+      list.append(empty);
+    }
+    ui.searchStatus.textContent = statusMessage || (query.length < 2
+      ? `${localMatches.length} kayıtlı kişi · JIRA araması için en az 2 karakter yazın.`
+      : `${localMatches.length + uniqueRemote.length} eşleşme`);
+  }
+
+  async function searchJiraAssigneeFilters(query, scope = "items") {
+    const ui = jiraAssigneeFilterUi(scope);
+    const search = String(query || "").trim();
+    const requestId = ++jiraAssigneeFilterSearchRequest;
+    if (search.length < 2) {
+      jiraAssigneeFilterRemoteUsers = [];
+      renderJiraAssigneeFilterOptions(search, [], "", scope);
+      return;
+    }
+    renderJiraAssigneeFilterOptions(search, [], "JIRA’da aranıyor…", scope);
+    try {
+      const response = await window.JiraCloudClient.searchUsers(search, 20);
+      if (requestId !== jiraAssigneeFilterSearchRequest || ui.search.value.trim() !== search) return;
+      jiraAssigneeFilterRemoteUsers = Array.isArray(response.items) ? response.items : [];
+      renderJiraAssigneeFilterOptions(search, jiraAssigneeFilterRemoteUsers, `${jiraAssigneeFilterRemoteUsers.length} JIRA eşleşmesi bulundu.`, scope);
+    } catch (error) {
+      if (requestId !== jiraAssigneeFilterSearchRequest) return;
+      jiraAssigneeFilterRemoteUsers = [];
+      renderJiraAssigneeFilterOptions(search, [], `JIRA araması yapılamadı: ${error.message}`, scope);
+      ui.searchStatus.classList.add("is-error");
+    }
+  }
+
+  function scheduleJiraAssigneeFilterSearch(scope = "items") {
+    const ui = jiraAssigneeFilterUi(scope);
+    clearTimeout(jiraAssigneeFilterSearchTimer);
+    ui.searchStatus.classList.remove("is-error");
+    const query = ui.search.value.trim();
+    jiraAssigneeFilterRemoteUsers = [];
+    renderJiraAssigneeFilterOptions(query, [], query.length >= 2 ? "JIRA’da aranacak…" : "", scope);
+    jiraAssigneeFilterSearchTimer = window.setTimeout(() => searchJiraAssigneeFilters(query, scope), 300);
+  }
+
+  function setJiraAssigneeFilterOpen(scope = "items", open = false) {
+    const ui = jiraAssigneeFilterUi(scope);
+    const wasOpen = ui.button.getAttribute("aria-expanded") === "true";
+    ui.button.setAttribute("aria-expanded", String(open));
+    ui.dropdown.classList.toggle("hidden", !open);
+    if (open) {
+      const otherScope = scope === "requests" ? "items" : "requests";
+      const otherUi = jiraAssigneeFilterUi(otherScope);
+      otherUi.button.setAttribute("aria-expanded", "false");
+      otherUi.dropdown.classList.add("hidden");
+      renderJiraAssigneeFilterOptions(ui.search.value.trim(), jiraAssigneeFilterRemoteUsers, "", scope);
+      requestAnimationFrame(() => ui.search.focus());
+      return;
+    }
+    if (!wasOpen) return;
+    clearTimeout(jiraAssigneeFilterSearchTimer);
+    jiraAssigneeFilterSearchRequest += 1;
+    jiraAssigneeFilterRemoteUsers = [];
+    ui.search.value = "";
+    ui.searchStatus.classList.remove("is-error");
+  }
+
+  function jiraAssigneeFilterJql(accountId) {
+    const escaped = String(accountId || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+    return `assignee = "${escaped}" ORDER BY updated DESC`;
+  }
+
+  async function refreshSelectedJiraAssigneeIssues() {
+    const selected = jiraAssigneeFilter;
+    const requestId = ++jiraAssigneeFilterSyncRequest;
+    if (!selected) {
+      setJiraAssigneeFilterStatus("Tüm kayıtlı JIRA maddeleri ve talepler gösteriliyor.");
+      renderJiraItems();
+      return null;
+    }
+    if (!selected.jiraAccountId) {
+      setJiraAssigneeFilterStatus(`${selected.fullName} için JIRA Account ID bulunmadığından kayıtlı maddeler filtreleniyor.`);
+      renderJiraItems();
+      return null;
+    }
+    setJiraAssigneeFilterStatus(`${selected.fullName} kullanıcısına atanan maddeler JIRA’dan alınıyor…`, "busy");
+    const result = await syncJiraCloudIssues({ jql: jiraAssigneeFilterJql(selected.jiraAccountId) });
+    if (requestId !== jiraAssigneeFilterSyncRequest || taskAssigneeIdentity(selected) !== taskAssigneeIdentity(jiraAssigneeFilter)) return result;
+    if (!result) {
+      setJiraAssigneeFilterStatus(`${selected.fullName} kullanıcısının maddeleri JIRA’dan alınamadı; kayıtlı sonuçlar gösteriliyor.`, "error");
+      return null;
+    }
+    setJiraAssigneeFilterStatus(`${selected.fullName} seçili · ${result.imported} JIRA maddesi canlı entegrasyondan güncellendi.`, "success");
+    return result;
+  }
+
+  async function selectJiraAssigneeFilterOption(option, scope = "items") {
+    const ui = jiraAssigneeFilterUi(scope);
+    if (option.dataset.source === "all") {
+      jiraAssigneeFilter = null;
+    } else if (option.dataset.source === "local") {
+      jiraAssigneeFilter = window.PeopleStore.get(option.dataset.personId || "");
+    } else if (option.dataset.source === "jira") {
+      const remote = jiraAssigneeFilterRemoteUsers.find((person) => person.jiraAccountId === option.dataset.jiraAccountId);
+      if (!remote) return;
+      const result = window.PeopleStore.mergeJiraUsers([remote]);
+      if (!result.valid) {
+        ui.searchStatus.textContent = Object.values(result.errors || {}).join(" ") || "JIRA kullanıcısı kaydedilemedi.";
+        ui.searchStatus.classList.add("is-error");
+        return;
+      }
+      jiraAssigneeFilter = window.PeopleStore.list().find((person) => person.jiraAccountId === remote.jiraAccountId) || remote;
+      renderPeople();
+    }
+    updateJiraAssigneeFilterLabel();
+    setJiraAssigneeFilterOpen(scope, false);
+    renderJiraItems();
+    ui.button.focus();
+    await refreshSelectedJiraAssigneeIssues();
   }
 
   function tasksForPerson(person, previousName = "") {
@@ -2863,7 +3112,7 @@
   }
 
   function filteredJiraItems() {
-    const rows = window.JiraStore.list();
+    const rows = window.JiraStore.list().filter(jiraItemMatchesAssigneeFilter);
     const searchTerm = $("#jiraSearchInput").value.trim().toLocaleLowerCase("tr-TR");
     return searchTerm
       ? rows.filter((item) => [item.issueType, item.name, item.description, item.assignee, item.reporter, item.priority, item.status, item.resolution, item.dueDate]
@@ -2915,13 +3164,27 @@
   function renderJiraItems() {
     jiraItems = window.JiraStore.list();
     $("#jiraTabCount").textContent = String(jiraItems.length);
-    $("#jiraItemsSubtabCount").textContent = String(jiraItems.length);
-    $("#jiraRequestsSubtabCount").textContent = String(jiraItems.length);
+    const assigneeItems = jiraItems.filter(jiraItemMatchesAssigneeFilter);
+    $("#jiraItemsSubtabCount").textContent = String(assigneeItems.length);
+    $("#jiraRequestsSubtabCount").textContent = String(assigneeItems.length);
     const searchTerm = $("#jiraSearchInput").value.trim().toLocaleLowerCase("tr-TR");
     const visibleItems = filteredJiraItems();
-    $("#jiraCountBadge").textContent = searchTerm ? `${visibleItems.length} / ${jiraItems.length} madde` : `${jiraItems.length} madde`;
-    $("#jiraEmptyState").classList.toggle("hidden", jiraItems.length > 0);
-    $("#jiraList").classList.toggle("hidden", jiraItems.length === 0);
+    const hasAssigneeFilter = Boolean(jiraAssigneeFilter);
+    $("#jiraCountBadge").textContent = searchTerm || hasAssigneeFilter ? `${visibleItems.length} / ${jiraItems.length} madde` : `${jiraItems.length} madde`;
+    $("#jiraEmptyState").classList.toggle("hidden", visibleItems.length > 0);
+    $("#jiraList").classList.toggle("hidden", visibleItems.length === 0);
+    const emptyTitle = $("#jiraEmptyState h3");
+    const emptyCopy = $("#jiraEmptyState p");
+    if (!jiraItems.length) {
+      emptyTitle.textContent = "Henüz JIRA maddesi yok";
+      emptyCopy.textContent = "Eforları bağlamak için ilk JIRA maddesini ekleyin.";
+    } else if (hasAssigneeFilter) {
+      emptyTitle.textContent = `${jiraAssigneeFilter.fullName} için madde bulunamadı`;
+      emptyCopy.textContent = searchTerm ? "Atanan kullanıcı ve arama ölçütleriyle eşleşen kayıt yok." : "Bu kullanıcıya atanmış kayıtlı veya canlı JIRA maddesi bulunamadı.";
+    } else {
+      emptyTitle.textContent = "Aramayla eşleşen madde yok";
+      emptyCopy.textContent = "Farklı bir Key, summary, kişi veya statü arayın.";
+    }
 
     const selectedJiraId = fields.jiraId.value;
     filterEffortJiraOptions(selectedJiraId);
@@ -3082,7 +3345,8 @@
 
   function renderJiraRequests() {
     const allItems = window.JiraStore.list();
-    const currentGroups = groupJiraRequestsByStatus(allItems);
+    const assigneeItems = allItems.filter(jiraItemMatchesAssigneeFilter);
+    const currentGroups = groupJiraRequestsByStatus(assigneeItems);
     currentGroups.forEach((group) => knownJiraRequestStatusLabels.set(group.key, group.status));
     const currentKeys = new Set(currentGroups.map((group) => group.key));
     const allGroups = [
@@ -3094,19 +3358,19 @@
     renderJiraRequestStatusFilters(allGroups);
     const searchTerm = normalizeJiraSearch($("#jiraRequestsSearch").value);
     const searchedItems = searchTerm
-      ? allItems.filter((item) => [item.name, item.description, item.assignee, item.reporter, item.priority, item.status, item.issueType]
+      ? assigneeItems.filter((item) => [item.name, item.description, item.assignee, item.reporter, item.priority, item.status, item.issueType]
         .some((value) => normalizeJiraSearch(value).includes(searchTerm)))
-      : allItems;
+      : assigneeItems;
     const visibleItems = searchedItems.filter((item) => selectedJiraRequestStatuses.has(jiraRequestStatusKey(item.status)));
     const hasFilter = selectedJiraRequestStatuses.size !== allGroups.length;
-    $("#jiraRequestTotal").textContent = searchTerm || hasFilter ? `${visibleItems.length} / ${allItems.length} talep` : `${allItems.length} talep`;
-    const showBoard = allItems.length > 0 && selectedJiraRequestStatuses.size > 0;
+    $("#jiraRequestTotal").textContent = searchTerm || hasFilter ? `${visibleItems.length} / ${assigneeItems.length} talep` : `${assigneeItems.length} talep`;
+    const showBoard = assigneeItems.length > 0 && selectedJiraRequestStatuses.size > 0;
     $("#jiraRequestsEmpty").classList.toggle("hidden", showBoard);
     const emptyTitle = $("#jiraRequestsEmpty h3");
     const emptyCopy = $("#jiraRequestsEmpty p");
     emptyTitle.textContent = selectedJiraRequestStatuses.size ? "Gösterilecek talep yok" : "En az bir statü seçin";
     emptyCopy.textContent = selectedJiraRequestStatuses.size
-      ? "Arama ve statü seçiminize uyan JIRA maddesi bulunamadı."
+      ? `${jiraAssigneeFilter ? `${jiraAssigneeFilter.fullName} için ` : ""}arama ve statü seçiminize uyan JIRA maddesi bulunamadı.`
       : "Kanban sütunlarını göstermek için yukarıdan bir veya daha fazla statü seçin.";
     const board = $("#jiraRequestBoard");
     board.classList.toggle("hidden", !showBoard);
@@ -3842,20 +4106,49 @@
   }
 
   function setSupabaseStatus(message, state = "neutral") {
-    const status = $("#supabaseStatus");
-    status.textContent = message;
-    status.classList.toggle("is-error", state === "error");
-    status.classList.toggle("is-success", state === "success");
-    status.classList.toggle("is-busy", state === "busy");
+    ["#supabaseStatus", "#loginScreenStatus"].forEach((selector) => {
+      const status = $(selector);
+      if (!status) return;
+      status.textContent = message;
+      status.classList.toggle("is-error", state === "error");
+      status.classList.toggle("is-success", state === "success");
+      status.classList.toggle("is-busy", state === "busy");
+    });
     $("#supabaseConnectionBadge").dataset.state = state === "error" ? "error" : (supabaseSession ? "signed-in" : "signed-out");
     $("#supabaseHeaderMenu").classList.toggle("is-error", state === "error");
   }
 
   function setSupabaseBusy(busy) {
     supabaseBusy = Boolean(busy);
-    ["#supabaseEmail", "#supabasePassword", "#supabaseSignIn", "#supabaseSignUp", "#supabaseForgotPassword", "#supabaseNewPassword", "#supabasePull", "#supabaseSignOut"]
+    ["#supabaseEmail", "#supabasePassword", "#supabaseSignIn", "#supabaseSignUp", "#supabaseForgotPassword", "#supabaseNewPassword", "#supabasePull", "#supabaseSignOut", "#loginScreenEmail", "#loginScreenPassword", "#loginScreenSignIn", "#loginScreenSignUp", "#loginScreenForgotPassword"]
       .forEach((selector) => { const element = $(selector); if (element) element.disabled = supabaseBusy; });
     $("#supabaseHeaderMenu").classList.toggle("is-busy", supabaseBusy);
+    $("#loginScreen")?.classList.toggle("is-busy", supabaseBusy);
+  }
+
+  function setLoginScreenVisible(visible) {
+    const loginScreen = $("#loginScreen");
+    if (!loginScreen) return;
+    loginScreen.classList.toggle("hidden", !visible);
+    loginScreen.setAttribute("aria-hidden", String(!visible));
+    document.body.classList.toggle("auth-required", visible);
+    const pageHeader = document.querySelector(".page-header");
+    const pageMain = document.querySelector("main");
+    if (pageHeader) pageHeader.inert = visible;
+    if (pageMain) pageMain.inert = visible;
+  }
+
+  function syncSupabaseAuthInputs(email, password = "") {
+    const normalizedEmail = String(email || "").trim();
+    ["#supabaseEmail", "#loginScreenEmail"].forEach((selector) => {
+      const input = $(selector);
+      if (input) input.value = normalizedEmail;
+    });
+    if (!password) return;
+    ["#supabasePassword", "#loginScreenPassword"].forEach((selector) => {
+      const input = $(selector);
+      if (input) input.value = password;
+    });
   }
 
   function updateSupabaseLastSync(value) {
@@ -3941,6 +4234,7 @@
   async function refreshSupabaseAccount(session = supabaseSession) {
     supabaseSession = session || null;
     const signedIn = Boolean(supabaseSession?.user);
+    setLoginScreenVisible(!signedIn);
     $("#supabaseAuthForm").classList.toggle("hidden", signedIn);
     $("#supabaseSignedInPanel").classList.toggle("hidden", !signedIn);
     $("#supabaseHeaderMenu").classList.toggle("is-connected", signedIn);
@@ -3960,6 +4254,7 @@
       $("#supabaseOrganizationName").textContent = "-";
       setCloudDataGate("signed_out");
       setSupabaseStatus("Uygulama verilerini açmak için Supabase hesabınıza giriş yapın.");
+      window.setTimeout(() => $("#loginScreenEmail")?.focus(), 0);
       return;
     }
 
@@ -4361,10 +4656,9 @@
       setCalendarStatus(`${calendarProviderLabel(provider)} bağlantısı kesilemedi: ${error.message}`, "error");
     }
   });
-  $("#outlookCalendarRange").addEventListener("change", () => {
-    updateCalendarPeriod();
-    if (isCalendarConnected()) refreshCalendar();
-  });
+  $("#calendarPreviousMonth").addEventListener("click", () => changeCalendarMonth(-1));
+  $("#calendarToday").addEventListener("click", () => changeCalendarMonth(0, true));
+  $("#calendarNextMonth").addEventListener("click", () => changeCalendarMonth(1));
   $("#refreshWeather").addEventListener("click", loadWeather);
   $("#weatherLocationForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -4470,7 +4764,7 @@
   $("#removeJiraCredentials").addEventListener("click", removeJiraCredentials);
   $("#testJiraConnection").addEventListener("click", testJiraCloudConnection);
   $("#syncJiraIssues").addEventListener("click", () => syncJiraCloudIssues());
-  $("#refreshJiraNavigator").addEventListener("click", refreshJiraNavigatorFromWorklogs);
+  $("#refreshJiraNavigator").addEventListener("click", () => jiraAssigneeFilter ? refreshSelectedJiraAssigneeIssues() : refreshJiraNavigatorFromWorklogs());
   $("#selectAllJiraItems").addEventListener("click", () => {
     filteredJiraItems().forEach((item) => selectedJiraItemIds.add(item.id));
     renderJiraItems();
@@ -4537,7 +4831,60 @@
     if (!$("#jiraItemPicker").contains(event.target)) setEffortJiraPickerOpen(false);
     if (!$("#modalJiraPicker").contains(event.target)) setModalJiraPickerOpen(false);
     if (!$("#taskAssigneePicker").contains(event.target)) setTaskAssigneePickerOpen(false);
+    ["items", "requests"].forEach((scope) => {
+      const ui = jiraAssigneeFilterUi(scope);
+      if (!ui.picker.contains(event.target)) setJiraAssigneeFilterOpen(scope, false);
+    });
   });
+  function bindJiraAssigneeFilterPicker(scope) {
+    const ui = jiraAssigneeFilterUi(scope);
+    ui.button.addEventListener("click", () => setJiraAssigneeFilterOpen(scope, ui.button.getAttribute("aria-expanded") !== "true"));
+    ui.search.addEventListener("input", () => scheduleJiraAssigneeFilterSearch(scope));
+    ui.search.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setJiraAssigneeFilterOpen(scope, false);
+        ui.button.focus();
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        ui.options.querySelector(".jira-picker-option")?.focus();
+      }
+    });
+    ui.options.addEventListener("click", async (event) => {
+      const option = event.target.closest(".jira-assignee-filter-option, .jira-assignee-filter-all");
+      if (option) await selectJiraAssigneeFilterOption(option, scope);
+    });
+    ui.options.addEventListener("keydown", async (event) => {
+      const options = [...ui.options.querySelectorAll(".jira-picker-option")];
+      const currentIndex = options.indexOf(event.target.closest(".jira-picker-option"));
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setJiraAssigneeFilterOpen(scope, false);
+        ui.button.focus();
+      } else if (event.key === "Enter" || event.key === " ") {
+        const option = event.target.closest(".jira-assignee-filter-option, .jira-assignee-filter-all");
+        if (!option) return;
+        event.preventDefault();
+        await selectJiraAssigneeFilterOption(option, scope);
+      } else if (event.key === "ArrowDown" && currentIndex >= 0) {
+        event.preventDefault();
+        options[Math.min(currentIndex + 1, options.length - 1)]?.focus();
+      } else if (event.key === "ArrowUp" && currentIndex >= 0) {
+        event.preventDefault();
+        if (currentIndex === 0) ui.search.focus();
+        else options[currentIndex - 1]?.focus();
+      }
+    });
+    ui.clear.addEventListener("click", () => {
+      jiraAssigneeFilter = null;
+      jiraAssigneeFilterSyncRequest += 1;
+      updateJiraAssigneeFilterLabel();
+      setJiraAssigneeFilterStatus("Tüm kullanıcılar gösteriliyor.");
+      renderJiraItems();
+    });
+  }
+  bindJiraAssigneeFilterPicker("items");
+  bindJiraAssigneeFilterPicker("requests");
   $("#modalJiraPickerButton").addEventListener("click", () => {
     const isOpen = $("#modalJiraPickerButton").getAttribute("aria-expanded") === "true";
     setModalJiraPickerOpen(!isOpen);
@@ -4842,10 +5189,50 @@
       : "Yedeklemeyi kullanmak için Google OAuth Client ID kaydedin.");
   });
 
+  $("#loginScreenForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    runSupabaseAction(async () => {
+      const email = $("#loginScreenEmail").value;
+      const password = $("#loginScreenPassword").value;
+      syncSupabaseAuthInputs(email, password);
+      setSupabaseStatus("Supabase hesabınıza giriş yapılıyor…", "busy");
+      const result = await window.SupabaseCloud.signIn(email, password);
+      await refreshSupabaseAccount(result.session);
+      setSupabaseStatus("Supabase hesabınıza giriş yapıldı.", "success");
+    });
+  });
+
+  $("#loginScreenSignUp").addEventListener("click", () => runSupabaseAction(async () => {
+    if (!$("#loginScreenForm").reportValidity()) return;
+    const email = $("#loginScreenEmail").value;
+    const password = $("#loginScreenPassword").value;
+    syncSupabaseAuthInputs(email, password);
+    setSupabaseStatus("Supabase hesabınız oluşturuluyor…", "busy");
+    const result = await window.SupabaseCloud.signUp(email, password);
+    if (result.session) {
+      await refreshSupabaseAccount(result.session);
+      setSupabaseStatus("Hesabınız oluşturuldu ve Supabase’e bağlandı.", "success");
+    } else {
+      $("#headerSupabaseMenuBadge").classList.remove("hidden");
+      setSupabaseStatus("Doğrulama e-postası gönderildi. E-postadaki bağlantıya tıklayıp bu sayfaya dönün.", "success");
+    }
+  }));
+
+  $("#loginScreenForgotPassword").addEventListener("click", () => runSupabaseAction(async () => {
+    const emailInput = $("#loginScreenEmail");
+    if (!emailInput.reportValidity()) return;
+    syncSupabaseAuthInputs(emailInput.value);
+    await window.SupabaseCloud.sendPasswordReset(emailInput.value);
+    setSupabaseStatus("Şifre yenileme bağlantısı e-posta adresinize gönderildi.", "success");
+  }));
+
   $("#supabaseAuthForm").addEventListener("submit", (event) => {
     event.preventDefault();
     runSupabaseAction(async () => {
-      const result = await window.SupabaseCloud.signIn($("#supabaseEmail").value, $("#supabasePassword").value);
+      const email = $("#supabaseEmail").value;
+      const password = $("#supabasePassword").value;
+      syncSupabaseAuthInputs(email, password);
+      const result = await window.SupabaseCloud.signIn(email, password);
       await refreshSupabaseAccount(result.session);
       setSupabaseStatus("Supabase hesabınıza giriş yapıldı.", "success");
     });
@@ -4853,7 +5240,10 @@
 
   $("#supabaseSignUp").addEventListener("click", () => runSupabaseAction(async () => {
     if (!$("#supabaseAuthForm").reportValidity()) return;
-    const result = await window.SupabaseCloud.signUp($("#supabaseEmail").value, $("#supabasePassword").value);
+    const email = $("#supabaseEmail").value;
+    const password = $("#supabasePassword").value;
+    syncSupabaseAuthInputs(email, password);
+    const result = await window.SupabaseCloud.signUp(email, password);
     if (result.session) {
       await refreshSupabaseAccount(result.session);
       setSupabaseStatus("Hesabınız oluşturuldu ve Supabase’e bağlandı.", "success");
@@ -4866,6 +5256,7 @@
   $("#supabaseForgotPassword").addEventListener("click", () => runSupabaseAction(async () => {
     const emailInput = $("#supabaseEmail");
     if (!emailInput.reportValidity()) return;
+    syncSupabaseAuthInputs(emailInput.value);
     await window.SupabaseCloud.sendPasswordReset(emailInput.value);
     setSupabaseStatus("Şifre yenileme bağlantısı e-posta adresinize gönderildi.", "success");
   }));
@@ -4934,8 +5325,12 @@
     });
     window.SupabaseCloud.getSession()
       .then((session) => refreshSupabaseAccount(session).then(() => refreshJiraCredentialStatus()))
-      .catch((error) => setSupabaseStatus(`Supabase oturumu alınamadı: ${error.message}`, "error"));
+      .catch((error) => {
+        setLoginScreenVisible(true);
+        setSupabaseStatus(`Supabase oturumu alınamadı: ${error.message}`, "error");
+      });
   } catch (error) {
+    setLoginScreenVisible(true);
     setCloudDataGate("error", error.message);
     setSupabaseStatus(`Supabase başlatılamadı: ${error.message}`, "error");
   }

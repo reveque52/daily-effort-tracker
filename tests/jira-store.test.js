@@ -25,10 +25,11 @@ const store = loadStore();
 assert.equal(store.validate({}).valid, false);
 assert.equal(store.validate({ name: "PROJ-1", description: "İş", url: "not-a-url" }).valid, false);
 
-const created = store.create({ name: "PROJ-1", description: "İlk madde", url: "https://jira.example.com/browse/PROJ-1", issueType: "Task", assignee: "Selçuk", status: "Open" });
+const created = store.create({ name: "PROJ-1", description: "İlk madde", url: "https://jira.example.com/browse/PROJ-1", issueType: "Task", assignee: "Selçuk", assigneeAccountId: "jira-account-selcuk", status: "Open" });
 assert.equal(created.valid, true);
 assert.equal(store.get("jira-test-id-1").name, "PROJ-1");
 assert.equal(store.get("jira-test-id-1").assignee, "Selçuk");
+assert.equal(store.get("jira-test-id-1").assigneeAccountId, "jira-account-selcuk");
 assert.equal(store.create({ name: "proj-1", description: "Mükerrer", url: "https://jira.example.com/browse/PROJ-1" }).valid, false, "Manuel kayıtta aynı JIRA Key tekrar oluşturulmamalı");
 
 const updated = store.update("jira-test-id-1", { name: "PROJ-1", description: "Güncel", url: "https://jira.example.com/browse/PROJ-1" });
