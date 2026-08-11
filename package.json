@@ -5,7 +5,7 @@
   "description": "JIRA, görev, efor, hatırlatma ve yapay zeka asistanı içeren kişisel çalışma günlüğü.",
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "test": "node tests/cloud-data-runtime.test.js && node tests/data-store.test.js && node tests/tasks-store.test.js && node tests/people-store.test.js && node tests/jira-store.test.js && node tests/reminders-store.test.js && node tests/ai-assistant.test.js && node tests/jira-cloud.test.js && node tests/frontend-contract.test.js"
+    "test": "node tests/cloud-data-runtime.test.js && node tests/data-store.test.js && node tests/tasks-store.test.js && node tests/people-store.test.js && node tests/jira-store.test.js && node tests/reminders-store.test.js && node tests/ai-assistant.test.js && node tests/jira-cloud.test.js && node tests/weather-client.test.js && node tests/frontend-contract.test.js"
   },
   "engines": {
     "node": ">=20"

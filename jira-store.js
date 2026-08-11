@@ -83,6 +83,16 @@
     return true;
   }
 
+  function removeMany(ids) {
+    if (!Array.isArray(ids)) return { valid: false, errors: { ids: "Silinecek JIRA maddeleri geçersiz." } };
+    const selected = new Set(ids.map((id) => String(id || "").trim()).filter(Boolean));
+    if (!selected.size) return { valid: true, errors: {}, value: { removed: 0, total: readAll().length } };
+    const rows = readAll();
+    const next = rows.filter((item) => !selected.has(item.id));
+    writeAll(next);
+    return { valid: true, errors: {}, value: { removed: rows.length - next.length, total: next.length } };
+  }
+
   function replaceAll(importedItems) {
     if (!Array.isArray(importedItems)) return { valid: false, errors: { jiraItems: "JIRA yedeği geçersiz." } };
     const normalized = [];
@@ -154,5 +164,5 @@
     };
   }
 
-  global.JiraStore = Object.freeze({ STORAGE_KEY, validate, list, get, create, update, remove, replaceAll, mergeAll });
+  global.JiraStore = Object.freeze({ STORAGE_KEY, validate, list, get, create, update, remove, removeMany, replaceAll, mergeAll });
 })(window);

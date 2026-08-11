@@ -510,26 +510,67 @@ function createAssistantServer(options = {}) {
       if (request.method !== "GET") return jsonResponse(response, 405, { error: "Yalnızca GET desteklenir." }, corsHeaders);
       if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
       try {
-        const requestedMax = Number(requestUrl.searchParams.get("maxResults") || 1000);
-        const limit = Math.min(Math.max(Number.isFinite(requestedMax) ? Math.trunc(requestedMax) : 1000, 1), 1000);
+        const query = String(requestUrl.searchParams.get("query") || "").trim().slice(0, 100);
+        if (query && query.length < 2) return jsonResponse(response, 400, { error: "JIRA kullanıcı araması için en az 2 karakter girin." }, corsHeaders);
+        const defaultLimit = query ? 20 : 1000;
+        const maxLimit = query ? 50 : 1000;
+        const requestedMax = Number(requestUrl.searchParams.get("maxResults") || defaultLimit);
+        const limit = Math.min(Math.max(Number.isFinite(requestedMax) ? Math.trunc(requestedMax) : defaultLimit, 1), maxLimit);
         const pageSize = Math.min(limit, 100);
         const users = [];
-        let startAt = 0;
-        while (users.length < limit) {
-          const params = new URLSearchParams({ startAt: String(startAt), maxResults: String(Math.min(pageSize, limit - users.length)) });
-          const payload = await requestJiraFetch(`/rest/api/3/users/search?${params.toString()}`);
-          const page = Array.isArray(payload) ? payload : [];
-          users.push(...page);
-          if (page.length < pageSize) break;
-          startAt += page.length;
+        if (query) {
+          const params = new URLSearchParams({ query, startAt: "0", maxResults: String(limit) });
+          const payload = await requestJiraFetch(`/rest/api/3/user/search?${params.toString()}`);
+          users.push(...(Array.isArray(payload) ? payload : []));
+        } else {
+          let startAt = 0;
+          while (users.length < limit) {
+            const params = new URLSearchParams({ startAt: String(startAt), maxResults: String(Math.min(pageSize, limit - users.length)) });
+            const payload = await requestJiraFetch(`/rest/api/3/users/search?${params.toString()}`);
+            const page = Array.isArray(payload) ? payload : [];
+            users.push(...page);
+            if (page.length < pageSize) break;
+            startAt += page.length;
+          }
         }
         const items = users
           .map(mapJiraUser)
           .filter((user) => user.jiraAccountId && user.fullName && user.active && (!user.accountType || user.accountType === "atlassian"))
           .sort((a, b) => a.fullName.localeCompare(b.fullName, "tr", { sensitivity: "base" }));
-        return jsonResponse(response, 200, { items, total: items.length, site: activeJiraBaseUrl }, corsHeaders);
+        return jsonResponse(response, 200, { items, total: items.length, query, site: activeJiraBaseUrl }, corsHeaders);
       } catch (error) {
         return jsonResponse(response, error.status || 500, { error: error.message || "JIRA kullanıcıları alınamadı." }, corsHeaders);
+      }
+    }
+
+    if (requestUrl.pathname === "/api/jira/issue-picker") {
+      if (request.method !== "GET") return jsonResponse(response, 405, { error: "Yalnızca GET desteklenir." }, corsHeaders);
+      if (!originAllowed) return jsonResponse(response, 403, { error: "Bu kaynağa erişim izni yok." });
+      try {
+        const query = String(requestUrl.searchParams.get("query") || "").trim().slice(0, 100);
+        if (query.length < 2) return jsonResponse(response, 400, { error: "JIRA madde araması için en az 2 karakter girin." }, corsHeaders);
+        const params = new URLSearchParams({ query, currentJQL: "created is not EMPTY ORDER BY updated DESC", showSubTasks: "true", showSubTaskParent: "true" });
+        const payload = await requestJiraFetch(`/rest/api/3/issue/picker?${params.toString()}`);
+        const suggestions = [];
+        const seenKeys = new Set();
+        for (const section of Array.isArray(payload.sections) ? payload.sections : []) {
+          for (const issue of Array.isArray(section.issues) ? section.issues : []) {
+            const key = String(issue?.key || "").trim().toUpperCase();
+            if (!key || seenKeys.has(key)) continue;
+            seenKeys.add(key);
+            suggestions.push({
+              jiraIssueId: String(issue?.id || ""),
+              name: key,
+              description: String(issue?.summaryText || issue?.summary || "").replace(/<[^>]*>/g, "").trim(),
+              url: `${activeJiraBaseUrl}/browse/${encodeURIComponent(key)}`
+            });
+            if (suggestions.length >= 20) break;
+          }
+          if (suggestions.length >= 20) break;
+        }
+        return jsonResponse(response, 200, { items: suggestions, total: suggestions.length, query, site: activeJiraBaseUrl }, corsHeaders);
+      } catch (error) {
+        return jsonResponse(response, error.status || 500, { error: error.message || "JIRA madde önerileri alınamadı." }, corsHeaders);
       }
     }
 
@@ -588,16 +629,24 @@ function createAssistantServer(options = {}) {
         const jql = String(requestUrl.searchParams.get("jql") || "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC").trim();
         if (!jql || jql.length > 1000) return jsonResponse(response, 400, { error: "JQL sorgusu 1–1000 karakter arasında olmalıdır." }, corsHeaders);
         const requestedMax = Number(requestUrl.searchParams.get("maxResults") || 100);
-        const maxResults = Math.min(Math.max(Number.isFinite(requestedMax) ? requestedMax : 100, 1), 100);
-        const payload = await requestJiraFetch("/rest/api/3/search/jql", {
-          method: "POST",
-          body: JSON.stringify({
-            jql,
-            maxResults,
-            fields: ["summary", "issuetype", "assignee", "reporter", "priority", "status", "resolution", "created", "updated", "duedate"]
-          })
-        });
-        return jsonResponse(response, 200, { items: (payload.issues || []).map((issue) => mapJiraIssue(issue, activeJiraBaseUrl)), nextPageToken: payload.nextPageToken || "" }, corsHeaders);
+        const limit = Math.min(Math.max(Number.isFinite(requestedMax) ? Math.trunc(requestedMax) : 100, 1), 1000);
+        const issues = [];
+        let nextPageToken = "";
+        for (let page = 0; page < 10 && issues.length < limit; page += 1) {
+          const payload = await requestJiraFetch("/rest/api/3/search/jql", {
+            method: "POST",
+            body: JSON.stringify({
+              jql,
+              maxResults: Math.min(100, limit - issues.length),
+              fields: ["summary", "issuetype", "assignee", "reporter", "priority", "status", "resolution", "created", "updated", "duedate"],
+              ...(nextPageToken ? { nextPageToken } : {})
+            })
+          });
+          issues.push(...(Array.isArray(payload.issues) ? payload.issues : []));
+          nextPageToken = String(payload.nextPageToken || "");
+          if (!nextPageToken) break;
+        }
+        return jsonResponse(response, 200, { items: issues.map((issue) => mapJiraIssue(issue, activeJiraBaseUrl)), nextPageToken, truncated: Boolean(nextPageToken) }, corsHeaders);
       } catch (error) {
         return jsonResponse(response, error.status || 500, { error: error.message || "JIRA maddeleri alınamadı." }, corsHeaders);
       }

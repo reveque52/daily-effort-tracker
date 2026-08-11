@@ -80,9 +80,22 @@
     return request(`/users?${params}`, { method: "GET" });
   }
 
+  function searchUsers(query, maxResults = 20) {
+    const search = String(query || "").trim();
+    if (search.length < 2) throw new Error("JIRA kullanıcı araması için en az 2 karakter girin.");
+    const params = new URLSearchParams({ query: search, maxResults: String(maxResults) });
+    return request(`/users?${params}`, { method: "GET" });
+  }
+
   function syncIssues(jql, maxResults = 100) {
     const params = new URLSearchParams({ jql: String(jql || "").trim(), maxResults: String(maxResults) });
     return request(`/issues?${params}`, { method: "GET" });
+  }
+
+  function searchIssues(query) {
+    const search = String(query || "").trim();
+    if (search.length < 2) throw new Error("JIRA madde araması için en az 2 karakter girin.");
+    return request(`/issue-picker?${new URLSearchParams({ query: search })}`, { method: "GET" });
   }
 
   function getIssue(issueKey) {
@@ -124,5 +137,5 @@
     });
   }
 
-  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, usesSupabase, health, getOAuthStatus, getOAuthStartUrl, signInWithJira, signOutFromJira, getCredentialStatus, saveCredentials, removeCredentials, syncUsers, syncIssues, getIssue, transitionIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
+  global.JiraCloudClient = Object.freeze({ getEndpoint, setEndpoint, usesSupabase, health, getOAuthStatus, getOAuthStartUrl, signInWithJira, signOutFromJira, getCredentialStatus, saveCredentials, removeCredentials, syncUsers, searchUsers, syncIssues, searchIssues, getIssue, transitionIssue, syncWorklogs, createWorklog, updateWorklog, deleteWorklog });
 })(window);

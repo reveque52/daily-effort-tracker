@@ -55,6 +55,16 @@ assert.equal(store.list().find((item) => item.name.toUpperCase() === "PROJ-3").d
 assert.equal(store.remove("restored"), true);
 
 store.replaceAll([
+  { id: "bulk-1", name: "BULK-1", description: "Toplu bir", url: "https://jira.example.com/browse/BULK-1" },
+  { id: "bulk-2", name: "BULK-2", description: "Toplu iki", url: "https://jira.example.com/browse/BULK-2" },
+  { id: "bulk-3", name: "BULK-3", description: "Korunacak", url: "https://jira.example.com/browse/BULK-3" }
+]);
+const removedMany = store.removeMany(["bulk-1", "bulk-2", "missing"]);
+assert.equal(removedMany.valid, true);
+assert.equal(removedMany.value.removed, 2);
+assert.deepEqual(Array.from(store.list(), (item) => item.id), ["bulk-3"]);
+
+store.replaceAll([
   { id: "canonical", name: "DUP-1", description: "İlk", url: "https://jira.example.com/browse/DUP-1" },
   { id: "duplicate", name: "dup-1", description: "Son", url: "https://jira.example.com/browse/DUP-1" }
 ]);
@@ -64,4 +74,4 @@ assert.equal(deduplicated.value.duplicateCount, 1);
 assert.equal(deduplicated.value.idRemap.duplicate, "canonical");
 assert.equal(store.list()[0].description, "Son");
 
-console.log("✓ JIRA doğrulama, Key tekilliği, koruyucu HTML birleştirme, CRUD ve yedek geri yükleme");
+console.log("✓ JIRA doğrulama, Key tekilliği, koruyucu HTML birleştirme, CRUD, toplu silme ve yedek geri yükleme");

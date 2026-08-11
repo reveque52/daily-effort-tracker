@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260811-3">
+    <link rel="stylesheet" href="styles.css?v=20260811-6">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
@@ -19,9 +19,10 @@
     <script src="vendor/msal-browser.min.js?v=5.18.0" defer></script>
     <script src="outlook-calendar.js?v=20260811-1" defer></script>
     <script src="google-calendar.js?v=20260810-1" defer></script>
+    <script src="weather-client.js?v=20260811-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
     <script src="supabase-cloud.js?v=20260811-3" defer></script>
-    <script src="app.js?v=20260811-5" defer></script>
+    <script src="app.js?v=20260811-7" defer></script>
   </head>
   <body>
     <header class="page-header">
@@ -30,9 +31,36 @@
         <h1>Günlük Efor Takibi</h1>
         <p>Eforlarını JIRA maddelerine bağla, güne ve issue’ya göre kolayca takip et.</p>
       </div>
-      <div class="today-chip" aria-label="Bugünün tarihi">
-        <span>Bugün</span>
-        <strong id="todayLabel"></strong>
+      <div class="header-weather-card" aria-label="Bugünün tarihi, konum ve hava durumu">
+        <div class="today-chip">
+          <span>Bugün</span>
+          <strong id="todayLabel"></strong>
+        </div>
+        <div class="weather-divider" aria-hidden="true"></div>
+        <div class="weather-summary">
+          <span id="weatherIcon" class="weather-icon" aria-hidden="true">🌡️</span>
+          <div class="weather-main">
+            <details id="weatherLocationMenu" class="weather-location-menu">
+              <summary><span aria-hidden="true">⌖</span><strong id="weatherLocationLabel">İstanbul</strong><span aria-hidden="true">⌄</span></summary>
+              <div class="weather-location-popover">
+                <strong>Hava durumu konumu</strong>
+                <small>Şehir arayın veya yalnızca düğmeye bastığınızda cihaz konumunu kullanın.</small>
+                <form id="weatherLocationForm" class="weather-location-form">
+                  <label class="sr-only" for="weatherLocationInput">Şehir veya ilçe</label>
+                  <input id="weatherLocationInput" type="search" minlength="2" maxlength="80" placeholder="Örn. Pendik, İstanbul" required>
+                  <button class="button primary" type="submit">Ara</button>
+                </form>
+                <button id="weatherUseDeviceLocation" class="button secondary weather-device-location" type="button">Konumumu kullan</button>
+                <p id="weatherLocationStatus" class="weather-location-status" role="status" aria-live="polite"></p>
+                <div id="weatherLocationResults" class="weather-location-results"></div>
+              </div>
+            </details>
+            <div class="weather-temperature-row"><strong id="weatherTemperature">--°</strong><span id="weatherCondition">Yükleniyor…</span></div>
+            <small id="weatherMeta">Hava durumu alınıyor…</small>
+          </div>
+          <button id="refreshWeather" class="weather-refresh" type="button" aria-label="Hava durumunu yenile" title="Hava durumunu yenile">↻</button>
+        </div>
+        <a class="weather-attribution" href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a>
       </div>
     </header>
 
@@ -282,8 +310,15 @@
         <div class="home-dashboard-grid">
           <section class="panel dashboard-panel weekly-chart-panel" aria-labelledby="weeklyEffortTitle">
             <div class="panel-heading dashboard-panel-heading">
-              <div><span class="eyebrow">Günlük dağılım</span><h2 id="weeklyEffortTitle">Haftalık efor</h2></div>
-              <button class="dashboard-link" type="button" data-home-target="timesheetView">Timesheet’i aç →</button>
+              <div><span id="weeklyEffortEyebrow" class="eyebrow">Günlük dağılım</span><h2 id="weeklyEffortTitle">Haftalık efor</h2></div>
+              <div class="dashboard-panel-actions">
+                <div class="chart-period-switch" role="group" aria-label="Efor grafiği dönemi">
+                  <button class="chart-period-button active" type="button" data-effort-chart-period="week" aria-pressed="true">Haftalık</button>
+                  <button class="chart-period-button" type="button" data-effort-chart-period="month" aria-pressed="false">Aylık</button>
+                  <button class="chart-period-button" type="button" data-effort-chart-period="year" aria-pressed="false">Yıllık</button>
+                </div>
+                <button class="dashboard-link" type="button" data-home-target="timesheetView">Timesheet’i aç →</button>
+              </div>
             </div>
             <div id="weeklyEffortChart" class="weekly-effort-chart" role="img" aria-label="Bu haftanın günlere göre efor grafiği"></div>
           </section>
@@ -343,15 +378,6 @@
             <span>Kayıt sayısı</span>
             <strong id="entryCount">0</strong>
             <small>Girilen çalışma</small>
-          </article>
-          <article class="summary-card calendar-dashboard-card">
-            <span>Yaklaşan görev</span>
-            <strong id="nextTaskTitle">Görev yok</strong>
-            <small id="nextTaskDate">Teslim tarihi bulunmuyor</small>
-            <div class="calendar-provider-actions">
-              <button id="addNextTaskToCalendar" class="calendar-action" type="button" disabled>Google Takvim’e ekle</button>
-              <button id="addNextTaskToOutlookCalendar" class="calendar-action outlook-calendar-action" type="button" disabled>Outlook Takvim’e ekle</button>
-            </div>
           </article>
         </section>
 
@@ -450,7 +476,22 @@
                 <label class="field field-wide"><span>Başlık / alt madde</span><input id="taskTitleInput" type="text" maxlength="300" placeholder="Yapılacak işi yazın" required></label>
                 <label class="field field-wide"><span>Ana görev</span><select id="taskParentTaskInput"><option value="">Ana görev yok — bağımsız görev</option></select><small>Bu kayıt bir alt görevse bağlı olduğu ana görevi seçin.</small></label>
                 <label class="field"><span>Görev tipi</span><select id="taskTypeInput" required><option value="architecture_roadmap" selected>Architecture Roadmap</option><option value="standard">Standart görev</option><option value="meeting_organization">Toplantı organizasyonu</option><option value="management_request">Yönetim talebi</option><option value="other">Diğer</option></select></label>
-                <label class="field"><span>Atanan kişi / kimde bekliyor</span><select id="taskAssigneeInput"><option value="">Atanmamış</option></select><small>Kişileri Ekip → Kişiler ekranından tanımlayabilirsiniz.</small></label>
+                <div class="field">
+                  <span>Atanan kişi / kimde bekliyor</span>
+                  <div id="taskAssigneePicker" class="task-assignee-picker">
+                    <button id="taskAssigneePickerButton" class="jira-picker-trigger task-assignee-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="taskAssigneePickerDropdown">
+                      <span id="taskAssigneePickerValue">Atanmamış</span>
+                      <span class="jira-picker-chevron" aria-hidden="true">⌄</span>
+                    </button>
+                    <div id="taskAssigneePickerDropdown" class="jira-picker-dropdown task-assignee-picker-dropdown hidden">
+                      <input id="taskAssigneeSearchInput" type="search" autocomplete="off" placeholder="JIRA kullanıcısı ara…" aria-label="Atanacak kişiyi ara" aria-controls="taskAssigneeOptionList">
+                      <div id="taskAssigneeSearchStatus" class="jira-picker-count" aria-live="polite">Ad yazdıkça yerel kişiler filtrelenir.</div>
+                      <div id="taskAssigneeOptionList" class="jira-picker-options task-assignee-options" role="listbox" aria-label="Atanabilecek kişiler"></div>
+                    </div>
+                    <select id="taskAssigneeInput" class="sr-only" tabindex="-1" aria-hidden="true"><option value="">Atanmamış</option></select>
+                  </div>
+                  <small>En az 2 karakter yazdığınızda eşleşen aktif kullanıcılar JIRA’dan anlık alınır.</small>
+                </div>
                 <label class="field"><span>Öncelik</span><select id="taskPriorityInput"><option value="">Belirtilmedi</option><option value="high">Yüksek</option><option value="medium">Orta</option><option value="low">Düşük</option></select></label>
                 <label class="field"><span>Yıl</span><input id="taskYearInput" type="number" min="2000" max="2100" step="1" inputmode="numeric" placeholder="Örn. 2026"></label>
                 <label class="field"><span>Planlanan çeyrek</span><select id="taskQuarterInput"><option value="">Belirtilmedi</option><option value="Q1">Q1</option><option value="Q2">Q2</option><option value="Q3">Q3</option><option value="Q4">Q4</option></select></label>
@@ -614,6 +655,16 @@
                 <strong id="jiraCountBadge" class="task-count-badge">0 madde</strong>
               </div>
             </div>
+            <div class="jira-navigator-toolbar" aria-label="JIRA maddesi toplu işlemleri">
+              <div class="jira-navigator-actions">
+                <button id="refreshJiraNavigator" class="button secondary" type="button">JIRA’dan yenile</button>
+                <button id="selectAllJiraItems" class="button secondary" type="button">Tümünü seç</button>
+                <button id="clearJiraItemSelection" class="button secondary" type="button">Seçimi bırak</button>
+                <button id="deleteSelectedJiraItems" class="button danger-text" type="button" disabled>Seçilenleri sil</button>
+              </div>
+              <strong id="jiraSelectionCount">0 seçili</strong>
+            </div>
+            <p id="jiraNavigatorSyncStatus" class="jira-navigator-sync-status" role="status" aria-live="polite">Bu sekme açıldığında worklog girdiğiniz maddeler JIRA’dan otomatik güncellenir.</p>
             <p id="jiraColumnStatus" class="jira-column-status" role="status" aria-live="polite">Kolonlar içeriğe otomatik sığdırılır; başlıkları sürükleyebilir ve genişliklerini değiştirebilirsiniz.</p>
             <div id="jiraEmptyState" class="empty-state"><div aria-hidden="true">⌁</div><h3>Henüz JIRA maddesi yok</h3><p>Eforları bağlamak için ilk JIRA maddesini ekleyin.</p></div>
             <div id="jiraList" class="jira-table-scroll" aria-live="polite">
@@ -698,7 +749,22 @@
         <div class="modal-heading"><div><span class="eyebrow">Timesheet eforu</span><h2 id="effortEditModalTitle">Eforu revize et</h2></div><button id="closeEffortEditModal" class="modal-close" type="button" aria-label="Kapat">×</button></div>
         <label id="modalEntrySelectField" class="field hidden"><span>Düzenlenecek efor</span><select id="modalEntrySelect"></select></label>
         <div class="modal-form-grid">
-          <label class="field field-wide"><span>JIRA maddesi</span><select id="modalJiraInput" required></select></label>
+          <div class="field field-wide">
+            <span>JIRA maddesi</span>
+            <div id="modalJiraPicker" class="effort-jira-picker">
+              <button id="modalJiraPickerButton" class="jira-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="modalJiraPickerDropdown">
+                <span id="modalJiraPickerValue">JIRA-YOK — Henüz JIRA maddesi atanmadı</span>
+                <span class="jira-picker-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div id="modalJiraPickerDropdown" class="jira-picker-dropdown modal-jira-picker-dropdown hidden">
+                <input id="modalJiraSearchInput" type="search" autocomplete="off" placeholder="Key veya Summary yazın…" aria-controls="modalJiraOptionList" aria-describedby="modalJiraSearchCount">
+                <div id="modalJiraSearchCount" class="jira-picker-count" aria-live="polite"></div>
+                <div id="modalJiraOptionList" class="jira-picker-options" role="listbox" aria-label="JIRA maddeleri"></div>
+              </div>
+              <select id="modalJiraInput" class="jira-native-select" hidden required aria-label="Eforun bağlanacağı JIRA maddesi"><option value="__dummy_jira__">JIRA-YOK — Henüz JIRA maddesi atanmadı</option></select>
+            </div>
+            <small>En az 2 karakter yazdığınızda kayıtlı maddelere ek olarak JIRA’dan anlık sonuç gelir.</small>
+          </div>
           <label class="field"><span>Tarih</span><input id="modalDateInput" type="date" required></label>
           <label class="field"><span>Süre (saat)</span><input id="modalHoursInput" type="number" min="0.25" max="24" step="0.25" required></label>
           <label id="modalRepeatEntryToggleField" class="repeat-entry-toggle field-wide">
@@ -756,6 +822,7 @@
 
     <template id="jiraTemplate">
       <tr class="jira-issue-row">
+        <td class="jira-select-column" data-column-id="select"><input class="jira-row-select" type="checkbox"></td>
         <td class="jira-issue-type" data-column-id="issueType"></td>
         <td class="jira-issue-key" data-column-id="key"><a target="_blank" rel="noopener noreferrer"></a></td>
         <td class="jira-summary" data-column-id="summary"></td>

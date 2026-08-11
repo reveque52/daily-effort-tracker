@@ -50,12 +50,27 @@ function close(server) {
     fetchImpl: async (url, options = {}) => {
       upstreamCalls.push({ url, options });
       if (url.endsWith("/rest/api/3/myself")) return Response.json({ accountId: "account-1", displayName: "Test User" });
+      if (url.includes("/rest/api/3/user/search?")) return Response.json([
+        { accountId: "account-selcuk", displayName: "Selçuk Dere", emailAddress: "selcuk@example.com", active: true, accountType: "atlassian", timeZone: "Europe/Istanbul", avatarUrls: { "48x48": "https://avatar.example.com/selcuk.png" } },
+        { accountId: "account-inactive", displayName: "Selin Inactive", active: false, accountType: "atlassian" }
+      ]);
       if (url.includes("/rest/api/3/users/search?")) return Response.json([
         { accountId: "account-1", displayName: "Test User", emailAddress: "test@example.com", active: true, accountType: "atlassian", timeZone: "Europe/Istanbul", avatarUrls: { "48x48": "https://avatar.example.com/test.png" } },
         { accountId: "account-2", displayName: "Inactive User", active: false, accountType: "atlassian" },
         { accountId: "app-1", displayName: "Automation", active: true, accountType: "app" }
       ]);
-      if (url.endsWith("/rest/api/3/search/jql")) return Response.json({ issues: [{ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", issuetype: { name: "Task" }, status: { name: "Open" } } }] });
+      if (url.includes("/rest/api/3/issue/picker?")) return Response.json({ sections: [
+        { id: "history", issues: [{ id: 10179, key: "RD-179", summary: "<b>Version Packaging</b>", summaryText: "Version Packaging" }] },
+        { id: "current", issues: [{ id: 10179, key: "RD-179", summaryText: "Version Packaging" }, { id: 10001, key: "DIP-43", summaryText: "Technical Preparations" }] }
+      ] });
+      if (url.endsWith("/rest/api/3/search/jql")) {
+        const searchPayload = JSON.parse(options.body || "{}");
+        if (searchPayload.jql === "worklogAuthor = currentUser() ORDER BY updated DESC") {
+          if (!searchPayload.nextPageToken) return Response.json({ issues: [{ id: "20001", key: "LOG-1", fields: { summary: "Logged issue one", issuetype: { name: "Task" }, status: { name: "Open" } } }], nextPageToken: "navigator-page-2" });
+          return Response.json({ issues: [{ id: "20002", key: "LOG-2", fields: { summary: "Logged issue two", issuetype: { name: "Bug" }, status: { name: "In Progress" } } }] });
+        }
+        return Response.json({ issues: [{ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", issuetype: { name: "Task" }, status: { name: "Open" } } }] });
+      }
       if (url.includes("/rest/api/3/issue/RD-179?fields=")) return Response.json({ id: "10179", key: "RD-179", fields: { summary: "Version Packaging", issuetype: { name: "Task" }, assignee: { displayName: "Test User" }, reporter: { displayName: "Reporter" }, priority: { name: "Low" }, status: { name: "In Progress" }, resolution: null, created: "2026-01-01T09:00:00.000+0300", updated: "2026-08-07T09:00:00.000+0300", duedate: "2026-12-31" } });
       if (url.endsWith("/rest/api/3/issue/DIP-43/transitions") && options.method === "POST") return new Response(null, { status: 204 });
       if (url.endsWith("/rest/api/3/issue/DIP-43/transitions")) return Response.json({ transitions: [{ id: "31", to: { name: "In Progress" } }, { id: "41", to: { name: "Closed" } }] });
@@ -89,11 +104,40 @@ function close(server) {
     assert.equal(users.items[0].email, "test@example.com");
     assert.ok(upstreamCalls.some((call) => call.url.includes("/rest/api/3/users/search?startAt=0&maxResults=100")));
 
+    const searchedUsers = await fetch(`${baseUrl}/api/jira/users?query=sel&maxResults=20`).then((response) => response.json());
+    assert.equal(searchedUsers.items.length, 1);
+    assert.equal(searchedUsers.items[0].jiraAccountId, "account-selcuk");
+    assert.equal(searchedUsers.query, "sel");
+    const userSearchCall = upstreamCalls.find((call) => call.url.includes("/rest/api/3/user/search?"));
+    assert.equal(new URL(userSearchCall.url).searchParams.get("query"), "sel");
+    assert.equal(new URL(userSearchCall.url).searchParams.get("maxResults"), "20");
+
+    const shortSearch = await fetch(`${baseUrl}/api/jira/users?query=s`);
+    assert.equal(shortSearch.status, 400);
+
+    const issueSuggestions = await fetch(`${baseUrl}/api/jira/issue-picker?query=ver`).then((response) => response.json());
+    assert.deepEqual(issueSuggestions.items.map((item) => item.name), ["RD-179", "DIP-43"]);
+    assert.equal(issueSuggestions.items[0].description, "Version Packaging");
+    const pickerCall = upstreamCalls.find((call) => call.url.includes("/rest/api/3/issue/picker?"));
+    const pickerUrl = new URL(pickerCall.url);
+    assert.equal(pickerUrl.searchParams.get("query"), "ver");
+    assert.match(pickerUrl.searchParams.get("currentJQL"), /updated DESC/);
+    const shortIssueSearch = await fetch(`${baseUrl}/api/jira/issue-picker?query=v`);
+    assert.equal(shortIssueSearch.status, 400);
+
     const issues = await fetch(`${baseUrl}/api/jira/issues?jql=${encodeURIComponent("assignee = currentUser()")}`).then((response) => response.json());
     assert.equal(issues.items.length, 1);
     assert.equal(issues.items[0].name, "DIP-43");
     const searchBody = JSON.parse(upstreamCalls.find((call) => call.url.endsWith("/search/jql")).options.body);
     assert.equal(searchBody.jql, "assignee = currentUser()");
+
+    const navigatorJql = "worklogAuthor = currentUser() ORDER BY updated DESC";
+    const workloggedIssues = await fetch(`${baseUrl}/api/jira/issues?jql=${encodeURIComponent(navigatorJql)}&maxResults=1000`).then((response) => response.json());
+    assert.deepEqual(workloggedIssues.items.map((item) => item.name), ["LOG-1", "LOG-2"]);
+    assert.equal(workloggedIssues.truncated, false);
+    const navigatorCalls = upstreamCalls.filter((call) => call.url.endsWith("/search/jql") && JSON.parse(call.options.body).jql === navigatorJql);
+    assert.equal(navigatorCalls.length, 2);
+    assert.equal(JSON.parse(navigatorCalls[1].options.body).nextPageToken, "navigator-page-2");
 
     const singleIssue = await fetch(`${baseUrl}/api/jira/issues/rd-179`).then((response) => response.json());
     assert.equal(singleIssue.item.name, "RD-179");
@@ -128,7 +172,7 @@ function close(server) {
 
     const authHeaders = upstreamCalls.map((call) => call.options.headers?.Authorization).filter(Boolean);
     assert.ok(authHeaders.every((value) => value.startsWith("Basic ")));
-    assert.ok(!JSON.stringify({ health, users, issues, transitioned, imported, created, updated, deleted }).includes("test-jira-token"));
+    assert.ok(!JSON.stringify({ health, users, searchedUsers, issues, transitioned, imported, created, updated, deleted }).includes("test-jira-token"));
   } finally {
     await close(server);
   }

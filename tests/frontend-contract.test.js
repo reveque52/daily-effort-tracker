@@ -18,6 +18,7 @@ const aiClient = fs.readFileSync(path.join(root, "ai-assistant.js"), "utf8");
 const jiraCloudClient = fs.readFileSync(path.join(root, "jira-cloud.js"), "utf8");
 const outlookCalendarClient = fs.readFileSync(path.join(root, "outlook-calendar.js"), "utf8");
 const googleCalendarClient = fs.readFileSync(path.join(root, "google-calendar.js"), "utf8");
+const weatherClient = fs.readFileSync(path.join(root, "weather-client.js"), "utf8");
 const supabaseCloudClient = fs.readFileSync(path.join(root, "supabase-cloud.js"), "utf8");
 const jiraEdgeFunction = fs.readFileSync(path.join(root, "supabase", "functions", "jira-proxy", "index.ts"), "utf8");
 const jiraVaultMigration = fs.readFileSync(path.join(root, "supabase", "migrations", "20260810190000_jira_credentials_vault.sql"), "utf8");
@@ -30,11 +31,12 @@ const taskTypeReportApp = fs.readFileSync(path.join(root, "task-type-report.js")
 const deleteEffortBlock = app.slice(app.indexOf("async function deleteEffortEntry"), app.indexOf("\n  function render()", app.indexOf("async function deleteEffortEntry")));
 const effortModalSubmitBlock = app.slice(app.indexOf('effortEditModalForm.addEventListener("submit"'), app.indexOf("\n  function updateTimesheetControls", app.indexOf('effortEditModalForm.addEventListener("submit"')));
 
-assert.doesNotMatch([app, dataStore, tasks, peopleStore, jira, reminders, drive, aiClient, jiraCloudClient, outlookCalendarClient].join("\n"), /localStorage\.(?:getItem|setItem|removeItem)/, "App data and user preferences must not persist in localStorage");
+assert.doesNotMatch([app, dataStore, tasks, peopleStore, jira, reminders, drive, aiClient, jiraCloudClient, outlookCalendarClient, weatherClient].join("\n"), /localStorage\.(?:getItem|setItem|removeItem)/, "App data and user preferences must not persist in localStorage");
 assert.match(supabaseCloudClient, /async function getUserSettings[\s\S]*async function updateUserSettings[\s\S]*from\("user_settings"\)/, "User preferences must be read from and written to Supabase user_settings");
 assert.match(app, /function queueCloudUserSettings[\s\S]*SupabaseCloud\.updateUserSettings[\s\S]*applyCloudUserSettings\(bundle\.settings/, "Cloud preferences must load automatically and save to Supabase");
 
 const requiredIds = [
+  "todayLabel", "weatherIcon", "weatherLocationMenu", "weatherLocationLabel", "weatherLocationForm", "weatherLocationInput", "weatherUseDeviceLocation", "weatherLocationStatus", "weatherLocationResults", "weatherTemperature", "weatherCondition", "weatherMeta", "refreshWeather",
   "homeView", "homeWeekLabel", "homeWeeklyHours", "homeWeeklyGoal", "homeWeeklyEntryCount",
   "homePlannedTasks", "homeInProgressTasks", "weeklyEffortChart", "taskStatusChart",
   "jiraEffortChart", "homeOpenTaskCount", "homePendingTaskList",
@@ -50,18 +52,18 @@ const requiredIds = [
   "driveHeaderMenu", "headerDriveMenuLabel", "headerDriveMenuBadge", "driveCompactPanel", "driveCompactTitle", "driveConnectionBadge", "driveSettingsSummary", "driveClientIdPreview", "editDriveSettings", "driveSettingsEditor", "cancelDriveSettings", "skipInitialRestore",
   "supabaseHeaderMenu", "headerSupabaseMenuLabel", "headerSupabaseMenuBadge", "supabaseConnectionBadge", "supabaseStatus", "supabaseAuthForm", "supabaseEmail", "supabasePassword", "supabaseSignIn", "supabaseSignUp", "supabaseForgotPassword", "supabaseRecoveryForm", "supabaseNewPassword", "supabaseSignedInPanel", "supabaseUserEmail", "supabaseOrganizationName", "supabaseLastSync", "supabasePull", "supabaseSignOut", "cloudDataGate", "cloudDataGateTitle", "cloudDataGateMessage", "openSupabaseFromGate",
   "tasksView", "taskForm", "taskTitleInput", "taskDueDateInput", "taskStatusInput", "taskDescriptionInput", "taskDocumentsInput", "taskDocumentSelectionSummary", "taskDocumentList",
-  "taskParentTaskInput", "taskAssigneeInput", "taskTypeInput", "taskPriorityInput", "taskYearInput", "taskQuarterInput", "taskPlanImport",
+  "taskParentTaskInput", "taskAssigneePicker", "taskAssigneePickerButton", "taskAssigneePickerValue", "taskAssigneePickerDropdown", "taskAssigneeSearchInput", "taskAssigneeSearchStatus", "taskAssigneeOptionList", "taskAssigneeInput", "taskTypeInput", "taskPriorityInput", "taskYearInput", "taskQuarterInput", "taskPlanImport",
   "openTaskPlanPaste", "taskPlanImportModal", "taskPlanPasteForm", "taskPlanTextInput", "taskPlanPasteMessage",
   "taskList", "taskTemplate", "taskTypeGroupTemplate", "taskCreateView", "taskReportView", "taskDetailView", "taskDetailTitle",
-  "taskDetailDescription", "taskDetailParentItem", "taskDetailAssignee", "taskDetailType", "taskDetailPriority", "taskDetailPlan", "taskDetailSubtaskList", "taskDetailSubtaskCount", "addSubtaskButton", "taskTypeFilter", "taskStatusFilter", "taskFilterEmpty", "reviseTaskButton", "backToTaskReport", "taskReportCount", "taskReportTableWrap", "addNextTaskToCalendar", "addNextTaskToOutlookCalendar",
+  "taskDetailDescription", "taskDetailParentItem", "taskDetailAssignee", "taskDetailType", "taskDetailPriority", "taskDetailPlan", "taskDetailSubtaskList", "taskDetailSubtaskCount", "addSubtaskButton", "taskTypeFilter", "taskStatusFilter", "taskFilterEmpty", "reviseTaskButton", "backToTaskReport", "taskReportCount", "taskReportTableWrap",
   "timesheetView", "timesheetPeriod", "timesheetReferenceDate", "timesheetStartDate",
   "timesheetEndDate", "includeWeekends", "addTimesheetEffort", "syncJiraWorklogs", "timesheetJiraSyncStatus", "timesheetTable", "timesheetTotalHours",
   "timesheetGrouping",
   "jiraItemPicker", "jiraItemPickerButton", "jiraItemPickerValue", "jiraItemPickerDropdown", "jiraItemSearchInput", "jiraItemSearchCount", "jiraItemOptionList", "jiraItemInput", "jiraView", "jiraForm", "jiraNameInput", "jiraSubmitButton", "jiraSubmitLabel",
   "jiraList", "jiraTemplate", "jiraHtmlImport",
   "jiraHeaderMenu", "headerJiraMenuLabel", "headerJiraMenuBadge", "jiraCloudTitle", "jiraOAuthBadge", "connectJiraOAuth", "disconnectJiraOAuth", "jiraCredentialTitle", "jiraCredentialBadge", "jiraCredentialStatus", "jiraCredentialBaseUrl", "jiraCredentialEmail", "jiraCredentialToken", "saveJiraCredentials", "removeJiraCredentials", "jiraSyncJql", "testJiraConnection", "syncJiraIssues", "jiraAutoWorklog", "jiraCloudStatus",
-  "jiraSearchInput", "jiraColumnManager", "jiraColumnOptions", "autoFitJiraColumns", "resetJiraColumns", "jiraColumnStatus", "jiraIssueTable", "jiraTableHeaderRow", "jiraTableBody", "jiraItemsView", "jiraRequestsView", "jiraItemsSubtabCount", "jiraRequestsSubtabCount", "jiraRequestsTitle", "jiraRequestsSearch", "jiraRequestTotal", "jiraRequestStatusFilters", "selectAllJiraRequestStatuses", "clearJiraRequestStatuses", "jiraRequestBoardStatus", "jiraRequestsEmpty", "jiraRequestBoard", "effortEditModal", "effortEditModalForm", "modalEntrySelect",
-  "modalJiraInput", "modalDateInput", "modalHoursInput", "modalDescriptionInput", "effortEditModalSubmitLabel", "deleteEffortModal",
+  "jiraSearchInput", "refreshJiraNavigator", "selectAllJiraItems", "clearJiraItemSelection", "deleteSelectedJiraItems", "jiraSelectionCount", "jiraNavigatorSyncStatus", "jiraColumnManager", "jiraColumnOptions", "autoFitJiraColumns", "resetJiraColumns", "jiraColumnStatus", "jiraIssueTable", "jiraTableHeaderRow", "jiraTableBody", "jiraItemsView", "jiraRequestsView", "jiraItemsSubtabCount", "jiraRequestsSubtabCount", "jiraRequestsTitle", "jiraRequestsSearch", "jiraRequestTotal", "jiraRequestStatusFilters", "selectAllJiraRequestStatuses", "clearJiraRequestStatuses", "jiraRequestBoardStatus", "jiraRequestsEmpty", "jiraRequestBoard", "effortEditModal", "effortEditModalForm", "modalEntrySelect",
+  "modalJiraPicker", "modalJiraPickerButton", "modalJiraPickerValue", "modalJiraPickerDropdown", "modalJiraSearchInput", "modalJiraSearchCount", "modalJiraOptionList", "modalJiraInput", "modalDateInput", "modalHoursInput", "modalDescriptionInput", "effortEditModalSubmitLabel", "deleteEffortModal",
   "modalRepeatEntryToggleField", "modalRepeatEntryToggle",
   "teamView", "peopleView", "peopleTabCount", "syncJiraUsers", "jiraPeopleSyncTitle", "jiraPeopleSyncStatus", "jiraPeopleCount", "manualPeopleCount", "personForm", "personId", "personJiraIdentity", "personJiraIdentityAvatar", "personJiraIdentityName", "personJiraIdentityAccount", "personFullNameInput", "personEmailInput", "personTitleInput", "personRoleInput", "personManagerInput", "personFormMessage", "personFormTitle", "personSubmitLabel", "cancelPersonEdit", "peopleListTitle", "peopleCount", "peopleSearchInput", "peopleSourceFilter", "peopleEmptyState", "peopleFilterEmpty", "peopleList",
   "organizationView", "organizationLeaderFilter", "organizationWorkloadTitle", "organizationTaskStats", "organizationTaskEmpty", "organizationTaskTableWrap", "organizationTaskList",
@@ -75,13 +77,21 @@ for (const id of ["taskDetailPageContent", "taskDetailPageErrorTitle", "taskDeta
   assert.match(taskDetailHtml, new RegExp(`id=["']${id}["']`), `Eksik görev detay sayfası sözleşmesi: #${id}`);
 }
 
-for (const id of ["taskTypeReportTitle", "taskTypeReportBackLink", "taskTypeReportErrorTitle", "taskTypeReportErrorMessage", "taskTypeReportContent", "taskTypeReportTotal", "taskTypeReportOpen", "taskTypeReportInProgress", "taskTypeReportCompleted", "taskTypeReportBody"]) {
+for (const id of ["taskTypeReportTitle", "taskTypeReportBackLink", "taskTypeReportErrorTitle", "taskTypeReportErrorMessage", "taskTypeReportContent", "taskTypeReportTotal", "taskTypeReportOpen", "taskTypeReportInProgress", "taskTypeReportCompleted", "taskTypeReportColumnManager", "taskTypeReportColumnOptions", "resetTaskTypeReportColumns", "taskTypeReportFitToggle", "taskTypeReportColumnStatus", "taskTypeReportScroll", "taskTypeReportTable", "taskTypeReportHeaderRow", "taskTypeReportBody"]) {
   assert.match(taskTypeReportHtml, new RegExp(`id=["']${id}["']`), `Eksik görev tipi raporu sözleşmesi: #${id}`);
 }
 
 assert.ok(html.indexOf('src="cloud-data-runtime.js') < html.indexOf('src="data-store.js') && html.indexOf('src="data-store.js') < html.indexOf('src="app.js'), "Bellek tabanlı bulut çalışma katmanı veri mağazalarından önce yüklenmeli");
 assert.ok(html.indexOf('src="vendor/msal-browser.min.js') < html.indexOf('src="outlook-calendar.js') && html.indexOf('src="outlook-calendar.js') < html.indexOf('src="app.js'), "MSAL ve Outlook Takvim istemcileri uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="drive-sync.js') < html.indexOf('src="google-calendar.js') && html.indexOf('src="google-calendar.js') < html.indexOf('src="app.js'), "Drive ayarları ve Google Takvim istemcisi uygulamadan önce yüklenmeli");
+assert.ok(html.indexOf('src="weather-client.js') < html.indexOf('src="app.js'), "Hava durumu istemcisi uygulamadan önce yüklenmeli");
+assert.match(weatherClient, /geocoding-api\.open-meteo\.com\/v1\/search[\s\S]*api\.open-meteo\.com\/v1\/forecast/, "Hava durumu istemcisi resmi Open-Meteo konum ve tahmin uçlarını kullanmalı");
+assert.match(weatherClient, /current:[\s\S]*temperature_2m[\s\S]*apparent_temperature[\s\S]*relative_humidity_2m[\s\S]*weather_code[\s\S]*wind_speed_10m[\s\S]*daily:[\s\S]*temperature_2m_max[\s\S]*temperature_2m_min/, "Hava durumu istemcisi kompakt kart için güncel ve günlük değerleri istemeli");
+assert.doesNotMatch(weatherClient, /api[_-]?key|Authorization/i, "Anahtarsız hava durumu entegrasyonu tarayıcıda gizli bilgi taşımamalı");
+assert.match(app, /function useDeviceWeatherLocation[\s\S]*getCurrentPosition[\s\S]*weatherUseDeviceLocation"\)\.addEventListener\("click"/, "Cihaz konumu yalnızca kullanıcı düğmeye bastığında istenmeli");
+assert.match(app, /queueCloudUserSettings\(\{ weatherLocation \}\)/, "Seçilen hava durumu konumu Supabase kullanıcı ayarına kaydedilmeli");
+assert.match(app, /applyWeatherLocationSetting\(cloudUserSettings\.weatherLocation/, "Kayıtlı hava durumu konumu Supabase kullanıcı ayarından yüklenmeli");
+assert.match(css, /header-weather-card[^{]*\{[^}]*grid-template-columns[\s\S]*weather-location-popover[^{]*\{[^}]*position:\s*absolute[\s\S]*@media\s*\(max-width:\s*600px\)[\s\S]*header-weather-card/, "Tarih ve hava durumu kartı masaüstü ve mobilde duyarlı olmalı");
 assert.ok(html.indexOf('src="vendor/supabase.js') < html.indexOf('src="supabase-cloud.js') && html.indexOf('src="supabase-cloud.js') < html.indexOf('src="app.js'), "Sabitlenmiş Supabase SDK ve bulut istemcisi uygulamadan önce yüklenmeli");
 assert.match(supabaseCloudClient, /sb_publishable_[A-Za-z0-9_-]+/, "Tarayıcı Supabase bağlantısı modern publishable key kullanmalı");
 assert.doesNotMatch(supabaseCloudClient, /service_role|sb_secret_|SUPABASE_SERVICE_ROLE/, "Supabase secret veya service-role anahtarı tarayıcı koduna yazılmamalı");
@@ -137,6 +147,11 @@ assert.match(app, /openReminderModal"\)\.addEventListener\("click", openReminder
 assert.match(app, /classList\.toggle\("is-ticker", reminders\.length > 1\)[\s\S]*cloneNode\(true\)/, "Hatırlatmalar kesintisiz kayan akış için çoğaltılmalı");
 assert.match(css, /reminder-ticker-window[^{]*\{[^}]*height:\s*76px[\s\S]*@keyframes reminder-flow[^{]*\{[^}]*translateY/, "Hatırlatma kutusu kompakt olmalı ve aşağıdan yukarı akmalı");
 assert.match(app, /weeklyEntries[\s\S]*homeWeeklyHours[\s\S]*homeWeeklyEntryCount/, "Haftalık efor özeti eksik");
+assert.match(html, /data-effort-chart-period="week"[\s\S]*data-effort-chart-period="month"[\s\S]*data-effort-chart-period="year"/, "Efor dağılımı grafiğinde haftalık, aylık ve yıllık dönem seçenekleri bulunmalı");
+assert.match(app, /function buildHomeEffortChartModel[\s\S]*period === "year"[\s\S]*length:\s*12|function buildHomeEffortChartModel[\s\S]*Array\.from\(\{ length: 12 \}/, "Yıllık efor görünümü 12 aylık dağılım üretmeli");
+assert.match(app, /monthMode[\s\S]*getDate\(\)[\s\S]*minimumMaximum:\s*8/, "Aylık efor görünümü ayın günlerine göre dağılım üretmeli");
+assert.match(app, /data-effort-chart-period[\s\S]*homeEffortChartPeriod[\s\S]*renderHomeDashboard\(\)/, "Efor grafiği dönem seçimi grafiği yeniden oluşturmalı");
+assert.match(css, /weekly-effort-chart\[data-period="month"\][\s\S]*weekly-effort-chart\[data-period="year"\]/, "Aylık ve yıllık efor grafikleri için duyarlı kolon boyutları bulunmalı");
 assert.match(app, /function formatEffortDays|const formatEffortDays[\s\S]*\/ 8/, "Efor gün karşılığı 8 saat üzerinden hesaplanmalı");
 assert.match(app, /formatRoundedHours[\s\S]*Math\.round/, "Efor istatistiklerinde saat küsuratları gösterilmemeli");
 assert.match(html, /<strong id="effortWeekDays">[\s\S]*<small id="effortWeekHours">/, "Eforlar ekranında gün sayısı saat detayından daha görünür olmalı");
@@ -161,9 +176,12 @@ assert.match(html, /id="jiraItemPickerButton"[^>]*aria-haspopup="listbox"[^>]*ar
 assert.match(html, /id="jiraItemPickerDropdown" class="jira-picker-dropdown hidden"[\s\S]*id="jiraItemSearchInput"[^>]*type="search"[^>]*aria-controls="jiraItemOptionList"/, "Efor JIRA araması açılır listenin içinde yer almalı");
 assert.match(app, /function normalizeJiraSearch[\s\S]*toLocaleLowerCase\("tr-TR"\)[\s\S]*replaceAll\("ı", "i"\)/, "Efor JIRA araması büyük-küçük harf ve Türkçe I karakterlerinden etkilenmemeli");
 assert.match(app, /function jiraMatchesSearch[\s\S]*item\.name[\s\S]*item\.description[\s\S]*item\.assignee[\s\S]*item\.status/, "Efor JIRA araması Key, Summary, kişi ve durum alanlarını filtrelemeli");
-assert.match(app, /jiraItemSearchInput"\)\.addEventListener\("input"[\s\S]*filterEffortJiraOptions/, "Efor JIRA seçenekleri kullanıcı yazarken anlık filtrelenmeli");
-assert.match(app, /function renderEffortJiraOptionList[\s\S]*jira-picker-option[\s\S]*aria-selected/, "Filtrelenen JIRA maddeleri açılır listede seçilebilir gösterilmeli");
-assert.match(app, /function setEffortJiraPickerOpen[\s\S]*jiraItemPickerDropdown[\s\S]*aria-expanded/, "JIRA açılır listesinin açık-kapalı durumu yönetilmeli");
+assert.match(app, /jiraItemSearchInput"\)\.addEventListener\("input"[\s\S]*scheduleIntegratedJiraSearch\("main"\)/, "Efor JIRA seçenekleri kullanıcı yazarken anlık filtrelenmeli");
+assert.match(app, /function renderIntegratedJiraOptionList[\s\S]*jira-picker-option[\s\S]*aria-selected/, "Filtrelenen ve canlı JIRA maddeleri açılır listede seçilebilir gösterilmeli");
+assert.match(app, /function setIntegratedJiraPickerOpen[\s\S]*aria-expanded[\s\S]*dropdown\.classList\.toggle[\s\S]*function setEffortJiraPickerOpen/, "JIRA açılır listelerinin açık-kapalı durumu yönetilmeli");
+assert.match(html, /id="modalJiraPicker"[\s\S]*id="modalJiraSearchInput"[\s\S]*id="modalJiraOptionList"[\s\S]*id="modalJiraInput"/, "Timesheet efor penceresinde aramalı JIRA seçici bulunmalı");
+assert.match(app, /async function searchIntegratedJiraIssues[\s\S]*search\.length < 2[\s\S]*JiraCloudClient\.searchIssues/, "Efor JIRA seçicileri iki karakterden sonra canlı JIRA önerisi aramalı");
+assert.match(app, /async function selectRemoteJiraIssue[\s\S]*JiraCloudClient\.getIssue[\s\S]*JiraStore\.mergeAll[\s\S]*waitForDataSaves/, "Canlı sonuçtan seçilen JIRA maddesi tam bilgilerle Supabase'e kaydedilmeli");
 assert.match(app, /project:\s*selectedJira\.name/, "Eforun proje karşılığı seçilen JIRA anahtarından türetilmeli");
 assert.ok(html.indexOf('src="jira-cloud.js') < html.indexOf('src="app.js'), "JIRA Cloud istemcisi uygulamadan önce yüklenmeli");
 assert.doesNotMatch(jiraCloudClient, /JIRA_API_TOKEN|Authorization:\s*`Basic/, "JIRA API token tarayıcı kodunda bulunmamalı");
@@ -205,6 +223,11 @@ assert.match(jiraCloudClient, /function syncWorklogs\(from, to\)[\s\S]*request\(
 assert.match(app, /function syncTimesheetJiraWorklogs[\s\S]*mergeJiraWorklogs[\s\S]*JIRA’dan alınan eforlar Drive’a gönderildi/, "Timesheet JIRA eforlarını mükerrer oluşturmadan yerel veriye ve Drive yedeğine aktarmalı");
 assert.match(dataStore, /function mergeJiraWorklogs[\s\S]*byWorklogId[\s\S]*conflicts/, "JIRA worklog kimliğiyle mükerrer ve yerel değişiklik çakışmaları yönetilmeli");
 assert.match(app, /function syncJiraCloudIssues[\s\S]*JiraStore\.mergeAll/, "Canlı JIRA senkronizasyonu mevcut Key kayıtlarını birleştirmeli");
+assert.match(app, /JIRA_WORKLOGGED_ISSUES_JQL\s*=\s*"worklogAuthor = currentUser\(\) ORDER BY updated DESC"[\s\S]*function refreshJiraNavigatorFromWorklogs[\s\S]*syncJiraCloudIssues/, "JIRA Issue Navigator worklog girilen maddeleri açılışta yenilemeli");
+assert.match(app, /function activateMainView[\s\S]*activateJiraSubview\("jiraItemsView"\)[\s\S]*function activateJiraSubview[\s\S]*refreshJiraNavigatorFromWorklogs/, "JIRA Maddeleri sekmesine geçildiğinde otomatik worklog maddesi senkronizasyonu başlamalı");
+assert.match(app, /function renderJiraSelectionControls[\s\S]*selectedJiraItemIds[\s\S]*function deleteSelectedJiraItems[\s\S]*JiraStore\.removeMany/, "JIRA Issue Navigator seçme, seçimi bırakma ve toplu silme işlemlerini desteklemeli");
+assert.match(html, /id="refreshJiraNavigator"[\s\S]*id="selectAllJiraItems"[\s\S]*id="clearJiraItemSelection"[\s\S]*id="deleteSelectedJiraItems"[\s\S]*class="jira-row-select"/, "JIRA listesinde yenileme ve toplu seçim kontrolleri bulunmalı");
+assert.match(jira, /function removeMany[\s\S]*selected[\s\S]*removed/, "JIRA veri katmanı toplu silmeyi tek kayıt işlemiyle desteklemeli");
 assert.match(html, /class="jira-subtab-button active"[^>]*data-jira-tab="jiraItemsView"[\s\S]*data-jira-tab="jiraRequestsView"/, "JIRA ekranında JIRA Maddeleri ve Talepler alt sekmeleri bulunmalı");
 assert.match(app, /function activateJiraSubview[\s\S]*jira-subtab-button[\s\S]*jira-subview/, "JIRA alt sekme geçişleri bağlanmalı");
 assert.match(app, /function groupJiraRequestsByStatus[\s\S]*item\.status[\s\S]*function renderJiraRequests[\s\S]*jira-request-column/, "Talepler JIRA statüsüne göre Kanban sütunlarında gruplanmalı");
@@ -238,12 +261,17 @@ assert.doesNotMatch(app, /replaceLocalBundle[\s\S]*migrateExistingTasksToArchite
 assert.match(html, /task-report-table[\s\S]*<thead><tr><th>Görev<\/th><th class="task-status-column">Durum<\/th><\/tr><\/thead>/, "Yapılacak İşler raporunda yalnızca Görev ve Durum başlıkları olmalı");
 assert.doesNotMatch(html, /<thead><tr><th>Görev<\/th><th class="task-status-column">Durum<\/th><th/, "Görev ve Durum dışında ana rapor sütunu bulunmamalı");
 assert.match(taskDetailHtml, /task-detail-overview-table[\s\S]*Tamamlandı[\s\S]*Görev \/ Alt Görev[\s\S]*Bağlı Ana Görev[\s\S]*Atanan \/ Kimde Bekliyor[\s\S]*Öncelik[\s\S]*Yıl \/ Çeyrek[\s\S]*Teslim Tarihi[\s\S]*Durum[\s\S]*İşlemler/, "Eski rapor sütunlarının tamamı ayrı görev detay sayfasında gösterilmeli");
-assert.match(taskTypeReportHtml, /task-type-report-table[\s\S]*Tamamlandı[\s\S]*Görev \/ Alt Görev[\s\S]*Bağlı Ana Görev[\s\S]*Atanan \/ Kimde Bekliyor[\s\S]*Öncelik[\s\S]*Yıl \/ Çeyrek[\s\S]*Teslim Tarihi[\s\S]*Durum[\s\S]*İşlemler/, "Görev tipi raporu eski detay sütunlarının tamamını göstermeli");
+assert.match(taskTypeReportApp, /REPORT_COLUMNS[\s\S]*Tamamlandı[\s\S]*Görev \/ Alt Görev[\s\S]*Bağlı Ana Görev[\s\S]*Atanan \/ Kimde Bekliyor[\s\S]*Öncelik[\s\S]*Yıl \/ Çeyrek[\s\S]*Teslim Tarihi[\s\S]*Durum[\s\S]*İşlemler/, "Görev tipi raporu seçilebilir detay sütunlarının tamamını tanımlamalı");
+assert.match(taskTypeReportApp, /function renderReportColumnOptions[\s\S]*checkbox[\s\S]*reportLayout\.visible[\s\S]*renderTaskTypeReport/, "Görev tipi raporu kolonları kullanıcı tarafından gösterilip gizlenebilmeli");
+assert.match(taskTypeReportApp, /function applyReportFitMode[\s\S]*fitScreen[\s\S]*totalWeight[\s\S]*taskTypeReportFitToggle/, "Görev tipi raporu görünür kolonları ekrana orantılı sığdırmalı");
+assert.match(taskTypeReportApp, /bundle\.settings\?\.taskTypeReportLayout/, "Görev tipi raporu kayıtlı kolon tercihini Supabase paketinden yüklemeli");
+assert.match(taskTypeReportApp, /updateUserSettings\(\{ taskTypeReportLayout: reportLayout \}\)/, "Görev tipi raporu kolon tercihini Supabase kullanıcı ayarlarında saklamalı");
+assert.match(css, /task-type-report-page \.task-detail-page-main[^{]*\{[^}]*1540px[\s\S]*task-type-report-table\.fit-screen[^{]*\{[^}]*table-layout:\s*fixed/, "Görev tipi detay raporu geniş ekranı kullanmalı ve tabloyu ekrana sığdırmalı");
 assert.match(taskTypeReportApp, /TaskStore\.TASK_TYPES[\s\S]*filter\(\(task\)[\s\S]*task\.taskType[\s\S]*taskTypeReportBody/, "Görev tipi raporu yalnızca seçilen tipe ait maddeleri listelemeli");
 assert.match(html, /taskPriorityInput[\s\S]*taskYearInput[\s\S]*taskQuarterInput/, "Görev formunda öncelik, yıl ve çeyrek alanları eksik");
 assert.match(html, /taskTypeInput[\s\S]*meeting_organization[\s\S]*management_request/, "Görev tipi seçenekleri eksik");
 assert.match(html, /taskTypeInput[\s\S]*architecture_roadmap/, "Architecture Roadmap görev tipi eksik");
-assert.match(html, /id="taskAssigneeInput"[^>]*>[\s\S]*Atanmamış[\s\S]*Kişileri Ekip → Kişiler ekranından tanımlayabilirsiniz/, "Görev ataması kişi tanım ekranındaki seçim listesine bağlanmalı");
+assert.match(html, /id="taskAssigneePicker"[\s\S]*id="taskAssigneeSearchInput"[\s\S]*id="taskAssigneeOptionList"[\s\S]*id="taskAssigneeInput"[\s\S]*En az 2 karakter/, "Görev ataması canlı JIRA kullanıcı aramasına bağlanmalı");
 assert.doesNotMatch(html, /<thead><tr>[\s\S]*?<th>Görev tipi<\/th>[\s\S]*?<\/tr><\/thead>/, "Görev tipi grup başlığında olduğu için rapor tablosunda yinelenmemeli");
 assert.doesNotMatch(html, /id="taskDueDateInput"[^>]*required/, "Yıl ve çeyrek kullanılan görevlerde teslim tarihi zorunlu olmamalı");
 assert.doesNotMatch(html, /<thead><tr>[^<]*(?:<th[^>]*>[^<]*<\/th>)*<th>Detaylı açıklama<\/th>/, "Görev raporunda detaylı açıklama sütunu olmamalı");
@@ -257,13 +285,8 @@ assert.match(app, /store\?\.create/, "Create entegrasyonu eksik");
 assert.match(app, /store\?\.update/, "Update entegrasyonu eksik");
 assert.match(app, /store\?\.remove/, "Delete entegrasyonu eksik");
 assert.doesNotMatch(html, /class="icon-button calendar-button"/, "Takvim düğmesi efor satırlarında olmamalı");
-assert.match(html, /id="addNextTaskToCalendar"/, "Dashboard Google Takvim düğmesi eksik");
-assert.match(app, /calendar\.google\.com\/calendar\/render/, "Google Takvim etkinlik adresi eksik");
-assert.match(app, /dates:\s*`\$\{start\}\/\$\{end\}`/, "Takvim tarih aralığı eksik");
-assert.match(html, /id="addNextTaskToOutlookCalendar"[^>]*>Outlook Takvim’e ekle<\/button>/, "Dashboard Outlook Takvim düğmesi eksik");
-assert.match(app, /function outlookCalendarUrl[\s\S]*outlook\.office\.com\/calendar\/deeplink\/compose/, "Outlook Web etkinlik adresi eksik");
-assert.match(app, /startdt:[\s\S]*enddt:[\s\S]*allday:\s*"true"[\s\S]*body:/, "Outlook etkinlik tarih ve açıklama alanları eksik");
-assert.match(app, /addNextTaskToOutlookCalendar"\)\.addEventListener\("click"[\s\S]*outlookCalendarUrl/, "Outlook Takvim düğmesi etkinlik akışına bağlanmalı");
+assert.doesNotMatch(html, /calendar-dashboard-card|Yaklaşan görev|addNextTaskToCalendar|addNextTaskToOutlookCalendar/, "Efor özetinde yaklaşan görev takvim kartı bulunmamalı");
+assert.doesNotMatch(app, /nextDashboardTask|googleCalendarUrl|outlookCalendarUrl/, "Kaldırılan yaklaşan görev kartının kullanılmayan uygulama kodu kalmamalı");
 assert.ok(html.indexOf('src="drive-sync.js') < html.indexOf('src="app.js'), "Drive modülü uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="tasks-store.js') < html.indexOf('src="app.js'), "Görev modülü uygulamadan önce yüklenmeli");
 assert.ok(html.indexOf('src="people-store.js') < html.indexOf('src="app.js'), "Kişi modülü uygulamadan önce yüklenmeli");
@@ -308,12 +331,23 @@ assert.match(tasks, /QUARTERS[\s\S]*Q1[\s\S]*Q4/, "Görev çeyrek değerleri eks
 assert.match(tasks, /TASK_TYPES[\s\S]*standard[\s\S]*meeting_organization[\s\S]*management_request/, "Görev tipi veri modeli eksik");
 assert.match(taskDetailApp, /taskTypeLabel[\s\S]*detailPageAssignee/, "Görev tipi ve atanan kişi ayrı detay sayfasına bağlanmalı");
 assert.match(app, /function populateTaskAssigneeOptions[\s\S]*PeopleStore\.list[\s\S]*person\.fullName[\s\S]*person\.email/, "Görev atama listesi tanımlı kişilerden oluşturulmalı");
+assert.match(app, /function scheduleTaskAssigneeSearch[\s\S]*setTimeout\(\(\) => searchTaskAssignees\(query\), 300\)/, "Görev atama araması JIRA çağrılarını gecikmeli yapmalı");
+assert.match(app, /async function searchTaskAssignees[\s\S]*search\.length < 2[\s\S]*JiraCloudClient\.searchUsers/, "Görev atama alanı iki karakterden sonra JIRA kullanıcılarını anlık aramalı");
+assert.match(app, /function selectTaskAssigneeOption[\s\S]*PeopleStore\.mergeJiraUsers[\s\S]*jiraAccountId/, "JIRA'dan seçilen kullanıcı yerel kişi kaydıyla birleştirilerek göreve atanmalı");
 assert.match(app, /function selectedTaskAssignment[\s\S]*assigneeId:[\s\S]*person\.id/, "Görev kaydı seçilen kişinin kimliğini ve adını saklamalı");
 assert.match(tasks, /assigneeId:[\s\S]*Atanan kişi bağlantısı geçersiz/, "Görev veri modeli kişi bağlantısını doğrulamalı");
 assert.match(peopleStore, /function validate[\s\S]*fullName[\s\S]*email[\s\S]*function duplicateEmail[\s\S]*function replaceAll/, "Kişi veri modeli ad-soyad, e-posta tekilliği ve yedek geri yüklemeyi desteklemeli");
 assert.match(peopleStore, /function mergeJiraUsers[\s\S]*jiraAccountId[\s\S]*emailMatchIndex[\s\S]*created[\s\S]*updated/, "JIRA kullanıcıları Account ID ve e-posta üzerinden mevcut kişileri koruyarak birleştirilmeli");
 assert.match(jiraCloudClient, /function syncUsers[\s\S]*\/users\?/, "JIRA istemcisi aktif kullanıcı senkronizasyonunu desteklemeli");
+assert.match(jiraCloudClient, /function searchUsers[\s\S]*query[\s\S]*\/users\?/, "JIRA istemcisi yazılan metinle kullanıcı aramasını desteklemeli");
+assert.match(jiraCloudClient, /function searchIssues[\s\S]*query[\s\S]*\/issue-picker\?/, "JIRA istemcisi efor girişinde canlı issue önerisi aramasını desteklemeli");
 assert.match(aiServer, /\/api\/jira\/users[\s\S]*\/rest\/api\/3\/users\/search[\s\S]*user\.active[\s\S]*accountType/, "Backend yalnızca aktif Atlassian kullanıcılarını güvenli proxy üzerinden döndürmeli");
+assert.match(aiServer, /\/api\/jira\/users[\s\S]*query[\s\S]*\/rest\/api\/3\/user\/search/, "Backend canlı kullanıcı aramasını JIRA'nın kullanıcı arama endpoint'ine iletmeli");
+assert.match(jiraEdgeFunction, /pathname === "\/users"[\s\S]*query[\s\S]*\/rest\/api\/3\/user\/search/, "Supabase JIRA proxy canlı kullanıcı aramasını desteklemeli");
+assert.match(aiServer, /\/api\/jira\/issue-picker[\s\S]*\/rest\/api\/3\/issue\/picker[\s\S]*summaryText/, "Backend canlı JIRA issue picker sonuçlarını güvenli biçimde dönüştürmeli");
+assert.match(jiraEdgeFunction, /pathname === "\/issue-picker"[\s\S]*\/rest\/api\/3\/issue\/picker[\s\S]*summaryText/, "Supabase JIRA proxy canlı issue picker aramasını desteklemeli");
+assert.match(aiServer, /\/api\/jira\/issues[\s\S]*for \(let page = 0; page < 10[\s\S]*nextPageToken/, "Backend JIRA issue aramasını sayfalı olarak toplamalı");
+assert.match(jiraEdgeFunction, /pathname === "\/issues"[\s\S]*for \(let page = 0; page < 10[\s\S]*nextPageToken/, "Supabase JIRA proxy issue aramasını sayfalı olarak toplamalı");
 assert.match(app, /async function syncJiraPeople[\s\S]*JiraCloudClient\.syncUsers[\s\S]*PeopleStore\.mergeJiraUsers[\s\S]*backupAndReport/, "Kişiler ekranı JIRA kullanıcılarını yerel değişiklik olarak içe aktarmalı");
 assert.match(app, /function renderPeople[\s\S]*peopleSearchInput[\s\S]*person-avatar[\s\S]*person-source-badge[\s\S]*E-posta JIRA’da gizli/, "Kişiler ekranı JIRA profil bilgilerini, kaynağı ve gizli e-posta durumunu göstermeli");
 assert.match(css, /people-sync-panel/, "JIRA kullanıcı senkronizasyon paneli stillendirilmeli");
@@ -400,7 +434,7 @@ assert.match(app, /function beginJiraColumnResize[\s\S]*pointermove[\s\S]*jiraTa
 assert.match(app, /function renderJiraColumnOptions[\s\S]*checkbox[\s\S]*jiraTableLayout\.visible/, "JIRA kolonları görünümden çıkarılıp yeniden eklenebilmeli");
 assert.match(app, /function autoFitJiraColumns[\s\S]*scrollWidth[\s\S]*applyJiraColumnWidths/, "JIRA kolonları içerik genişliğine otomatik sığdırılmalı");
 assert.match(app, /function scheduleJiraAutoFit[\s\S]*requestAnimationFrame[\s\S]*autoFitJiraColumns\(false\)/, "JIRA otomatik sığdırma görünür tablo yerleşiminden sonra çalışmalı");
-assert.match(app, /function activateMainView[\s\S]*mainViewId === "jiraView"[\s\S]*scheduleJiraAutoFit\(\)[\s\S]*function activateJiraSubview[\s\S]*viewId === "jiraItemsView"[\s\S]*scheduleJiraAutoFit\(\)/, "JIRA Maddeleri tabı ve alt görünümü açıldığında kolonlar yeniden sığdırılmalı");
+assert.match(app, /function activateMainView[\s\S]*mainViewId === "jiraView"[\s\S]*activateJiraSubview\("jiraItemsView"\)[\s\S]*function activateJiraSubview[\s\S]*viewId === "jiraItemsView"[\s\S]*scheduleJiraAutoFit\(\)/, "JIRA Maddeleri tabı açıldığında madde görünümüne geçilmeli ve kolonlar yeniden sığdırılmalı");
 assert.match(css, /jira-issue-table[^{]*\{[^}]*width:\s*max-content[\s\S]*jira-column-resizer[^{]*\{[^}]*cursor:\s*col-resize/, "JIRA tablosu sıkı içerik genişliği ve kolon boyutlandırma tutamacı kullanmalı");
 assert.match(app, /DOMParser[\s\S]*#issuetable/, "JIRA HTML içe aktarma ayrıştırıcısı eksik");
 assert.match(jira, /mergeAll/, "JIRA HTML kayıtlarını birleştirme desteği eksik");

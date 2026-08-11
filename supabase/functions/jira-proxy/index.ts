@@ -242,18 +242,47 @@ Deno.serve(async (req: Request) => {
     }
 
     if (requestUrl.pathname === "/users" && method === "GET") {
-      const limit = Math.min(Math.max(Number(requestUrl.searchParams.get("maxResults")) || 1000, 1), 1000);
+      const query = String(requestUrl.searchParams.get("query") || "").trim().slice(0, 100);
+      if (query && query.length < 2) throw new HttpError("JIRA kullanıcı araması için en az 2 karakter girin.");
+      const defaultLimit = query ? 20 : 1000;
+      const maxLimit = query ? 50 : 1000;
+      const limit = Math.min(Math.max(Number(requestUrl.searchParams.get("maxResults")) || defaultLimit, 1), maxLimit);
       const users: any[] = [];
-      for (let startAt = 0; users.length < limit;) {
-        const pageSize = Math.min(100, limit - users.length);
-        const page = await jiraFetch(credentials, `/rest/api/3/users/search?${new URLSearchParams({ startAt: String(startAt), maxResults: String(pageSize) })}`);
-        const rows = Array.isArray(page) ? page : [];
-        users.push(...rows);
-        if (rows.length < pageSize) break;
-        startAt += rows.length;
+      if (query) {
+        const page = await jiraFetch(credentials, `/rest/api/3/user/search?${new URLSearchParams({ query, startAt: "0", maxResults: String(limit) })}`);
+        users.push(...(Array.isArray(page) ? page : []));
+      } else {
+        for (let startAt = 0; users.length < limit;) {
+          const pageSize = Math.min(100, limit - users.length);
+          const page = await jiraFetch(credentials, `/rest/api/3/users/search?${new URLSearchParams({ startAt: String(startAt), maxResults: String(pageSize) })}`);
+          const rows = Array.isArray(page) ? page : [];
+          users.push(...rows);
+          if (rows.length < pageSize) break;
+          startAt += rows.length;
+        }
       }
       const items = users.map(mapUser).filter((item) => item.jiraAccountId && item.fullName && item.active && (!item.accountType || item.accountType === "atlassian")).sort((a, b) => a.fullName.localeCompare(b.fullName, "tr", { sensitivity: "base" }));
-      return json({ items, total: items.length, site: credentials.baseUrl });
+      return json({ items, total: items.length, query, site: credentials.baseUrl });
+    }
+
+    if (requestUrl.pathname === "/issue-picker" && method === "GET") {
+      const query = String(requestUrl.searchParams.get("query") || "").trim().slice(0, 100);
+      if (query.length < 2) throw new HttpError("JIRA madde araması için en az 2 karakter girin.");
+      const params = new URLSearchParams({ query, currentJQL: "created is not EMPTY ORDER BY updated DESC", showSubTasks: "true", showSubTaskParent: "true" });
+      const payload = await jiraFetch(credentials, `/rest/api/3/issue/picker?${params}`);
+      const suggestions: any[] = [];
+      const seenKeys = new Set<string>();
+      for (const section of Array.isArray(payload.sections) ? payload.sections : []) {
+        for (const issue of Array.isArray(section.issues) ? section.issues : []) {
+          const key = String(issue?.key || "").trim().toUpperCase();
+          if (!key || seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          suggestions.push({ jiraIssueId: String(issue?.id || ""), name: key, description: String(issue?.summaryText || issue?.summary || "").replace(/<[^>]*>/g, "").trim(), url: `${credentials.baseUrl}/browse/${encodeURIComponent(key)}` });
+          if (suggestions.length >= 20) break;
+        }
+        if (suggestions.length >= 20) break;
+      }
+      return json({ items: suggestions, total: suggestions.length, query, site: credentials.baseUrl });
     }
 
     const transitionMatch = requestUrl.pathname.match(/^\/issues\/([^/]+)\/transitions$/);
@@ -279,9 +308,19 @@ Deno.serve(async (req: Request) => {
     if (requestUrl.pathname === "/issues" && method === "GET") {
       const jql = String(requestUrl.searchParams.get("jql") || "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC").trim();
       if (!jql || jql.length > 1000) throw new HttpError("JQL sorgusu 1–1000 karakter arasında olmalıdır.");
-      const maxResults = Math.min(Math.max(Number(requestUrl.searchParams.get("maxResults")) || 100, 1), 100);
-      const result = await jiraFetch(credentials, "/rest/api/3/search/jql", { method: "POST", body: JSON.stringify({ jql, maxResults, fields: issueFields }) });
-      return json({ items: (result.issues || []).map((issue: any) => mapIssue(issue, credentials.baseUrl)), nextPageToken: result.nextPageToken || "" });
+      const limit = Math.min(Math.max(Math.trunc(Number(requestUrl.searchParams.get("maxResults")) || 100), 1), 1000);
+      const issues: any[] = [];
+      let nextPageToken = "";
+      for (let page = 0; page < 10 && issues.length < limit; page += 1) {
+        const result = await jiraFetch(credentials, "/rest/api/3/search/jql", {
+          method: "POST",
+          body: JSON.stringify({ jql, maxResults: Math.min(100, limit - issues.length), fields: issueFields, ...(nextPageToken ? { nextPageToken } : {}) }),
+        });
+        issues.push(...(Array.isArray(result.issues) ? result.issues : []));
+        nextPageToken = String(result.nextPageToken || "");
+        if (!nextPageToken) break;
+      }
+      return json({ items: issues.map((issue: any) => mapIssue(issue, credentials.baseUrl)), nextPageToken, truncated: Boolean(nextPageToken) });
     }
 
     const worklogMatch = requestUrl.pathname.match(/^\/worklogs(?:\/([^/]+))?$/);
