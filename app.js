@@ -63,6 +63,7 @@
   let lastSupabaseSyncAt = null;
   let cloudUserSettings = {};
   let cloudSettingsSaveChain = Promise.resolve();
+  let cloudSettingsSavePending = 0;
   let jiraAutoFitFrame = 0;
   const JIRA_TABLE_COLUMNS = Object.freeze([
     { id: "issueType", label: "Issue Type", min: 76, max: 170 },
@@ -3324,6 +3325,7 @@
     }
     cloudUserSettings = { ...cloudUserSettings, ...patch };
     const snapshot = { ...cloudUserSettings };
+    cloudSettingsSavePending += 1;
     cloudSettingsSaveChain = cloudSettingsSaveChain
       .catch(() => null)
       .then(() => window.SupabaseCloud.updateUserSettings(snapshot))
@@ -3334,7 +3336,8 @@
       .catch((error) => {
         setSupabaseStatus(`Bulut ayarları kaydedilemedi: ${error.message}`, "error");
         return false;
-      });
+      })
+      .finally(() => { cloudSettingsSavePending = Math.max(0, cloudSettingsSavePending - 1); });
     return cloudSettingsSaveChain;
   }
 
@@ -3412,7 +3415,6 @@
       const reminderResult = window.ReminderStore.replaceAll(bundle.reminders || []);
       if (!reminderResult.valid) throw new Error(Object.values(reminderResult.errors || {}).join(" ") || "Hatırlatma verileri doğrulanamadı.");
       window.TaskStore.ensureHierarchy();
-      window.TaskStore.migrateExistingTasksToArchitectureRoadmap();
     });
     renderJiraItems();
     render();
@@ -3422,6 +3424,7 @@
 
   async function pullFromSupabase() {
     if (!supabaseSession?.user) throw new Error("Supabase hesabına giriş yapmanız gerekiyor.");
+    if (!await waitForDataSaves()) throw new Error("Bekleyen değişiklikler Supabase'e kaydedilemediği için bulut verileri yenilenmedi.");
     cloudDataReady = false;
     setCloudDataGate("loading");
     setSupabaseStatus("Supabase verileri otomatik yükleniyor…", "busy");
@@ -3453,7 +3456,8 @@
     if (!supabaseSession?.user || !cloudDataReady) {
       setCloudDataGate("signed_out", "Veri değişikliği için Supabase hesabının açık ve verilerin yüklenmiş olması gerekir.");
       setSupabaseStatus("Değişiklik kaydedilemedi: Supabase verileri hazır değil.", "error");
-      return Promise.resolve(false);
+      cloudSaveChain = Promise.resolve(false);
+      return cloudSaveChain;
     }
     const revision = ++cloudSaveRevision;
     cloudSavePending += 1;
@@ -3474,10 +3478,15 @@
     return cloudSaveChain;
   }
 
+  async function waitForDataSaves() {
+    try { return (await cloudSaveChain) !== false && cloudSavePending === 0; }
+    catch { return false; }
+  }
+
   async function waitForCloudSaves() {
     try {
-      await Promise.all([cloudSaveChain, cloudSettingsSaveChain]);
-      return cloudSavePending === 0;
+      const [dataSaved, settingsSaved] = await Promise.all([waitForDataSaves(), cloudSettingsSaveChain]);
+      return dataSaved && settingsSaved !== false && cloudSettingsSavePending === 0;
     }
     catch { return false; }
   }
@@ -3678,8 +3687,14 @@
         );
         payload.attachments = [...taskExistingAttachments, ...uploaded];
       }
+      const taskSnapshot = window.TaskStore.list();
       const result = editing ? window.TaskStore.update(taskFields.id.value, payload) : window.TaskStore.create({ id: taskId, ...payload });
       if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" "));
+      if (!await waitForDataSaves()) {
+        window.CloudDataRuntime.suspend(() => window.TaskStore.replaceAll(taskSnapshot));
+        renderTasks();
+        throw new Error("Supabase kaydı tamamlanamadı. Görev bellekte geri alındı; bağlantınızı kontrol edip yeniden deneyin.");
+      }
       if (creatingSubtask && selectedParent) expandedTaskIds.add(selectedParent.id);
       resetTaskForm();
       $("#taskFormMessage").textContent = editing ? "Görev güncellendi." : (creatingSubtask ? "Alt görev eklendi." : "Görev eklendi.");
@@ -4219,6 +4234,11 @@
     document.querySelectorAll(".header-menu[open]").forEach((menu) => {
       if (!menu.contains(event.target)) menu.open = false;
     });
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (cloudSavePending === 0 && cloudSettingsSavePending === 0) return;
+    event.preventDefault();
+    event.returnValue = "";
   });
 
   try {

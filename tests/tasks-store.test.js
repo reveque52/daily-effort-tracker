@@ -71,9 +71,8 @@ const childTask = store.list().find((task) => task.title === "Alt iş");
 assert.equal(childTask.parentTaskId, parentTask.id);
 assert.equal(store.remove(parentTask.id), false, "Alt görevi olan ana görev silinmemeli");
 
-const migration = store.migrateExistingTasksToArchitectureRoadmap();
-assert.equal(migration.updated, store.list().length);
-assert.ok(store.list().every((task) => task.taskType === "architecture_roadmap"));
-assert.equal(store.migrateExistingTasksToArchitectureRoadmap().updated, 0, "Dönüşüm yalnızca bir kez çalışmalı");
+const reloadedTasks = store.list();
+assert.equal(store.replaceAll(reloadedTasks).valid, true);
+assert.deepEqual(store.list().map((task) => task.taskType), reloadedTasks.map((task) => task.taskType), "Yeniden yükleme görev tiplerini değiştirmemeli");
 
 console.log("✓ görev doğrulama, ana görev-alt görev ilişkisi, CRUD, toplu içe aktarma ve yedek geri yükleme");
