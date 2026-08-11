@@ -234,7 +234,7 @@ assert.match(html, /taskTypeGroupTemplate[\s\S]*task-type-group-total[\s\S]*data
 assert.match(app, /function groupTasksByType[\s\S]*priorities:[\s\S]*high:[\s\S]*medium:[\s\S]*low:[\s\S]*none:/, "Görevler tip bazında toplam ve öncelik sayılarına göre gruplanmalı");
 assert.match(app, /task-type-group-toggle[\s\S]*new URLSearchParams\(\{ type: group\.taskType \}\)[\s\S]*task-type-report\.html\?\$\{params\}/, "Görev tipi başlığı ayrı rapor sayfasına yönlenmeli");
 assert.match(css, /task-type-priority-count\[data-priority="high"\][\s\S]*task-type-priority-count\[data-priority="medium"\][\s\S]*task-type-priority-count\[data-priority="low"\]/, "Öncelik sayaçları farklı renklerle gösterilmeli");
-assert.match(app, /migrateExistingTasksToArchitectureRoadmap\(\)/, "Mevcut görevler Architecture Roadmap tipine dönüştürülmeli");
+assert.doesNotMatch(app, /replaceLocalBundle[\s\S]*migrateExistingTasksToArchitectureRoadmap\(\)[\s\S]*async function pullFromSupabase/, "Buluttan yüklenen görevlerin tipi sayfa yenilemesinde değiştirilmemeli");
 assert.match(html, /task-report-table[\s\S]*<thead><tr><th>Görev<\/th><th class="task-status-column">Durum<\/th><\/tr><\/thead>/, "Yapılacak İşler raporunda yalnızca Görev ve Durum başlıkları olmalı");
 assert.doesNotMatch(html, /<thead><tr><th>Görev<\/th><th class="task-status-column">Durum<\/th><th/, "Görev ve Durum dışında ana rapor sütunu bulunmamalı");
 assert.match(taskDetailHtml, /task-detail-overview-table[\s\S]*Tamamlandı[\s\S]*Görev \/ Alt Görev[\s\S]*Bağlı Ana Görev[\s\S]*Atanan \/ Kimde Bekliyor[\s\S]*Öncelik[\s\S]*Yıl \/ Çeyrek[\s\S]*Teslim Tarihi[\s\S]*Durum[\s\S]*İşlemler/, "Eski rapor sütunlarının tamamı ayrı görev detay sayfasında gösterilmeli");
@@ -414,6 +414,9 @@ assert.doesNotMatch([dataStore, tasks, peopleStore, jira, reminders].join("\n"),
 assert.match(app, /supabaseAuthForm[\s\S]*SupabaseCloud\.signIn[\s\S]*supabaseSignUp[\s\S]*SupabaseCloud\.signUp[\s\S]*supabaseForgotPassword[\s\S]*sendPasswordReset/, "Supabase hesap menüsü giriş, kayıt ve e-posta şifre yenilemeye bağlanmalı");
 assert.match(app, /function refreshSupabaseAccount[\s\S]*ensureCloudDataLoaded\(\)[\s\S]*function pullFromSupabase[\s\S]*replaceLocalBundle[\s\S]*setCloudDataGate\("ready"\)/, "Supabase oturumu açıldığında bulut verileri otomatik yüklenmeli");
 assert.match(app, /function queueCloudChange[\s\S]*SupabaseCloud\.applyChanges\(change\)[\s\S]*Tüm değişiklikler Supabase’e kaydedildi/, "Her bellek değişikliği otomatik olarak Supabase'e gönderilmeli");
+assert.match(app, /taskForm\.addEventListener\("submit"[\s\S]*TaskStore\.(?:update|create)[\s\S]*await waitForDataSaves\(\)[\s\S]*Görev bellekte geri alındı/, "Görev formu başarı bildirmeden önce Supabase kaydını beklemeli ve hata halinde belleği geri almalı");
+assert.match(app, /async function pullFromSupabase[\s\S]*await waitForDataSaves\(\)[\s\S]*SupabaseCloud\.pullBundle/, "Buluttan yenileme bekleyen kayıtları tamamlamadan belleği değiştirmemeli");
+assert.match(app, /addEventListener\("beforeunload"[\s\S]*cloudSavePending[\s\S]*event\.preventDefault/, "Bekleyen Supabase kaydı sırasında sayfa yenileme uyarısı gösterilmeli");
 assert.match(app, /CloudDataRuntime\.setChangeHandler\(queueCloudChange\)/, "Bulut çalışma katmanı otomatik Supabase kaydına bağlanmalı");
 assert.doesNotMatch(html, /id="supabasePush"|Yerel verileri gönder|Supabase’den yükle/, "Bulut-öncelikli uygulamada manuel yerel veri gönderme akışı bulunmamalı");
 assert.match(taskDetailApp, /initializeTaskDetail[\s\S]*SupabaseCloud\.getSession[\s\S]*SupabaseCloud\.pullBundle[\s\S]*TaskStore\.replaceAll/, "Görev detay sayfası veriyi Supabase'den yüklemeli");

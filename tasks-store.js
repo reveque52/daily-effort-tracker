@@ -9,7 +9,6 @@
   const MAX_DESCRIPTION_HTML_LENGTH = 50000;
   const MAX_ATTACHMENTS = 100;
   let fallbackRows = [];
-  let architectureMigrationDone = false;
 
   function normalizeAttachment(input) {
     const webViewLink = String(input?.webViewLink || "").trim();
@@ -203,23 +202,5 @@
     return { created, linked, total: rows.length };
   }
 
-  function migrateExistingTasksToArchitectureRoadmap() {
-    const rows = readAll();
-    if (architectureMigrationDone) {
-      return { updated: 0, total: rows.length };
-    }
-    const now = new Date().toISOString();
-    let updated = 0;
-    rows.forEach((task) => {
-      if (task.taskType === "architecture_roadmap") return;
-      task.taskType = "architecture_roadmap";
-      task.updatedAt = now;
-      updated += 1;
-    });
-    if (updated) writeAll(rows);
-    architectureMigrationDone = true;
-    return { updated, total: rows.length };
-  }
-
-  global.TaskStore = Object.freeze({ STORAGE_KEY, STATUSES, PRIORITIES, QUARTERS, TASK_TYPES, validate, list, get, create, update, remove, replaceAll, mergeAll, ensureHierarchy, migrateExistingTasksToArchitectureRoadmap });
+  global.TaskStore = Object.freeze({ STORAGE_KEY, STATUSES, PRIORITIES, QUARTERS, TASK_TYPES, validate, list, get, create, update, remove, replaceAll, mergeAll, ensureHierarchy });
 })(window);
