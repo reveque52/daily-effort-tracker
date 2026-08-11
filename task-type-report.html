@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Görev tipine göre detaylı görev raporu.">
     <title>Görev Tipi Raporu · Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260811-3">
+    <link rel="stylesheet" href="styles.css?v=20260811-5">
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="tasks-store.js?v=20260811-2" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
     <script src="supabase-cloud.js?v=20260811-3" defer></script>
-    <script src="task-type-report.js?v=20260811-1" defer></script>
+    <script src="task-type-report.js?v=20260811-2" defer></script>
   </head>
   <body class="task-detail-page task-type-report-page">
     <header class="task-detail-page-header">
@@ -38,10 +38,25 @@
         </div>
 
         <section class="panel task-type-report-card" aria-labelledby="taskTypeReportTableTitle">
-          <div class="task-detail-page-section-heading task-type-report-heading"><span class="eyebrow">Detaylı rapor</span><h2 id="taskTypeReportTableTitle">Görevler</h2></div>
-          <div class="task-type-report-scroll">
-            <table class="task-detail-overview-table task-type-report-table">
-              <thead><tr><th>Tamamlandı</th><th>Görev / Alt Görev</th><th>Bağlı Ana Görev</th><th>Atanan / Kimde Bekliyor</th><th>Öncelik</th><th>Yıl / Çeyrek</th><th>Teslim Tarihi</th><th>Durum</th><th>İşlemler</th></tr></thead>
+          <div class="task-detail-page-section-heading task-type-report-heading">
+            <div><span class="eyebrow">Detaylı rapor</span><h2 id="taskTypeReportTableTitle">Görevler</h2></div>
+            <div class="task-type-report-tools">
+              <details id="taskTypeReportColumnManager" class="jira-column-manager task-report-column-manager">
+                <summary>Kolonlar</summary>
+                <div class="jira-column-popover task-report-column-popover">
+                  <strong>Gösterilecek kolonlar</strong>
+                  <small>Raporda görmek istediğiniz alanları seçin. En az bir kolon açık kalır.</small>
+                  <div id="taskTypeReportColumnOptions" class="jira-column-options"></div>
+                  <div class="jira-column-actions"><button id="resetTaskTypeReportColumns" class="button secondary" type="button">Varsayılana dön</button></div>
+                </div>
+              </details>
+              <button id="taskTypeReportFitToggle" class="button secondary active" type="button" aria-pressed="true">Ekrana sığdır: Açık</button>
+            </div>
+          </div>
+          <p id="taskTypeReportColumnStatus" class="jira-column-status" role="status" aria-live="polite">Tüm kolonlar ekrana sığdırılıyor.</p>
+          <div id="taskTypeReportScroll" class="task-type-report-scroll fit-screen">
+            <table id="taskTypeReportTable" class="task-detail-overview-table task-type-report-table">
+              <thead><tr id="taskTypeReportHeaderRow"></tr></thead>
               <tbody id="taskTypeReportBody"></tbody>
             </table>
           </div>
