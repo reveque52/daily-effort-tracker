@@ -22,10 +22,11 @@ function close(server) {
   assert.equal(built.payload.started, "2026-08-07T09:00:00.000+0300");
   assert.equal(built.payload.comment.content[0].content[0].text, "Teknik hazırlık");
 
-  const mapped = mapJiraIssue({ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", status: { name: "Open" } } }, "https://fit-global.atlassian.net");
+  const mapped = mapJiraIssue({ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", assignee: { accountId: "account-1", displayName: "Test User" }, status: { name: "Open" } } }, "https://fit-global.atlassian.net");
   assert.equal(mapped.name, "DIP-43");
   assert.equal(mapped.description, "Technical Preparations");
   assert.equal(mapped.url, "https://fit-global.atlassian.net/browse/DIP-43");
+  assert.equal(mapped.assigneeAccountId, "account-1");
 
   const mappedUser = mapJiraUser({ accountId: "account-1", displayName: "Test User", emailAddress: "test@example.com", active: true, accountType: "atlassian", timeZone: "Europe/Istanbul", avatarUrls: { "48x48": "https://avatar.example.com/test.png" } });
   assert.equal(mappedUser.jiraAccountId, "account-1");
@@ -71,7 +72,7 @@ function close(server) {
         }
         return Response.json({ issues: [{ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", issuetype: { name: "Task" }, status: { name: "Open" } } }] });
       }
-      if (url.includes("/rest/api/3/issue/RD-179?fields=")) return Response.json({ id: "10179", key: "RD-179", fields: { summary: "Version Packaging", issuetype: { name: "Task" }, assignee: { displayName: "Test User" }, reporter: { displayName: "Reporter" }, priority: { name: "Low" }, status: { name: "In Progress" }, resolution: null, created: "2026-01-01T09:00:00.000+0300", updated: "2026-08-07T09:00:00.000+0300", duedate: "2026-12-31" } });
+      if (url.includes("/rest/api/3/issue/RD-179?fields=")) return Response.json({ id: "10179", key: "RD-179", fields: { summary: "Version Packaging", issuetype: { name: "Task" }, assignee: { accountId: "account-1", displayName: "Test User" }, reporter: { displayName: "Reporter" }, priority: { name: "Low" }, status: { name: "In Progress" }, resolution: null, created: "2026-01-01T09:00:00.000+0300", updated: "2026-08-07T09:00:00.000+0300", duedate: "2026-12-31" } });
       if (url.endsWith("/rest/api/3/issue/DIP-43/transitions") && options.method === "POST") return new Response(null, { status: 204 });
       if (url.endsWith("/rest/api/3/issue/DIP-43/transitions")) return Response.json({ transitions: [{ id: "31", to: { name: "In Progress" } }, { id: "41", to: { name: "Closed" } }] });
       if (url.includes("/rest/api/3/issue/DIP-43?fields=")) return Response.json({ id: "10001", key: "DIP-43", fields: { summary: "Technical Preparations", issuetype: { name: "Task" }, status: { name: "In Progress" } } });
@@ -143,6 +144,7 @@ function close(server) {
     assert.equal(singleIssue.item.name, "RD-179");
     assert.equal(singleIssue.item.description, "Version Packaging");
     assert.equal(singleIssue.item.assignee, "Test User");
+    assert.equal(singleIssue.item.assigneeAccountId, "account-1");
     assert.equal(singleIssue.item.priority, "Low");
 
     const transitioned = await fetch(`${baseUrl}/api/jira/issues/DIP-43/transitions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targetStatus: "In Progress" }) }).then((response) => response.json());

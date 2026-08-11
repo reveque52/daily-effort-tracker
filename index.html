@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260811-6">
+    <link rel="stylesheet" href="styles.css?v=20260811-11">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
@@ -21,10 +21,57 @@
     <script src="google-calendar.js?v=20260810-1" defer></script>
     <script src="weather-client.js?v=20260811-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
-    <script src="supabase-cloud.js?v=20260811-3" defer></script>
-    <script src="app.js?v=20260811-7" defer></script>
+    <script src="supabase-cloud.js?v=20260811-4" defer></script>
+    <script src="app.js?v=20260811-9" defer></script>
   </head>
-  <body>
+  <body class="auth-required">
+    <section id="loginScreen" class="login-screen" aria-labelledby="loginScreenTitle">
+      <div class="login-shell">
+        <aside class="login-brand-panel" aria-label="Günlük Efor Takibi tanıtımı">
+          <div class="login-brand-mark" aria-hidden="true">EF</div>
+          <div>
+            <span class="login-kicker">Çalışma günlüğü</span>
+            <h1>Günlük işlerinizi tek merkezden yönetin.</h1>
+            <p>Eforlarınızı, görevlerinizi ve JIRA kayıtlarınızı güvenli Supabase hesabınızla her cihazda güncel tutun.</p>
+          </div>
+          <ul class="login-feature-list" aria-label="Uygulama özellikleri">
+            <li><span aria-hidden="true">✓</span> Efor ve timesheet takibi</li>
+            <li><span aria-hidden="true">✓</span> Görev ve ekip yönetimi</li>
+            <li><span aria-hidden="true">✓</span> JIRA ve takvim entegrasyonları</li>
+          </ul>
+          <small>Verileriniz yalnızca giriş yaptığınız Supabase çalışma alanından yüklenir.</small>
+        </aside>
+
+        <div class="login-card">
+          <div class="login-card-heading">
+            <span class="eyebrow">Supabase ile güvenli giriş</span>
+            <h2 id="loginScreenTitle">Tekrar hoş geldiniz</h2>
+            <p>Çalışma alanınıza devam etmek için hesabınıza giriş yapın.</p>
+          </div>
+
+          <p id="loginScreenStatus" class="login-screen-status is-busy" role="status" aria-live="polite">Oturumunuz kontrol ediliyor…</p>
+
+          <form id="loginScreenForm" class="login-screen-form">
+            <label>
+              <span>E-posta</span>
+              <input id="loginScreenEmail" type="email" autocomplete="email" required placeholder="adiniz@firma.com">
+            </label>
+            <label>
+              <span>Şifre</span>
+              <input id="loginScreenPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="En az 8 karakter">
+            </label>
+            <button id="loginScreenSignIn" class="button primary login-primary-action" type="submit">Giriş yap</button>
+            <div class="login-secondary-actions">
+              <button id="loginScreenSignUp" class="button secondary" type="button">Hesap oluştur</button>
+              <button id="loginScreenForgotPassword" class="button link-button" type="button">Şifremi unuttum</button>
+            </div>
+          </form>
+
+          <p class="login-security-note"><span aria-hidden="true">●</span> Oturumunuz Supabase tarafından güvenli biçimde yönetilir.</p>
+        </div>
+      </div>
+    </section>
+
     <header class="page-header">
       <div class="header-copy">
         <span class="eyebrow">Çalışma günlüğü</span>
@@ -268,8 +315,12 @@
               </div>
             </div>
             <div class="outlook-calendar-toolbar">
-              <label class="filter-control"><span>Görünüm</span><select id="outlookCalendarRange"><option value="7">7 gün</option><option value="14" selected>14 gün</option><option value="30">30 gün</option></select></label>
-              <strong id="outlookCalendarPeriod">Bugünden itibaren 14 gün</strong>
+              <div class="calendar-month-navigation" role="group" aria-label="Takvim ayında gezinme">
+                <button id="calendarPreviousMonth" class="calendar-nav-button" type="button" aria-label="Önceki ay">‹</button>
+                <strong id="outlookCalendarPeriod">Ağustos 2026</strong>
+                <button id="calendarToday" class="calendar-today-button" type="button">Bugün</button>
+                <button id="calendarNextMonth" class="calendar-nav-button" type="button" aria-label="Sonraki ay">›</button>
+              </div>
               <details id="outlookCalendarSettings" class="outlook-calendar-settings">
                 <summary>Outlook bağlantı ayarları</summary>
                 <div class="outlook-settings-grid">
@@ -288,8 +339,8 @@
               </details>
             </div>
             <p id="outlookCalendarStatus" class="outlook-calendar-status" role="status" aria-live="polite">Takvim sağlayıcınızı seçip hesabınızla bağlanın.</p>
-            <div id="outlookCalendarEmpty" class="dashboard-empty">Bu tarih aralığında etkinlik bulunmuyor.</div>
-            <div id="outlookCalendarList" class="outlook-calendar-list" aria-live="polite"></div>
+            <div id="outlookCalendarList" class="calendar-month-view" role="grid" aria-label="Aylık takvim" aria-live="polite"></div>
+            <div id="outlookCalendarEmpty" class="calendar-empty-note">Bu ay etkinlik bulunmuyor.</div>
           </section>
 
           <section class="panel home-quick-reminder" aria-labelledby="reminderPanelTitle">
@@ -642,6 +693,21 @@
             <div class="panel-heading jira-list-heading">
               <div><span class="eyebrow">JIRA issue navigator</span><h2 id="jiraListTitle">JIRA maddeleri</h2></div>
               <div class="jira-list-tools">
+                <div class="filter-control jira-assignee-filter-control">
+                  <span>Atanan kullanıcı</span>
+                  <div id="jiraAssigneeFilterPicker" class="task-assignee-picker jira-assignee-filter-picker">
+                    <button id="jiraAssigneeFilterButton" class="jira-picker-trigger task-assignee-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="jiraAssigneeFilterDropdown">
+                      <span id="jiraAssigneeFilterValue">Tüm kullanıcılar</span><span aria-hidden="true">⌄</span>
+                    </button>
+                    <div id="jiraAssigneeFilterDropdown" class="jira-picker-dropdown task-assignee-picker-dropdown hidden">
+                      <input id="jiraAssigneeFilterSearch" type="search" autocomplete="off" placeholder="JIRA kullanıcısı ara…" aria-label="JIRA maddelerinde atanan kullanıcıyı ara" aria-controls="jiraAssigneeFilterOptions">
+                      <div id="jiraAssigneeFilterSearchStatus" class="jira-picker-count" aria-live="polite">Ad yazdıkça yerel kişiler filtrelenir.</div>
+                      <div id="jiraAssigneeFilterOptions" class="jira-picker-options task-assignee-options" role="listbox" aria-label="JIRA maddeleri atanan kullanıcı filtresi"></div>
+                    </div>
+                  </div>
+                  <small id="jiraAssigneeFilterStatus" role="status" aria-live="polite">Tüm kullanıcılar gösteriliyor.</small>
+                  <button id="clearJiraAssigneeFilter" class="jira-assignee-filter-clear hidden" type="button">Filtreyi temizle</button>
+                </div>
                 <label class="filter-control"><span>Tabloda ara</span><input id="jiraSearchInput" type="search" placeholder="Key, summary, kişi..."></label>
                 <details id="jiraColumnManager" class="jira-column-manager">
                   <summary>Kolonlar</summary>
@@ -678,7 +744,25 @@
         <section id="jiraRequestsView" class="panel jira-subview jira-requests-panel hidden" aria-labelledby="jiraRequestsTitle">
           <div class="panel-heading jira-requests-heading">
             <div><span class="eyebrow">Durum bazlı görünüm</span><h2 id="jiraRequestsTitle">Talepler</h2></div>
-            <div class="jira-requests-tools"><label class="filter-control"><span>Taleplerde ara</span><input id="jiraRequestsSearch" type="search" placeholder="Key, summary, kişi, statü..."></label><strong id="jiraRequestTotal" class="task-count-badge">0 talep</strong></div>
+            <div class="jira-requests-tools">
+              <div class="filter-control jira-assignee-filter-control">
+                <span>Atanan kullanıcı</span>
+                <div id="jiraRequestsAssigneeFilterPicker" class="task-assignee-picker jira-assignee-filter-picker">
+                  <button id="jiraRequestsAssigneeFilterButton" class="jira-picker-trigger task-assignee-picker-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="jiraRequestsAssigneeFilterDropdown">
+                    <span id="jiraRequestsAssigneeFilterValue">Tüm kullanıcılar</span><span aria-hidden="true">⌄</span>
+                  </button>
+                  <div id="jiraRequestsAssigneeFilterDropdown" class="jira-picker-dropdown task-assignee-picker-dropdown hidden">
+                    <input id="jiraRequestsAssigneeFilterSearch" type="search" autocomplete="off" placeholder="JIRA kullanıcısı ara…" aria-label="Taleplerde atanan kullanıcıyı ara" aria-controls="jiraRequestsAssigneeFilterOptions">
+                    <div id="jiraRequestsAssigneeFilterSearchStatus" class="jira-picker-count" aria-live="polite">Ad yazdıkça yerel kişiler filtrelenir.</div>
+                    <div id="jiraRequestsAssigneeFilterOptions" class="jira-picker-options task-assignee-options" role="listbox" aria-label="Talepler atanan kullanıcı filtresi"></div>
+                  </div>
+                </div>
+                <small id="jiraRequestsAssigneeFilterStatus" role="status" aria-live="polite">Tüm kullanıcılar gösteriliyor.</small>
+                <button id="clearJiraRequestsAssigneeFilter" class="jira-assignee-filter-clear hidden" type="button">Filtreyi temizle</button>
+              </div>
+              <label class="filter-control"><span>Taleplerde ara</span><input id="jiraRequestsSearch" type="search" placeholder="Key, summary, kişi, statü..."></label>
+              <strong id="jiraRequestTotal" class="task-count-badge">0 talep</strong>
+            </div>
           </div>
           <div class="jira-request-filterbar">
             <div><strong>Gösterilecek statüler</strong><div id="jiraRequestStatusFilters" class="jira-request-status-filters" aria-label="Gösterilecek JIRA statüleri"></div></div>

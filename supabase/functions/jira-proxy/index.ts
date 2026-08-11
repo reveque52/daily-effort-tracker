@@ -61,6 +61,7 @@ function mapIssue(issue: any, baseUrl: string) {
     description: String(fields.summary || issue?.key || "JIRA maddesi"),
     url: `${baseUrl}/browse/${encodeURIComponent(issue?.key || "")}`,
     assignee: String(fields.assignee?.displayName || ""),
+    assigneeAccountId: String(fields.assignee?.accountId || ""),
     reporter: String(fields.reporter?.displayName || ""),
     priority: String(fields.priority?.name || ""),
     status: String(fields.status?.name || "Open"),

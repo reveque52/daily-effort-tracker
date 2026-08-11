@@ -66,7 +66,7 @@
   }
 
   async function signOut() {
-    const { error } = await getClient().auth.signOut();
+    const { error } = await getClient().auth.signOut({ scope: "local" });
     throwIfError(error);
   }
 
