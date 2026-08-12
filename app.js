@@ -47,6 +47,15 @@
   let calendarEvents = [];
   let calendarViewDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
   let activeCalendarProvider = "google";
+  let activeTheme = "violet";
+  const APP_THEMES = Object.freeze({
+    violet: { label: "Mor", menuLabel: "Mor tema" },
+    ocean: { label: "Okyanus", menuLabel: "Okyanus teması" },
+    forest: { label: "Orman", menuLabel: "Orman teması" },
+    sunset: { label: "Günbatımı", menuLabel: "Günbatımı teması" },
+    midnight: { label: "Gece", menuLabel: "Gece teması", dark: true },
+    graphite: { label: "Kömür", menuLabel: "Kömür teması", dark: true }
+  });
   let homeEffortChartPeriod = "week";
   const DEFAULT_WEATHER_LOCATION = Object.freeze({ name: "İstanbul", detail: "Türkiye", latitude: 41.0082, longitude: 28.9784, timezone: "Europe/Istanbul" });
   let weatherLocation = { ...DEFAULT_WEATHER_LOCATION };
@@ -135,6 +144,43 @@
   const addDays = (date, days) => { const next = new Date(date); next.setDate(next.getDate() + days); return next; };
   const getJiraItem = (id) => id === DUMMY_JIRA.id ? DUMMY_JIRA : (id ? window.JiraStore.get(id) : null);
 
+  function normalizeTheme(value) {
+    const theme = String(value || "").trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(APP_THEMES, theme) ? theme : "violet";
+  }
+
+  function setThemeStatus(message, state = "") {
+    const status = $("#themeStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("is-success", state === "success");
+    status.classList.toggle("is-error", state === "error");
+  }
+
+  async function applyTheme(value, { persist = false } = {}) {
+    const theme = normalizeTheme(value);
+    const meta = APP_THEMES[theme];
+    activeTheme = theme;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = meta.dark ? "dark" : "light";
+    if ($("#headerThemeMenuLabel")) $("#headerThemeMenuLabel").textContent = meta.menuLabel;
+    if ($("#themeSelectionBadge")) $("#themeSelectionBadge").textContent = meta.label;
+    document.querySelectorAll("[data-theme-option]").forEach((button) => {
+      const selected = button.dataset.themeOption === theme;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-checked", String(selected));
+    });
+    setThemeStatus(`${meta.label} tema etkin.`);
+
+    if (!persist) return;
+    setThemeStatus("Tema tercihi kaydediliyor…");
+    try {
+      await queueCloudUserSettings({ theme });
+      setThemeStatus(`${meta.label} tema etkin ve hesabınıza kaydedildi.`, "success");
+    } catch (error) {
+      setThemeStatus(error.message || "Tema tercihi kaydedilemedi.", "error");
+    }
+  }
   function weatherLocationText(location = weatherLocation) {
     return [location.name, location.detail].filter(Boolean).join(", ");
   }
@@ -4161,6 +4207,7 @@
   function applyCloudUserSettings(settings = {}) {
     cloudUserSettings = settings && typeof settings === "object" ? { ...settings } : {};
     activeCalendarProvider = cloudUserSettings.calendarProvider === "outlook" ? "outlook" : "google";
+    applyTheme(cloudUserSettings.theme || "violet");
     jiraTableLayout = loadJiraTableLayout(cloudUserSettings.jiraTableLayout);
     window.DriveSync?.setClientId(cloudUserSettings.googleClientId || "");
     window.DriveSync?.setLastBackupTime(cloudUserSettings.lastDriveBackupAt || "");
@@ -5289,6 +5336,12 @@
     $("#driveHeaderMenu").open = false;
   });
 
+  document.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await applyTheme(button.dataset.themeOption, { persist: true });
+      button.closest(".header-menu")?.removeAttribute("open");
+    });
+  });
   document.querySelectorAll(".header-menu").forEach((menu) => {
     menu.addEventListener("toggle", () => {
       if (!menu.open) return;
