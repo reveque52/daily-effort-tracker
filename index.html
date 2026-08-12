@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="tr">
+<html lang="tr" data-theme="violet">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260811-11">
+    <link rel="stylesheet" href="styles.css?v=20260812-2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
@@ -22,7 +22,7 @@
     <script src="weather-client.js?v=20260811-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
     <script src="supabase-cloud.js?v=20260811-4" defer></script>
-    <script src="app.js?v=20260811-9" defer></script>
+    <script src="app.js?v=20260812-2" defer></script>
   </head>
   <body class="auth-required">
     <section id="loginScreen" class="login-screen" aria-labelledby="loginScreenTitle">
@@ -123,6 +123,48 @@
         </nav>
 
         <nav class="header-utility-nav" aria-label="Bulut, yedekleme ve entegrasyon menüleri">
+          <details id="themeHeaderMenu" class="header-menu header-theme-menu">
+            <summary>
+              <span class="header-menu-icon theme-menu-icon" aria-hidden="true">◐</span>
+              <span class="header-menu-copy"><small>Görünüm</small><strong id="headerThemeMenuLabel">Mor tema</strong></span>
+            </summary>
+            <div class="header-menu-popover theme-header-popover">
+              <section class="theme-panel" aria-labelledby="themePanelTitle">
+                <div class="theme-panel-heading">
+                  <div><span class="eyebrow">Kişiselleştirme</span><h2 id="themePanelTitle">Uygulama teması</h2></div>
+                  <span id="themeSelectionBadge" class="theme-selection-badge">Mor</span>
+                </div>
+                <p>Renk paletini seçin. Tercihiniz Supabase hesabınıza kaydedilir ve tüm cihazlarda uygulanır.</p>
+                <div id="themeOptionList" class="theme-option-list" role="radiogroup" aria-label="Uygulama teması">
+                  <button class="theme-option" type="button" data-theme-option="violet" role="radio" aria-checked="true">
+                    <span class="theme-option-preview theme-preview-violet" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Mor</strong><small>Dengeli ve odaklı</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="ocean" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-ocean" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Okyanus</strong><small>Temiz ve ferah</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="forest" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-forest" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Orman</strong><small>Sakin ve doğal</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="sunset" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-sunset" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Günbatımı</strong><small>Sıcak ve enerjik</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="midnight" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-midnight" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Gece</strong><small>Derin ve odaklı</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="graphite" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-graphite" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Kömür</strong><small>Nötr ve sade</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                </div>
+                <p id="themeStatus" class="theme-status" role="status" aria-live="polite">Mor tema etkin.</p>
+              </section>
+            </div>
+          </details>
           <details id="supabaseHeaderMenu" class="header-menu header-supabase-menu">
             <summary>
               <span class="header-menu-icon" aria-hidden="true">S</span>
