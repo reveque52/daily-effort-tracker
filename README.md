@@ -101,6 +101,21 @@ Timesheet ekranındaki **JIRA eforlarını getir** düğmesi, seçili tarih aral
 
 GitHub Pages yalnızca statik frontend'i barındırır. Yayındaki canlı JIRA bağlantısı kullanıcı bazlı Supabase Auth oturumu ve `jira-proxy` Edge Function üzerinden otomatik çalışır; servis adresi arayüzde ayrıca ayarlanmaz.
 
+## Sistem erişim logları
+
+Uygulama her Supabase oturumunda giriş zamanını, dakikalık son görülme bilgisini, çıkış zamanını, Edge Function tarafından belirlenen IP adresini ve tarayıcı bilgisini `user_access_logs` tablosuna yazar. **Sistem Logları** sekmesi yalnızca `selcuk.dere@fit-global.com` hesabında görünür. Aynı kısıtlama `access-log` Edge Function ve tablonun RLS politikasında da uygulanır; diğer kullanıcılar arayüzü değiştirseler bile logları okuyamaz.
+
+Canlı Supabase projesine ek özelliği dağıtmak için Supabase CLI oturumu açıldıktan sonra:
+
+```powershell
+npx.cmd supabase login
+npx.cmd supabase link --project-ref yspvrxngxjpxlxcfqhqt
+npx.cmd supabase db push
+npx.cmd supabase functions deploy access-log
+```
+
+Tarayıcı normal biçimde kapatıldığında çıkış kaydı gönderilmeye çalışılır. Ani bağlantı kesilmesi veya bilgisayarın kapanması durumunda oturum süresi son başarılı heartbeat zamanına kadar hesaplanır ve kayıt **Bağlantı kesildi** olarak gösterilir.
+
 ## Google ve Outlook Takvim entegrasyonu
 
 Ana sayfadaki Takvim alanında **Google Takvim** veya **Outlook** seçilebilir. Etkinlikler yalnızca görüntülenir; yerel kayıtlara ya da Drive yedeğine kopyalanmaz. Google için `calendar.events.readonly`, Outlook için `Calendars.ReadBasic` izni kullanılır ve tarayıcı kodunda client secret tutulmaz.

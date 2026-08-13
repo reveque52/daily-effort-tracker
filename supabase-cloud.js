@@ -338,6 +338,49 @@
     return data || {};
   }
 
+  async function invokeAccessLog(action, payload = {}) {
+    const session = await getSession();
+    if (!session?.user) throw new Error("Erişim logu için Supabase oturumu gerekli.");
+    const { data, error } = await getClient().functions.invoke("access-log", {
+      body: { action: String(action || ""), ...(payload && typeof payload === "object" ? payload : {}) }
+    });
+    if (error) {
+      let message = error.message || "Erişim logu servisine ulaşılamadı.";
+      try {
+        const details = await error.context?.json?.();
+        if (details?.error) message = details.error;
+      } catch { /* Supabase istemci hatası kullanılır. */ }
+      throw new Error(message);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data || {};
+  }
+
+  function trackAccess(action, sessionId, details = {}) {
+    return invokeAccessLog(action, { sessionId, ...details });
+  }
+
+  function listAccessLogs(filters = {}) {
+    return invokeAccessLog("list", filters);
+  }
+
+  function trackAccessOnUnload(sessionId, accessToken, reason = "page_closed") {
+    if (!sessionId || !accessToken) return false;
+    try {
+      fetch(`${PROJECT_URL}/functions/v1/access-log`, {
+        method: "POST",
+        keepalive: true,
+        headers: {
+          "Content-Type": "application/json",
+          apikey: PUBLISHABLE_KEY,
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ action: "end", sessionId, reason })
+      }).catch(() => null);
+      return true;
+    } catch { return false; }
+  }
+
   global.SupabaseCloud = Object.freeze({
     PROJECT_URL,
     TABLES,
@@ -356,6 +399,9 @@
     applyChanges,
     pushBundle,
     getRemoteSummary,
-    invokeJira
+    invokeJira,
+    trackAccess,
+    listAccessLogs,
+    trackAccessOnUnload
   });
 })(window);

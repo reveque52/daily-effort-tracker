@@ -22,6 +22,8 @@ const weatherClient = fs.readFileSync(path.join(root, "weather-client.js"), "utf
 const supabaseCloudClient = fs.readFileSync(path.join(root, "supabase-cloud.js"), "utf8");
 const jiraEdgeFunction = fs.readFileSync(path.join(root, "supabase", "functions", "jira-proxy", "index.ts"), "utf8");
 const jiraVaultMigration = fs.readFileSync(path.join(root, "supabase", "migrations", "20260810190000_jira_credentials_vault.sql"), "utf8");
+const accessLogEdgeFunction = fs.readFileSync(path.join(root, "supabase", "functions", "access-log", "index.ts"), "utf8");
+const accessLogMigration = fs.readFileSync(path.join(root, "supabase", "migrations", "20260813090000_user_access_logs.sql"), "utf8");
 const aiServer = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
 const taskDetailHtml = fs.readFileSync(path.join(root, "task-detail.html"), "utf8");
@@ -77,6 +79,7 @@ const requiredIds = [
   "modalRepeatEntryToggleField", "modalRepeatEntryToggle",
   "teamView", "peopleView", "peopleTabCount", "syncJiraUsers", "jiraPeopleSyncTitle", "jiraPeopleSyncStatus", "jiraPeopleCount", "manualPeopleCount", "personForm", "personId", "personJiraIdentity", "personJiraIdentityAvatar", "personJiraIdentityName", "personJiraIdentityAccount", "personFullNameInput", "personEmailInput", "personTitleInput", "personRoleInput", "personManagerInput", "personFormMessage", "personFormTitle", "personSubmitLabel", "cancelPersonEdit", "peopleListTitle", "peopleCount", "peopleSearchInput", "peopleSourceFilter", "peopleEmptyState", "peopleFilterEmpty", "peopleList",
   "organizationView", "organizationLeaderFilter", "organizationWorkloadTitle", "organizationTaskStats", "organizationTaskEmpty", "organizationTaskTableWrap", "organizationTaskList",
+  "accessLogTab", "accessLogView", "accessLogTitle", "accessLogTotal", "accessLogUserCount", "accessLogActiveCount", "accessLogAverageDuration", "refreshAccessLogs", "accessLogFrom", "accessLogTo", "accessLogSearch", "accessLogStatusFilter", "accessLogStatus", "accessLogEmpty", "accessLogTableWrap", "accessLogTableBody",
 ];
 
 for (const id of requiredIds) {
@@ -107,6 +110,15 @@ assert.match(supabaseCloudClient, /sb_publishable_[A-Za-z0-9_-]+/, "Tarayıcı S
 assert.doesNotMatch(supabaseCloudClient, /service_role|sb_secret_|SUPABASE_SERVICE_ROLE/, "Supabase secret veya service-role anahtarı tarayıcı koduna yazılmamalı");
 assert.match(supabaseCloudClient, /signUp[\s\S]*emailRedirectTo[\s\S]*signInWithPassword[\s\S]*resetPasswordForEmail[\s\S]*updateUser/, "Supabase e-posta kayıt, giriş, doğrulama ve şifre yenileme akışları bulunmalı");
 assert.match(supabaseCloudClient, /organization_members[\s\S]*pullBundle[\s\S]*onConflict:\s*"organization_id,id"[\s\S]*pushBundle/, "Supabase senkronizasyonu organizasyon kapsamında güvenli upsert kullanmalı");
+assert.match(html, /id="accessLogTab"\s+class="tab-button hidden"[\s\S]*id="accessLogView"\s+class="tab-view hidden"/, "Sistem logu sekmesi varsayılan olarak yalnızca yetkili kullanıcı için açılmak üzere gizli olmalı");
+assert.match(app, /ACCESS_LOG_ADMIN_EMAIL\s*=\s*"selcuk\.dere@fit-global\.com"[\s\S]*function updateAccessLogVisibility[\s\S]*function loadAccessLogs/, "Log sekmesi yalnızca tanımlı yönetici hesabında görünmeli");
+assert.match(app, /function startAccessTracking[\s\S]*trackAccess\("start"[\s\S]*setInterval\(sendAccessHeartbeat[\s\S]*function finishAccessTracking[\s\S]*trackAccess\("end"/, "Giriş, heartbeat ve çıkış hareketleri oturum süresini hesaplamak için kaydedilmeli");
+assert.match(app, /pagehide[\s\S]*trackAccessOnUnload/, "Tarayıcı kapanışında çıkış kaydı keepalive isteğiyle denenmeli");
+assert.match(supabaseCloudClient, /function invokeAccessLog[\s\S]*functions\.invoke\("access-log"[\s\S]*function listAccessLogs[\s\S]*function trackAccessOnUnload/, "Supabase istemcisi log yazma, listeleme ve kapanış akışlarını desteklemeli");
+assert.match(accessLogMigration, /create table public\.user_access_logs[\s\S]*ip_address inet[\s\S]*last_seen_at[\s\S]*enable row level security[\s\S]*selcuk\.dere@fit-global\.com/, "Erişim logu tablosu IP, heartbeat ve yöneticiye özel RLS politikası içermeli");
+assert.match(accessLogMigration, /revoke all on table public\.user_access_logs from anon, authenticated[\s\S]*grant select on table public\.user_access_logs to authenticated/, "Standart kullanıcılar log tablosuna doğrudan yazamamalı");
+assert.match(accessLogEdgeFunction, /admin\.auth\.getUser\(bearerToken\(req\)\)[\s\S]*email !== ADMIN_EMAIL[\s\S]*clientIp\(req\)[\s\S]*action === "heartbeat" \|\| action === "end"/, "Edge Function kullanıcı JWT'sini doğrulamalı, yönetici okumayı sınırlandırmalı ve IP'yi istek başlığından almalı");
+assert.doesNotMatch(accessLogEdgeFunction, /body\?\.(?:ip|ipAddress)|service_role\s*=|sb_secret_[A-Za-z0-9_-]+/, "IP istemci gövdesinden alınmamalı ve Edge Function içinde gerçek servis sırrı bulunmamalı");
 assert.match(supabaseCloudClient, /async function applyChanges[\s\S]*TABLES\[collection\][\s\S]*\.upsert\(rows[\s\S]*removableIds[\s\S]*\.delete\(\)/, "Bellek değişiklikleri Supabase'e satır bazında eklenip silinebilmeli");
 assert.match(html, /<meta\s+name="viewport"/i, "Mobil viewport tanımı eksik");
 assert.match(css, /@media\s*\(max-width:\s*850px\)/, "Tablet kırılımı eksik");
@@ -463,7 +475,7 @@ assert.match(app, /DOMParser[\s\S]*#issuetable/, "JIRA HTML içe aktarma ayrış
 assert.match(jira, /mergeAll/, "JIRA HTML kayıtlarını birleştirme desteği eksik");
 assert.match(jira, /normalizeKey[\s\S]*duplicateCount[\s\S]*idRemap/, "JIRA HTML içe aktarımında Key tekilleştirme ve bağlantı eşleme desteği eksik");
 assert.match(app, /function relinkMergedJiraEntries[\s\S]*idRemap\[entry\.jiraId\]/, "Mükerrer JIRA'ya bağlı eforlar korunan JIRA kaydına taşınmalı");
-assert.doesNotMatch(app, /pagehide|visibilitychange/, "Drive yedeği yalnızca kullanıcı Kaydet dediğinde gönderilmeli");
+assert.doesNotMatch(app, /(?:pagehide|visibilitychange)[\s\S]{0,500}backupLocalDataToDrive/, "Drive yedeği yalnızca kullanıcı Kaydet dediğinde gönderilmeli");
 assert.doesNotMatch(app, /APP_EDIT_SESSION_KEY|requireAppEditMode|setAppEditMode|EDIT_ACTION_SELECTOR/, "Veri değiştiren kontroller çalışma modu ile kilitlenmemeli");
 assert.doesNotMatch(css, /body:not\(\.app-edit-mode\)/, "Düzenleme işlemleri CSS ile çalışma moduna göre devre dışı bırakılmamalı");
 assert.match(cloudDataRuntime, /const records = new Map[\s\S]*function write[\s\S]*upserts[\s\S]*deletedIds[\s\S]*function suspend/, "Uygulama verileri yalnızca bellekte tutulup değişiklikler izlenmeli");

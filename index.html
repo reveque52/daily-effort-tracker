@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260812-2">
+    <link rel="stylesheet" href="styles.css?v=20260813-1">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
@@ -21,8 +21,8 @@
     <script src="google-calendar.js?v=20260810-1" defer></script>
     <script src="weather-client.js?v=20260811-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
-    <script src="supabase-cloud.js?v=20260811-4" defer></script>
-    <script src="app.js?v=20260812-2" defer></script>
+    <script src="supabase-cloud.js?v=20260813-1" defer></script>
+    <script src="app.js?v=20260813-1" defer></script>
   </head>
   <body class="auth-required">
     <section id="loginScreen" class="login-screen" aria-labelledby="loginScreenTitle">
@@ -120,6 +120,7 @@
           <button class="tab-button" type="button" data-tab="tasksView" aria-selected="false">Görevler <span id="taskTabCount">0</span></button>
           <button class="tab-button" type="button" data-tab="teamView" aria-selected="false">Ekip <span id="peopleTabCount">0</span></button>
           <button class="tab-button" type="button" data-tab="jiraView" aria-selected="false">JIRA Maddeleri <span id="jiraTabCount">0</span></button>
+          <button id="accessLogTab" class="tab-button hidden" type="button" data-tab="accessLogView" aria-selected="false">Sistem Logları</button>
         </nav>
 
         <nav class="header-utility-nav" aria-label="Bulut, yedekleme ve entegrasyon menüleri">
@@ -813,6 +814,47 @@
           <p id="jiraRequestBoardStatus" class="jira-request-board-status" role="status" aria-live="polite">Statüsünü değiştirmek için talep kartını başka bir sütuna sürükleyin.</p>
           <div id="jiraRequestsEmpty" class="empty-state"><div aria-hidden="true">≡</div><h3>Gösterilecek talep yok</h3><p>JIRA maddeleri senkronize edildiğinde statülerine göre burada gruplanır.</p></div>
           <div id="jiraRequestBoard" class="jira-request-board" aria-live="polite"></div>
+        </section>
+      </section>
+
+      <section id="accessLogView" class="tab-view hidden" aria-labelledby="accessLogTitle">
+        <section class="access-log-hero">
+          <div>
+            <span class="eyebrow">Yönetici denetimi</span>
+            <h2 id="accessLogTitle">Sistem erişim logları</h2>
+            <p>Uygulamaya giriş yapan kullanıcıların oturum zamanı, yaklaşık kullanım süresi, IP adresi ve cihaz bilgileri.</p>
+          </div>
+          <div class="access-log-admin-badge"><span aria-hidden="true">◆</span><div><small>Yetkili hesap</small><strong>selcuk.dere@fit-global.com</strong></div></div>
+        </section>
+
+        <div class="access-log-summary-grid" aria-label="Log özeti">
+          <article><span>Toplam oturum</span><strong id="accessLogTotal">0</strong><small>Seçili tarih aralığı</small></article>
+          <article><span>Tekil kullanıcı</span><strong id="accessLogUserCount">0</strong><small>Farklı hesap</small></article>
+          <article class="is-active"><span>Şu anda aktif</span><strong id="accessLogActiveCount">0</strong><small>Son 3 dakikada görülen</small></article>
+          <article><span>Ortalama süre</span><strong id="accessLogAverageDuration">0 dk</strong><small>Oturum başına</small></article>
+        </div>
+
+        <section class="panel access-log-panel">
+          <div class="panel-heading access-log-heading">
+            <div><span class="eyebrow">Giriş ve çıkış hareketleri</span><h2>Oturum kayıtları</h2></div>
+            <button id="refreshAccessLogs" class="button primary" type="button">Logları yenile</button>
+          </div>
+          <div class="access-log-filters">
+            <label class="field"><span>Başlangıç</span><input id="accessLogFrom" type="date"></label>
+            <label class="field"><span>Bitiş</span><input id="accessLogTo" type="date"></label>
+            <label class="field access-log-search"><span>Kullanıcı ara</span><input id="accessLogSearch" type="search" placeholder="E-posta adresi"></label>
+            <label class="field"><span>Oturum durumu</span><select id="accessLogStatusFilter"><option value="">Tümü</option><option value="active">Aktif</option><option value="closed">Çıkış yapıldı</option><option value="stale">Bağlantı kesildi</option></select></label>
+          </div>
+          <p id="accessLogStatus" class="access-log-status" role="status" aria-live="polite">Loglar görüntülendiğinde burada güncelleme bilgisi yer alır.</p>
+          <div id="accessLogEmpty" class="empty-state hidden"><div aria-hidden="true">◎</div><h3>Log kaydı bulunamadı</h3><p>Seçili tarih aralığı veya filtrelerle eşleşen oturum yok.</p></div>
+          <div id="accessLogTableWrap" class="access-log-table-wrap hidden">
+            <table class="access-log-table">
+              <caption class="sr-only">Sistem giriş, çıkış ve oturum süresi kayıtları</caption>
+              <thead><tr><th>Kullanıcı</th><th>Giriş</th><th>Çıkış / Son görülme</th><th>Süre</th><th>IP adresi</th><th>Cihaz</th><th>Durum</th></tr></thead>
+              <tbody id="accessLogTableBody"></tbody>
+            </table>
+          </div>
+          <footer class="access-log-footnote"><span aria-hidden="true">ⓘ</span><p>IP ve cihaz bilgileri güvenlik ve denetim amacıyla tutulur. Ani tarayıcı kapanışlarında süre, son alınan aktiflik sinyaline kadar hesaplanır.</p></footer>
         </section>
       </section>
     </main>
