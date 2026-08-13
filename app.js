@@ -56,6 +56,15 @@
     midnight: { label: "Gece", menuLabel: "Gece teması", dark: true },
     graphite: { label: "Kömür", menuLabel: "Kömür teması", dark: true }
   });
+  const ACCESS_LOG_ADMIN_EMAIL = "selcuk.dere@fit-global.com";
+  const ACCESS_LOG_HEARTBEAT_MS = 60_000;
+  const ACCESS_LOG_ACTIVE_WINDOW_MS = 180_000;
+  const ACCESS_LOG_SESSION_KEY = "daily-effort-access-session";
+  let accessLogRows = [];
+  let accessLogServerTime = Date.now();
+  let accessTrackingUserId = "";
+  let accessTrackingSessionId = "";
+  let accessHeartbeatTimer = 0;
   let homeEffortChartPeriod = "week";
   const DEFAULT_WEATHER_LOCATION = Object.freeze({ name: "İstanbul", detail: "Türkiye", latitude: 41.0082, longitude: 28.9784, timezone: "Europe/Istanbul" });
   let weatherLocation = { ...DEFAULT_WEATHER_LOCATION };
@@ -1251,7 +1260,234 @@
     select.value = options.some((option) => option.value === selectedParentId) ? selectedParentId : "";
   }
 
+  function isAccessLogAdmin(session = supabaseSession) {
+    return String(session?.user?.email || "").trim().toLowerCase() === ACCESS_LOG_ADMIN_EMAIL;
+  }
+
+  function updateAccessLogVisibility() {
+    const tab = $("#accessLogTab");
+    if (!tab) return;
+    const allowed = isAccessLogAdmin();
+    tab.classList.toggle("hidden", !allowed);
+    tab.setAttribute("aria-hidden", String(!allowed));
+    if (!allowed && tab.classList.contains("active")) activateMainView("homeView");
+  }
+
+  function accessSessionId() {
+    if (accessTrackingSessionId) return accessTrackingSessionId;
+    let id = "";
+    try { id = sessionStorage.getItem(ACCESS_LOG_SESSION_KEY) || ""; }
+    catch { /* sessionStorage kullanılamıyorsa yeni kimlik oluşturulur. */ }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      id = crypto.randomUUID();
+      try { sessionStorage.setItem(ACCESS_LOG_SESSION_KEY, id); }
+      catch { /* Kimlik bu sayfa ömrü boyunca bellekte kullanılabilir. */ }
+    }
+    accessTrackingSessionId = id;
+    return accessTrackingSessionId;
+  }
+
+  function clearAccessTrackingState(clearSession = false) {
+    if (accessHeartbeatTimer) window.clearInterval(accessHeartbeatTimer);
+    accessHeartbeatTimer = 0;
+    accessTrackingUserId = "";
+    if (clearSession) {
+      accessTrackingSessionId = "";
+      try { sessionStorage.removeItem(ACCESS_LOG_SESSION_KEY); }
+      catch { /* Oturum alanı kullanılamıyorsa yok sayılır. */ }
+    }
+  }
+
+  async function sendAccessHeartbeat() {
+    if (!supabaseSession?.user || !accessTrackingUserId || document.visibilityState === "hidden") return;
+    try { await window.SupabaseCloud.trackAccess("heartbeat", accessSessionId()); }
+    catch (error) { console.warn("Erişim heartbeat kaydı gönderilemedi:", error.message); }
+  }
+
+  async function startAccessTracking() {
+    const userId = supabaseSession?.user?.id || "";
+    if (!userId || (accessTrackingUserId === userId && accessHeartbeatTimer)) return;
+    clearAccessTrackingState(Boolean(accessTrackingUserId && accessTrackingUserId !== userId));
+    accessTrackingUserId = userId;
+    accessHeartbeatTimer = -1;
+    try {
+      await window.SupabaseCloud.trackAccess("start", accessSessionId(), {
+        path: `${location.pathname}${location.search}`
+      });
+    } catch (error) {
+      console.warn("Erişim başlangıç kaydı gönderilemedi:", error.message);
+    }
+    if (accessTrackingUserId === userId && supabaseSession?.user?.id === userId) {
+      accessHeartbeatTimer = window.setInterval(sendAccessHeartbeat, ACCESS_LOG_HEARTBEAT_MS);
+    }
+  }
+
+  async function finishAccessTracking(reason = "signed_out", clearSession = true) {
+    const sessionId = accessSessionId();
+    if (supabaseSession?.user && accessTrackingUserId) {
+      try { await window.SupabaseCloud.trackAccess("end", sessionId, { reason }); }
+      catch (error) { console.warn("Erişim çıkış kaydı gönderilemedi:", error.message); }
+    }
+    clearAccessTrackingState(clearSession);
+  }
+
+  function setAccessLogStatus(message, state = "") {
+    const status = $("#accessLogStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("is-busy", state === "busy");
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-success", state === "success");
+  }
+
+  function accessLogState(row) {
+    if (row.signed_out_at) return "closed";
+    const lastSeen = new Date(row.last_seen_at).getTime();
+    return Number.isFinite(lastSeen) && accessLogServerTime - lastSeen <= ACCESS_LOG_ACTIVE_WINDOW_MS ? "active" : "stale";
+  }
+
+  function accessLogDurationSeconds(row) {
+    const start = new Date(row.signed_in_at).getTime();
+    const state = accessLogState(row);
+    const end = row.signed_out_at
+      ? new Date(row.signed_out_at).getTime()
+      : state === "active" ? accessLogServerTime : new Date(row.last_seen_at).getTime();
+    return Math.max(0, Math.round((end - start) / 1000)) || 0;
+  }
+
+  function formatAccessDuration(seconds) {
+    const totalMinutes = Math.max(0, Math.round(Number(seconds) / 60));
+    if (totalMinutes < 1) return "< 1 dk";
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    return [days ? `${days} gün` : "", hours ? `${hours} sa` : "", minutes || (!days && !hours) ? `${minutes} dk` : ""].filter(Boolean).join(" ");
+  }
+
+  function accessDeviceLabel(userAgent = "") {
+    const ua = String(userAgent || "");
+    const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Tarayıcı";
+    const system = /Windows/i.test(ua) ? "Windows" : /Android/i.test(ua) ? "Android" : /iPhone|iPad/i.test(ua) ? "iOS" : /Mac OS/i.test(ua) ? "macOS" : /Linux/i.test(ua) ? "Linux" : "Bilinmeyen sistem";
+    return { browser, system };
+  }
+
+  function appendAccessTimeCell(row, value, secondary = "") {
+    const cell = document.createElement("td");
+    const wrapper = document.createElement("span");
+    wrapper.className = "access-log-time";
+    const strong = document.createElement("strong");
+    const parsed = value ? new Date(value) : null;
+    strong.textContent = parsed && !Number.isNaN(parsed.getTime()) ? dateTimeFormatter.format(parsed) : "—";
+    wrapper.append(strong);
+    if (secondary) {
+      const small = document.createElement("small");
+      small.textContent = secondary;
+      wrapper.append(small);
+    }
+    cell.append(wrapper);
+    row.append(cell);
+  }
+
+  function renderAccessLogs() {
+    if (!isAccessLogAdmin()) return;
+    const selectedState = $("#accessLogStatusFilter").value;
+    const rows = selectedState ? accessLogRows.filter((row) => accessLogState(row) === selectedState) : accessLogRows;
+    const body = $("#accessLogTableBody");
+    body.replaceChildren();
+    $("#accessLogEmpty").classList.toggle("hidden", rows.length > 0);
+    $("#accessLogTableWrap").classList.toggle("hidden", rows.length === 0);
+
+    const activeCount = rows.filter((row) => accessLogState(row) === "active").length;
+    const uniqueUsers = new Set(rows.map((row) => String(row.email || "").toLowerCase())).size;
+    const totalDuration = rows.reduce((sum, row) => sum + accessLogDurationSeconds(row), 0);
+    $("#accessLogTotal").textContent = String(rows.length);
+    $("#accessLogUserCount").textContent = String(uniqueUsers);
+    $("#accessLogActiveCount").textContent = String(activeCount);
+    $("#accessLogAverageDuration").textContent = formatAccessDuration(rows.length ? totalDuration / rows.length : 0);
+
+    rows.forEach((item) => {
+      const row = document.createElement("tr");
+      const userCell = document.createElement("td");
+      const user = document.createElement("span");
+      user.className = "access-log-user";
+      const email = document.createElement("strong");
+      email.textContent = item.email || "Bilinmeyen kullanıcı";
+      const id = document.createElement("small");
+      id.textContent = `Kullanıcı: ${String(item.user_id || "").slice(0, 8)}…`;
+      user.append(email, id);
+      userCell.append(user);
+      row.append(userCell);
+
+      appendAccessTimeCell(row, item.signed_in_at, item.entry_path || "Uygulama");
+      const state = accessLogState(item);
+      appendAccessTimeCell(row, item.signed_out_at || item.last_seen_at, item.signed_out_at ? "Çıkış zamanı" : "Son aktiflik");
+
+      const durationCell = document.createElement("td");
+      durationCell.className = "access-log-duration";
+      durationCell.textContent = formatAccessDuration(accessLogDurationSeconds(item));
+      row.append(durationCell);
+
+      const ipCell = document.createElement("td");
+      ipCell.className = "access-log-ip";
+      ipCell.textContent = item.ip_address || "—";
+      row.append(ipCell);
+
+      const device = accessDeviceLabel(item.user_agent);
+      const deviceCell = document.createElement("td");
+      deviceCell.className = "access-log-device";
+      deviceCell.title = item.user_agent || "";
+      const deviceBrowser = document.createElement("strong");
+      deviceBrowser.textContent = device.browser;
+      const deviceSystem = document.createElement("small");
+      deviceSystem.textContent = device.system;
+      deviceCell.append(deviceBrowser, deviceSystem);
+      row.append(deviceCell);
+
+      const stateCell = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = "access-log-state";
+      badge.dataset.state = state;
+      badge.textContent = ({ active: "Aktif", closed: "Çıkış yapıldı", stale: "Bağlantı kesildi" })[state];
+      if (item.exit_reason) badge.title = `Çıkış nedeni: ${item.exit_reason}`;
+      stateCell.append(badge);
+      row.append(stateCell);
+      body.append(row);
+    });
+  }
+
+  function accessLogDateBoundary(value, addDay = false) {
+    if (!value) return "";
+    const date = parseDate(value);
+    if (addDay) date.setDate(date.getDate() + 1);
+    return date.toISOString();
+  }
+
+  async function loadAccessLogs() {
+    if (!isAccessLogAdmin()) return;
+    const button = $("#refreshAccessLogs");
+    button.disabled = true;
+    setAccessLogStatus("Sistem erişim logları yükleniyor…", "busy");
+    try {
+      const result = await window.SupabaseCloud.listAccessLogs({
+        from: accessLogDateBoundary($("#accessLogFrom").value),
+        to: accessLogDateBoundary($("#accessLogTo").value, true),
+        search: $("#accessLogSearch").value,
+        limit: 500
+      });
+      accessLogRows = Array.isArray(result.logs) ? result.logs : [];
+      const serverTime = new Date(result.serverTime).getTime();
+      accessLogServerTime = Number.isFinite(serverTime) ? serverTime : Date.now();
+      renderAccessLogs();
+      setAccessLogStatus(`${accessLogRows.length} oturum kaydı ${dateTimeFormatter.format(new Date(accessLogServerTime))} itibarıyla yüklendi.`, "success");
+    } catch (error) {
+      accessLogRows = [];
+      renderAccessLogs();
+      setAccessLogStatus(`Loglar alınamadı: ${error.message}`, "error");
+    } finally { button.disabled = false; }
+  }
+
   function activateMainView(viewId) {
+    if (viewId === "accessLogView" && !isAccessLogAdmin()) viewId = "homeView";
     const teamSubview = ["peopleView", "organizationView"].includes(viewId) ? viewId : "";
     const mainViewId = teamSubview ? "teamView" : viewId;
     document.querySelectorAll(".tab-button").forEach((button) => {
@@ -1262,6 +1498,7 @@
     document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== mainViewId));
     if (teamSubview) activateTeamSubview(teamSubview);
     if (mainViewId === "jiraView") activateJiraSubview("jiraItemsView");
+    if (mainViewId === "accessLogView") loadAccessLogs();
   }
 
   function activateTeamSubview(viewId) {
@@ -4281,6 +4518,7 @@
   async function refreshSupabaseAccount(session = supabaseSession) {
     supabaseSession = session || null;
     const signedIn = Boolean(supabaseSession?.user);
+    updateAccessLogVisibility();
     setLoginScreenVisible(!signedIn);
     $("#supabaseAuthForm").classList.toggle("hidden", signedIn);
     $("#supabaseSignedInPanel").classList.toggle("hidden", !signedIn);
@@ -4292,6 +4530,7 @@
     updateSupabaseLastSync();
 
     if (!signedIn) {
+      clearAccessTrackingState(true);
       cloudDataReady = false;
       cloudLoadedUserId = "";
       lastSupabaseSyncAt = null;
@@ -4306,6 +4545,7 @@
     }
 
     $("#supabaseUserEmail").textContent = supabaseSession.user.email || "Supabase kullanıcısı";
+    startAccessTracking();
     try {
       await ensureCloudDataLoaded();
     } catch (error) {
@@ -5321,6 +5561,7 @@
   $("#supabasePull").addEventListener("click", () => runSupabaseAction(pullFromSupabase));
   $("#supabaseSignOut").addEventListener("click", () => runSupabaseAction(async () => {
     await waitForCloudSaves();
+    await finishAccessTracking("signed_out", true);
     await window.SupabaseCloud.signOut();
     await refreshSupabaseAccount(null);
   }));
@@ -5356,6 +5597,24 @@
       if (!menu.contains(event.target)) menu.open = false;
     });
   });
+  $("#refreshAccessLogs").addEventListener("click", loadAccessLogs);
+  $("#accessLogStatusFilter").addEventListener("change", renderAccessLogs);
+  $("#accessLogSearch").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loadAccessLogs();
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") sendAccessHeartbeat();
+  });
+  window.addEventListener("pageshow", () => startAccessTracking());
+  window.addEventListener("pagehide", () => {
+    if (!supabaseSession?.access_token || !accessTrackingUserId) return;
+    window.SupabaseCloud.trackAccessOnUnload(accessSessionId(), supabaseSession.access_token, "page_closed");
+    if (accessHeartbeatTimer) window.clearInterval(accessHeartbeatTimer);
+    accessHeartbeatTimer = 0;
+  });
   window.addEventListener("beforeunload", (event) => {
     if (cloudSavePending === 0 && cloudSettingsSavePending === 0) return;
     event.preventDefault();
@@ -5389,6 +5648,9 @@
   }
 
   $("#todayLabel").textContent = dateFormatter.format(new Date());
+  $("#accessLogTo").value = isoFromDate(new Date());
+  $("#accessLogFrom").value = isoFromDate(addDays(new Date(), -29));
+  updateAccessLogVisibility();
   applyWeatherLocationSetting(DEFAULT_WEATHER_LOCATION);
   $("#googleClientId").value = window.DriveSync?.getClientId() || "";
   setDriveSettingsEditing(false);
