@@ -58,6 +58,14 @@ function safeText(value: unknown, max: number) {
   return String(value || "").trim().slice(0, max);
 }
 
+function authUserId(value: unknown) {
+  const id = String(value || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) {
+    throw new HttpError("Kullanıcı kimliği geçersiz.");
+  }
+  return id;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Yalnızca POST desteklenir." }, 405);
@@ -76,6 +84,72 @@ Deno.serve(async (req: Request) => {
     const user = userData.user;
     const email = String(user.email || "").trim().toLowerCase();
     const now = new Date().toISOString();
+
+    if (action === "list-users" || action === "delete-user") {
+      if (email !== ADMIN_EMAIL) throw new HttpError("Kullanıcı yönetimi için yetkiniz yok.", 403);
+
+      if (action === "list-users") {
+        const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+        if (error) throw error;
+        const users = (data?.users || []).map((item) => ({
+          id: item.id,
+          email: item.email || "",
+          displayName: safeText(item.user_metadata?.full_name || item.user_metadata?.name, 160),
+          createdAt: item.created_at || null,
+          lastSignInAt: item.last_sign_in_at || null,
+          emailConfirmedAt: item.email_confirmed_at || null,
+          isCurrentAdmin: item.id === user.id,
+        }));
+        return json({ users, total: data?.total ?? users.length, serverTime: now });
+      }
+
+      const targetUserId = authUserId(body?.userId);
+      if (targetUserId === user.id) throw new HttpError("Kendi yönetici hesabınızı silemezsiniz.", 409);
+
+      const { data: targetData, error: targetError } = await admin.auth.admin.getUserById(targetUserId);
+      if (targetError || !targetData?.user) throw new HttpError("Silinecek kullanıcı bulunamadı.", 404);
+      const targetEmail = String(targetData.user.email || "").trim().toLowerCase();
+      const expectedConfirmation = targetEmail || targetUserId;
+      const confirmation = safeText(body?.confirmEmail, 320).toLowerCase();
+      if (!confirmation || confirmation !== expectedConfirmation) {
+        throw new HttpError(`Silme onayı için ${targetEmail ? "kullanıcının e-posta adresini" : "kullanıcı kimliğini"} eksiksiz yazın.`);
+      }
+      if (targetEmail === ADMIN_EMAIL) throw new HttpError("Yönetici hesabı silinemez.", 409);
+
+      const { data: ownedOrganizations, error: organizationError } = await admin
+        .from("organizations")
+        .select("id,name")
+        .eq("created_by", targetUserId);
+      if (organizationError) throw organizationError;
+      const organizationIds = (ownedOrganizations || []).map((organization) => organization.id);
+
+      if (organizationIds.length) {
+        const { count: otherMemberCount, error: memberError } = await admin
+          .from("organization_members")
+          .select("*", { count: "exact", head: true })
+          .in("organization_id", organizationIds)
+          .neq("user_id", targetUserId);
+        if (memberError) throw memberError;
+        if ((otherMemberCount || 0) > 0) {
+          throw new HttpError("Bu kullanıcı başka üyeleri bulunan bir çalışma alanının sahibi. Önce sahipliği başka bir kullanıcıya aktarın.", 409);
+        }
+
+        const { error: deleteOrganizationError } = await admin
+          .from("organizations")
+          .delete()
+          .in("id", organizationIds);
+        if (deleteOrganizationError) throw deleteOrganizationError;
+      }
+
+      const { error: deleteUserError } = await admin.auth.admin.deleteUser(targetUserId, false);
+      if (deleteUserError) throw deleteUserError;
+      return json({
+        ok: true,
+        deletedUserId: targetUserId,
+        deletedEmail: targetEmail,
+        deletedOrganizationCount: organizationIds.length,
+      });
+    }
 
     if (action === "list") {
       if (email !== ADMIN_EMAIL) throw new HttpError("Bu denetim kayıtlarını görüntüleme yetkiniz yok.", 403);

@@ -34,7 +34,7 @@ Uygulama açıldığında Supabase oturumu otomatik geri yüklenir ve efor, gör
 
 ## Supabase hesap, veri ve e-posta kurulumu
 
-Ana menüdeki **Supabase** alanından e-posta ve en az sekiz karakterli şifreyle hesap oluşturulur. E-posta doğrulandıktan sonra her kullanıcı için kişisel bir çalışma alanı otomatik hazırlanır. Efor, görev, kişi, JIRA maddesi ve hatırlatma kayıtları bu çalışma alanında tutulur; tarayıcıda yalnızca publishable key bulunur. Secret/service-role anahtarı veya SMTP parolası frontend koduna ve GitHub deposuna yazılmaz.
+Ana menüdeki **Supabase** alanında **Giriş yap** ve **Yeni hesap oluştur** modları birbirinden ayrıdır. Kayıt modunda en az sekiz karakterli şifre ve aynı şifrenin tekrarı zorunludur; kısa, dış boşluk içeren veya eşleşmeyen şifrelerde Supabase'e istek gönderilmez. Kayıt tamamlandığında kullanıcı ayrı doğrulama ekranına alınır ve gerekirse doğrulama e-postasını 60 saniyelik bekleme süresiyle yeniden gönderebilir. E-posta doğrulandıktan sonra her kullanıcı için kişisel bir çalışma alanı otomatik hazırlanır. Efor, görev, kişi, JIRA maddesi ve hatırlatma kayıtları bu çalışma alanında tutulur; tarayıcıda yalnızca publishable key bulunur. Secret/service-role anahtarı veya SMTP parolası frontend koduna ve GitHub deposuna yazılmaz.
 
 İlk kullanımda:
 
@@ -104,6 +104,8 @@ GitHub Pages yalnızca statik frontend'i barındırır. Yayındaki canlı JIRA b
 ## Sistem erişim logları
 
 Uygulama her Supabase oturumunda giriş zamanını, dakikalık son görülme bilgisini, çıkış zamanını, Edge Function tarafından belirlenen IP adresini ve tarayıcı bilgisini `user_access_logs` tablosuna yazar. **Sistem Logları** sekmesi yalnızca `selcuk.dere@fit-global.com` hesabında görünür. Aynı kısıtlama `access-log` Edge Function ve tablonun RLS politikasında da uygulanır; diğer kullanıcılar arayüzü değiştirseler bile logları okuyamaz.
+
+Aynı yönetici ekranındaki **Kullanıcı yönetimi** alanı Supabase Auth hesaplarını listeler. Kalıcı silme işlemi yalnızca yetkili yönetici tarafından, hedef e-posta adresi veya kullanıcı kimliği eksiksiz yazılarak onaylanabilir. Yönetici kendi hesabını silemez; başka üyeleri bulunan bir çalışma alanının sahibi de sahiplik aktarılmadan silinemez. Tek üyeli kişisel çalışma alanı kullanıcıyla birlikte kaldırılır. `service_role`/secret anahtarı hiçbir zaman tarayıcıya gönderilmez; listeleme ve silme işlemleri `access-log` Edge Function içinde yapılır.
 
 Canlı Supabase projesine ek özelliği dağıtmak için Supabase CLI oturumu açıldıktan sonra:
 

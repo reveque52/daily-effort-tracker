@@ -37,7 +37,12 @@
   }
 
   function throwIfError(error) {
-    if (error) throw new Error(error.message || "Supabase işlemi tamamlanamadı.");
+    if (!error) return;
+    const normalized = new Error(error.message || "Supabase işlemi tamamlanamadı.");
+    normalized.code = error.code || error.name || "supabase_error";
+    normalized.status = error.status || 0;
+    normalized.reasons = Array.isArray(error.reasons) ? [...error.reasons] : [];
+    throw normalized;
   }
 
   async function getSession() {
@@ -47,9 +52,20 @@
   }
 
   async function signUp(email, password) {
+    const normalizedPassword = String(password || "");
+    if (normalizedPassword.length < 8) {
+      const error = new Error("Şifre en az 8 karakter olmalıdır.");
+      error.code = "weak_password";
+      throw error;
+    }
+    if (normalizedPassword !== normalizedPassword.trim()) {
+      const error = new Error("Şifrenin başında veya sonunda boşluk bulunamaz.");
+      error.code = "weak_password";
+      throw error;
+    }
     const { data, error } = await getClient().auth.signUp({
       email: String(email || "").trim(),
-      password,
+      password: normalizedPassword,
       options: { emailRedirectTo: redirectUrl() }
     });
     throwIfError(error);
@@ -73,6 +89,16 @@
   async function sendPasswordReset(email) {
     const { data, error } = await getClient().auth.resetPasswordForEmail(String(email || "").trim(), {
       redirectTo: redirectUrl()
+    });
+    throwIfError(error);
+    return data;
+  }
+
+  async function resendSignUpConfirmation(email) {
+    const { data, error } = await getClient().auth.resend({
+      type: "signup",
+      email: String(email || "").trim(),
+      options: { emailRedirectTo: redirectUrl() }
     });
     throwIfError(error);
     return data;
@@ -364,6 +390,17 @@
     return invokeAccessLog("list", filters);
   }
 
+  function listAdminUsers() {
+    return invokeAccessLog("list-users");
+  }
+
+  function deleteAdminUser(userId, confirmEmail) {
+    return invokeAccessLog("delete-user", {
+      userId: String(userId || "").trim(),
+      confirmEmail: String(confirmEmail || "").trim()
+    });
+  }
+
   function trackAccessOnUnload(sessionId, accessToken, reason = "page_closed") {
     if (!sessionId || !accessToken) return false;
     try {
@@ -391,6 +428,7 @@
     signIn,
     signOut,
     sendPasswordReset,
+    resendSignUpConfirmation,
     updatePassword,
     onAuthStateChange,
     pullBundle,
@@ -402,6 +440,8 @@
     invokeJira,
     trackAccess,
     listAccessLogs,
+    listAdminUsers,
+    deleteAdminUser,
     trackAccessOnUnload
   });
 })(window);
