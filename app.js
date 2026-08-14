@@ -61,11 +61,21 @@
   const ACCESS_LOG_ACTIVE_WINDOW_MS = 180_000;
   const ACCESS_LOG_SESSION_KEY = "daily-effort-access-session";
   let accessLogRows = [];
+  let adminUsers = [];
   let accessLogServerTime = Date.now();
   let accessTrackingUserId = "";
   let accessTrackingSessionId = "";
   let accessHeartbeatTimer = 0;
   let homeEffortChartPeriod = "week";
+  const HOME_JIRA_DEFAULT_STATUS = "In Progress";
+  const HOME_JIRA_ALL_STATUSES = "__all__";
+  const HOME_ASSIGNED_JIRA_JQL = "assignee = currentUser() ORDER BY updated DESC";
+  const HOME_ASSIGNED_JIRA_REFRESH_MS = 5 * 60 * 1000;
+  const HOME_JIRA_STATUS_COLORS = Object.freeze(["#5146e5", "#1f9d74", "#f2b84b", "#e46a76", "#3986d7", "#8c62d7", "#e58a3c", "#4c9f9a"]);
+  let homeAssignedJiraItems = [];
+  let homeAssignedJiraStatus = HOME_JIRA_DEFAULT_STATUS;
+  let homeAssignedJiraLoadedAt = 0;
+  let homeAssignedJiraRequest = null;
   const DEFAULT_WEATHER_LOCATION = Object.freeze({ name: "İstanbul", detail: "Türkiye", latitude: 41.0082, longitude: 28.9784, timezone: "Europe/Istanbul" });
   let weatherLocation = { ...DEFAULT_WEATHER_LOCATION };
   let weatherRequestId = 0;
@@ -79,6 +89,10 @@
   let jiraNavigatorSyncPromise = null;
   let supabaseSession = null;
   let supabaseBusy = false;
+  let supabaseAuthMode = "signin";
+  let pendingVerificationEmail = "";
+  let verificationResendSeconds = 0;
+  let verificationResendTimer = 0;
   let cloudDataReady = false;
   let cloudLoadedUserId = "";
   let cloudLoadPromise = null;
@@ -635,11 +649,16 @@
       $("#removeJiraCredentials").classList.add("hidden");
       $("#jiraCredentialStatus").textContent = "Yerel backend otomatik seçildi. JIRA OAuth ayarları sunucudaki .env dosyasından okunur.";
       refreshJiraHeaderMenu();
+      if (!$("#homeView").classList.contains("hidden")) refreshHomeAssignedJiraIssues();
       return { configured: false };
     }
     if (!supabaseSession?.user) {
+      homeAssignedJiraItems = [];
+      homeAssignedJiraLoadedAt = 0;
+      renderHomeAssignedJiraIssues();
       $("#removeJiraCredentials").classList.add("hidden");
       setJiraCredentialStatus("JIRA bağlantı bilgilerini görmek veya kaydetmek için önce Supabase hesabınıza giriş yapın.");
+      setHomeAssignedJiraStatus("Atanan JIRA kayıtlarını görmek için önce Supabase hesabınıza giriş yapın.", "idle");
       return { configured: false };
     }
     try {
@@ -647,6 +666,7 @@
       if (!result.configured) {
         $("#removeJiraCredentials").classList.add("hidden");
         setJiraCredentialStatus("Bu Supabase hesabı için henüz JIRA bağlantısı kaydedilmedi.");
+        setHomeAssignedJiraStatus("Atanan kayıtları görmek için ana menüdeki JIRA bağlantı ayarlarını tamamlayın.", "idle");
         return result;
       }
       $("#jiraCredentialBaseUrl").value = result.baseUrl || "https://fit-global.atlassian.net";
@@ -655,6 +675,7 @@
       $("#removeJiraCredentials").classList.remove("hidden");
       const savedAt = result.updatedAt ? ` · ${dateTimeFormatter.format(new Date(result.updatedAt))}` : "";
       setJiraCredentialStatus(`Bağlantı Supabase Vault içinde şifreli olarak kayıtlı${savedAt}. Token tarayıcıya geri gönderilmez.`, "success");
+      if (!$("#homeView").classList.contains("hidden")) refreshHomeAssignedJiraIssues();
       return result;
     } catch (error) {
       setJiraCredentialStatus(`JIRA bağlantı bilgileri alınamadı: ${error.message}`, "error");
@@ -701,6 +722,10 @@
       $("#removeJiraCredentials").classList.add("hidden");
       setJiraCredentialStatus("Kayıtlı JIRA bağlantısı kaldırıldı.");
       jiraOAuthState = { configured: false, connected: false, mode: "none" };
+      homeAssignedJiraItems = [];
+      homeAssignedJiraLoadedAt = 0;
+      renderHomeAssignedJiraIssues();
+      setHomeAssignedJiraStatus("Atanan kayıtları görmek için JIRA bağlantı ayarlarını tamamlayın.", "idle");
       renderJiraOAuthState();
     } catch (error) {
       setJiraCredentialStatus(`JIRA bağlantısı kaldırılamadı: ${error.message}`, "error");
@@ -786,6 +811,220 @@
     jiraNavigatorSyncPromise = syncJiraCloudIssues({ jql: JIRA_WORKLOGGED_ISSUES_JQL, navigator: true })
       .finally(() => { jiraNavigatorSyncPromise = null; });
     return jiraNavigatorSyncPromise;
+  }
+
+  function setHomeAssignedJiraStatus(message, state = "") {
+    const status = $("#homeJiraIssueStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.dataset.state = state;
+  }
+
+  function homeJiraStatuses() {
+    return Array.from(new Set(homeAssignedJiraItems
+      .map((item) => String(item.status || "Belirtilmedi").trim() || "Belirtilmedi")))
+      .sort((left, right) => left.localeCompare(right, "tr", { sensitivity: "base" }));
+  }
+
+  function renderHomeJiraStatusFilter() {
+    const select = $("#homeJiraStatusFilter");
+    if (!select) return;
+    const statuses = homeJiraStatuses();
+    const selectedStatus = statuses.find((status) => normalizeJiraSearch(status) === normalizeJiraSearch(homeAssignedJiraStatus));
+    if (selectedStatus) homeAssignedJiraStatus = selectedStatus;
+    const availableStatuses = statuses.some((status) => normalizeJiraSearch(status) === normalizeJiraSearch(HOME_JIRA_DEFAULT_STATUS))
+      ? statuses
+      : [HOME_JIRA_DEFAULT_STATUS, ...statuses];
+    select.replaceChildren();
+    availableStatuses.forEach((status) => {
+      const option = document.createElement("option");
+      option.value = status;
+      option.textContent = status;
+      select.append(option);
+    });
+    const allOption = document.createElement("option");
+    allOption.value = HOME_JIRA_ALL_STATUSES;
+    allOption.textContent = "Tüm statüler";
+    select.append(allOption);
+    select.value = homeAssignedJiraStatus;
+  }
+
+  function homeJiraStatusColor(status, index) {
+    const normalized = normalizeJiraSearch(status);
+    if (normalized.includes("progress") || normalized.includes("devam")) return "#5146e5";
+    if (["done", "closed", "resolved", "tamam"].some((value) => normalized.includes(value))) return "#1f9d74";
+    if (["open", "to do", "todo", "plan", "bekle"].some((value) => normalized.includes(value))) return "#f2b84b";
+    return HOME_JIRA_STATUS_COLORS[index % HOME_JIRA_STATUS_COLORS.length];
+  }
+
+  function renderHomeJiraStatusChart() {
+    const chart = $("#homeJiraStatusChart");
+    if (!chart) return;
+    chart.replaceChildren();
+    const statusRows = homeJiraStatuses().map((status) => ({
+      status,
+      count: homeAssignedJiraItems.filter((item) => normalizeJiraSearch(item.status) === normalizeJiraSearch(status)).length
+    }));
+    const total = homeAssignedJiraItems.length;
+    if (!total) {
+      const empty = document.createElement("p");
+      empty.className = "dashboard-empty";
+      empty.textContent = "Atanan JIRA kayıtları yenilendiğinde statü dağılımı burada görünecek.";
+      chart.append(empty);
+      return;
+    }
+    let cursor = 0;
+    const segments = statusRows.map((row, index) => {
+      const start = cursor;
+      cursor += (row.count / total) * 100;
+      return `${homeJiraStatusColor(row.status, index)} ${start}% ${cursor}%`;
+    });
+    const donut = document.createElement("div");
+    donut.className = "task-donut home-jira-status-donut";
+    donut.style.background = `conic-gradient(${segments.join(", ")})`;
+    donut.setAttribute("aria-hidden", "true");
+    const donutCenter = document.createElement("span");
+    const donutTotal = document.createElement("strong");
+    donutTotal.textContent = String(total);
+    const donutLabel = document.createElement("small");
+    donutLabel.textContent = "toplam";
+    donutCenter.append(donutTotal, donutLabel);
+    donut.append(donutCenter);
+    const legend = document.createElement("div");
+    legend.className = "task-chart-legend home-jira-status-legend";
+    statusRows.forEach((row, index) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "task-chart-legend-item";
+      const active = normalizeJiraSearch(row.status) === normalizeJiraSearch(homeAssignedJiraStatus);
+      item.classList.toggle("active", active);
+      item.setAttribute("aria-pressed", String(active));
+      item.setAttribute("aria-label", `${row.status}: ${row.count} JIRA kaydı. Bu kayıtları göster`);
+      const dot = document.createElement("i");
+      dot.style.background = homeJiraStatusColor(row.status, index);
+      const label = document.createElement("span");
+      label.textContent = row.status;
+      const count = document.createElement("strong");
+      count.textContent = String(row.count);
+      item.append(dot, label, count);
+      item.addEventListener("click", () => {
+        homeAssignedJiraStatus = row.status;
+        renderHomeAssignedJiraIssues();
+      });
+      legend.append(item);
+    });
+    chart.append(donut, legend);
+  }
+
+  function renderHomeAssignedJiraIssues() {
+    const list = $("#homeJiraIssueList");
+    if (!list) return;
+    renderHomeJiraStatusFilter();
+    renderHomeJiraStatusChart();
+    const visibleItems = homeAssignedJiraItems.filter((item) => homeAssignedJiraStatus === HOME_JIRA_ALL_STATUSES
+      || normalizeJiraSearch(item.status) === normalizeJiraSearch(homeAssignedJiraStatus));
+    $("#homeJiraIssueCount").textContent = `${visibleItems.length} madde`;
+    list.replaceChildren();
+    $("#homeJiraIssueEmpty").classList.toggle("hidden", visibleItems.length > 0);
+    list.classList.toggle("hidden", visibleItems.length === 0);
+    visibleItems.forEach((item) => {
+      const row = document.createElement("article");
+      row.className = "home-jira-issue-row";
+      const issue = document.createElement(item.url ? "a" : "div");
+      issue.className = "home-jira-issue-link";
+      if (item.url) {
+        issue.href = item.url;
+        issue.target = "_blank";
+        issue.rel = "noopener noreferrer";
+        issue.title = `${item.name} maddesini JIRA'da aç`;
+      }
+      const key = document.createElement("strong");
+      key.textContent = item.name;
+      const summary = document.createElement("span");
+      summary.textContent = item.description;
+      issue.append(key, summary);
+      const metadata = document.createElement("div");
+      metadata.className = "home-jira-issue-meta";
+      const status = document.createElement("span");
+      status.className = "home-jira-status-badge";
+      status.textContent = item.status || "Belirtilmedi";
+      metadata.append(status);
+      if (item.priority) {
+        const priority = document.createElement("span");
+        priority.textContent = item.priority;
+        metadata.append(priority);
+      }
+      const effortButton = document.createElement("button");
+      effortButton.type = "button";
+      effortButton.className = "button primary home-jira-effort-button";
+      effortButton.textContent = "+ Efor";
+      effortButton.setAttribute("aria-label", `${item.name} için efor ekle`);
+      effortButton.addEventListener("click", () => openEffortCreateModal(item.id, isoToday()));
+      row.append(issue, metadata, effortButton);
+      list.append(row);
+    });
+  }
+
+  async function refreshHomeAssignedJiraIssues(options = {}) {
+    const force = options.force === true;
+    if (window.JiraCloudClient.usesSupabase() && !supabaseSession?.user) {
+      homeAssignedJiraItems = [];
+      renderHomeAssignedJiraIssues();
+      setHomeAssignedJiraStatus("Atanan JIRA kayıtlarını görmek için önce Supabase hesabınıza giriş yapın.", "idle");
+      return null;
+    }
+    if (!force && homeAssignedJiraLoadedAt && Date.now() - homeAssignedJiraLoadedAt < HOME_ASSIGNED_JIRA_REFRESH_MS) {
+      renderHomeAssignedJiraIssues();
+      return homeAssignedJiraItems;
+    }
+    if (homeAssignedJiraRequest) return homeAssignedJiraRequest;
+    const refreshButton = $("#refreshHomeJiraIssues");
+    refreshButton.disabled = true;
+    refreshButton.textContent = "Alınıyor…";
+    $("#homeJiraIssueList").setAttribute("aria-busy", "true");
+    setHomeAssignedJiraStatus("Size atanan JIRA kayıtları alınıyor…", "busy");
+    const jiraSnapshot = window.JiraStore.list();
+    const entrySnapshot = readEntries();
+    homeAssignedJiraRequest = (async () => {
+      try {
+        const response = await window.JiraCloudClient.syncIssues(HOME_ASSIGNED_JIRA_JQL, 500);
+        const remoteItems = Array.isArray(response.items) ? response.items : [];
+        const result = window.JiraStore.mergeAll(remoteItems);
+        if (!result.valid) throw new Error(Object.values(result.errors || {}).join(" ") || "Atanan JIRA kayıtları birleştirilemedi.");
+        relinkMergedJiraEntries(result.value.idRemap);
+        renderJiraItems();
+        render();
+        if (!await waitForDataSaves()) {
+          window.CloudDataRuntime.suspend(() => {
+            window.JiraStore.replaceAll(jiraSnapshot);
+            getStore()?.replaceAll?.(entrySnapshot);
+          });
+          renderJiraItems();
+          render();
+          throw new Error("JIRA kayıtları Supabase'e kaydedilemedi; önceki liste geri yüklendi.");
+        }
+        const byKey = new Map(window.JiraStore.list().map((item) => [String(item.name || "").toLocaleUpperCase("en-US"), item]));
+        homeAssignedJiraItems = remoteItems
+          .map((item) => byKey.get(String(item.name || "").toLocaleUpperCase("en-US")))
+          .filter(Boolean)
+          .sort((left, right) => String(right.jiraUpdated || "").localeCompare(String(left.jiraUpdated || "")));
+        homeAssignedJiraLoadedAt = Date.now();
+        renderHomeAssignedJiraIssues();
+        const truncatedNote = response.truncated ? " İlk 500 güncel kayıt gösteriliyor." : "";
+        setHomeAssignedJiraStatus(`JIRA'dan ${dateTimeFormatter.format(new Date())} tarihinde güncellendi.${truncatedNote}`, "success");
+        return homeAssignedJiraItems;
+      } catch (error) {
+        renderHomeAssignedJiraIssues();
+        setHomeAssignedJiraStatus(`Atanan JIRA kayıtları alınamadı: ${error.message}`, "error");
+        return null;
+      } finally {
+        refreshButton.disabled = false;
+        refreshButton.textContent = "Yenile";
+        $("#homeJiraIssueList").removeAttribute("aria-busy");
+        homeAssignedJiraRequest = null;
+      }
+    })();
+    return homeAssignedJiraRequest;
   }
 
   async function fetchJiraIssueByKey(issueKey, options = {}) {
@@ -1486,6 +1725,111 @@
     } finally { button.disabled = false; }
   }
 
+  function setAdminUserStatus(message, state = "") {
+    const status = $("#adminUserStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("is-busy", state === "busy");
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-success", state === "success");
+  }
+
+  function adminUserSearchText(user) {
+    return [user.email, user.displayName, user.id].join(" ").toLocaleLowerCase("tr-TR");
+  }
+
+  function renderAdminUsers() {
+    if (!isAccessLogAdmin()) return;
+    const query = String($("#adminUserSearch").value || "").trim().toLocaleLowerCase("tr-TR");
+    const rows = query ? adminUsers.filter((user) => adminUserSearchText(user).includes(query)) : adminUsers;
+    const body = $("#adminUserTableBody");
+    body.replaceChildren();
+    $("#adminUserCount").textContent = String(rows.length);
+    $("#adminUserEmpty").classList.toggle("hidden", rows.length > 0);
+    $("#adminUserTableWrap").classList.toggle("hidden", rows.length === 0);
+
+    rows.forEach((item) => {
+      const row = document.createElement("tr");
+      const userCell = document.createElement("td");
+      const user = document.createElement("span");
+      user.className = "access-log-user";
+      const label = document.createElement("strong");
+      label.textContent = item.displayName || item.email || "E-postasız kullanıcı";
+      const email = document.createElement("small");
+      email.textContent = item.email || item.id;
+      const id = document.createElement("small");
+      id.textContent = `Kimlik: ${item.id}`;
+      user.append(label, email, id);
+      userCell.append(user);
+      row.append(userCell);
+
+      appendAccessTimeCell(row, item.createdAt);
+      appendAccessTimeCell(row, item.lastSignInAt, item.lastSignInAt ? "Son başarılı giriş" : "Henüz giriş yapmadı");
+
+      const verificationCell = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = "access-log-state";
+      badge.dataset.state = item.emailConfirmedAt ? "active" : "stale";
+      badge.textContent = item.emailConfirmedAt ? "E-posta doğrulandı" : "Doğrulanmadı";
+      verificationCell.append(badge);
+      row.append(verificationCell);
+
+      const actionCell = document.createElement("td");
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "button danger-text admin-user-delete";
+      deleteButton.textContent = item.isCurrentAdmin ? "Korunan hesap" : "Kullanıcıyı sil";
+      deleteButton.disabled = Boolean(item.isCurrentAdmin);
+      if (!item.isCurrentAdmin) deleteButton.addEventListener("click", () => deleteAdminUser(item, deleteButton));
+      actionCell.append(deleteButton);
+      row.append(actionCell);
+      body.append(row);
+    });
+  }
+
+  async function loadAdminUsers() {
+    if (!isAccessLogAdmin()) return;
+    const button = $("#refreshAdminUsers");
+    button.disabled = true;
+    setAdminUserStatus("Supabase kullanıcıları yükleniyor…", "busy");
+    try {
+      const result = await window.SupabaseCloud.listAdminUsers();
+      adminUsers = Array.isArray(result.users) ? result.users : [];
+      renderAdminUsers();
+      setAdminUserStatus(`${adminUsers.length} kullanıcı güvenli yönetici servisi üzerinden yüklendi.`, "success");
+    } catch (error) {
+      adminUsers = [];
+      renderAdminUsers();
+      setAdminUserStatus(`Kullanıcılar alınamadı: ${error.message}`, "error");
+    } finally { button.disabled = false; }
+  }
+
+  async function deleteAdminUser(user, button) {
+    const expected = String(user.email || user.id || "").trim();
+    const confirmation = window.prompt(
+      `Bu işlem ${expected} hesabını ve hesabın tek sahibi olduğu çalışma alanını kalıcı olarak siler.\n\nOnaylamak için aşağıya ${user.email ? "e-posta adresini" : "kullanıcı kimliğini"} eksiksiz yazın:`,
+      ""
+    );
+    if (confirmation === null) return;
+    if (confirmation.trim().toLowerCase() !== expected.toLowerCase()) {
+      setAdminUserStatus("Kullanıcı silinmedi: yazılan onay bilgisi hedef hesapla eşleşmiyor.", "error");
+      return;
+    }
+
+    button.disabled = true;
+    setAdminUserStatus(`${expected} hesabı siliniyor…`, "busy");
+    try {
+      const result = await window.SupabaseCloud.deleteAdminUser(user.id, confirmation);
+      adminUsers = adminUsers.filter((item) => item.id !== user.id);
+      renderAdminUsers();
+      setAdminUserStatus(`${result.deletedEmail || expected} hesabı ve ${result.deletedOrganizationCount || 0} kişisel çalışma alanı kalıcı olarak silindi.`, "success");
+      await loadAccessLogs();
+    } catch (error) {
+      setAdminUserStatus(`Kullanıcı silinemedi: ${error.message}`, "error");
+      button.disabled = false;
+    }
+  }
+
   function activateMainView(viewId) {
     if (viewId === "accessLogView" && !isAccessLogAdmin()) viewId = "homeView";
     const teamSubview = ["peopleView", "organizationView"].includes(viewId) ? viewId : "";
@@ -1498,7 +1842,11 @@
     document.querySelectorAll(".tab-view").forEach((view) => view.classList.toggle("hidden", view.id !== mainViewId));
     if (teamSubview) activateTeamSubview(teamSubview);
     if (mainViewId === "jiraView") activateJiraSubview("jiraItemsView");
-    if (mainViewId === "accessLogView") loadAccessLogs();
+    if (mainViewId === "homeView") refreshHomeAssignedJiraIssues();
+    if (mainViewId === "accessLogView") {
+      loadAccessLogs();
+      loadAdminUsers();
+    }
   }
 
   function activateTeamSubview(viewId) {
@@ -4401,12 +4749,204 @@
     $("#supabaseHeaderMenu").classList.toggle("is-error", state === "error");
   }
 
+  function authFormUi(scope) {
+    const login = scope === "login";
+    return {
+      form: $(login ? "#loginScreenForm" : "#supabaseAuthForm"),
+      email: $(login ? "#loginScreenEmail" : "#supabaseEmail"),
+      password: $(login ? "#loginScreenPassword" : "#supabasePassword"),
+      confirm: $(login ? "#loginScreenConfirmPassword" : "#supabaseConfirmPassword"),
+      confirmField: $(login ? "#loginScreenConfirmPasswordField" : "#supabaseConfirmPasswordField"),
+      rules: $(login ? "#loginScreenPasswordRules" : "#supabasePasswordRules"),
+      submit: $(login ? "#loginScreenSignIn" : "#supabaseSignIn"),
+      forgot: $(login ? "#loginScreenForgotPassword" : "#supabaseForgotPassword")
+    };
+  }
+
+  function friendlyAuthError(error) {
+    const code = String(error?.code || "").toLowerCase();
+    if (code === "weak_password") return "Şifre güvenlik koşullarını karşılamıyor. En az 8 karakter kullanın.";
+    if (code === "email_not_confirmed") return "Giriş yapmadan önce e-posta adresinizi doğrulamanız gerekiyor.";
+    if (code === "invalid_credentials") return "E-posta adresi veya şifre hatalı.";
+    if (code === "over_email_send_rate_limit") return "Çok kısa sürede fazla e-posta istendi. Birkaç dakika sonra tekrar deneyin.";
+    if (code === "signup_disabled") return "Yeni hesap oluşturma şu anda kapalı.";
+    if (code === "user_already_exists") return "Bu e-posta adresiyle daha önce hesap oluşturulmuş olabilir. Giriş yapmayı veya şifre yenilemeyi deneyin.";
+    if (code === "validation_failed") return "E-posta veya şifre biçimi geçersiz.";
+    return error?.message || "Supabase işlemi tamamlanamadı.";
+  }
+
+  function updateAuthPasswordRules(scope, markInvalid = false) {
+    const ui = authFormUi(scope);
+    const states = window.AuthValidation.validate({
+      mode: "signup",
+      email: ui.email.value || "user@example.com",
+      password: ui.password.value,
+      confirmation: ui.confirm.value
+    }).rules;
+    ui.rules.querySelectorAll("[data-rule]").forEach((item) => {
+      const valid = Boolean(states[item.dataset.rule]);
+      item.classList.toggle("is-valid", valid);
+      item.classList.toggle("is-invalid", markInvalid && !valid);
+    });
+    return Object.values(states).every(Boolean);
+  }
+
+  function clearAuthPasswords() {
+    ["#loginScreenPassword", "#loginScreenConfirmPassword", "#supabasePassword", "#supabaseConfirmPassword"]
+      .forEach((selector) => { const input = $(selector); if (input) input.value = ""; });
+  }
+
+  function setSupabaseAuthMode(mode, options = {}) {
+    supabaseAuthMode = mode === "signup" ? "signup" : "signin";
+    const signingUp = supabaseAuthMode === "signup";
+    if (options.clearVerification !== false) {
+      pendingVerificationEmail = "";
+      verificationResendSeconds = 0;
+      if (verificationResendTimer) window.clearInterval(verificationResendTimer);
+      verificationResendTimer = 0;
+    }
+    ["login", "header"].forEach((scope) => {
+      const ui = authFormUi(scope);
+      ui.form.classList.remove("hidden");
+      ui.confirmField.classList.toggle("hidden", !signingUp);
+      ui.confirm.required = signingUp;
+      ui.rules.classList.toggle("hidden", !signingUp);
+      ui.password.autocomplete = signingUp ? "new-password" : "current-password";
+      ui.submit.textContent = signingUp ? "Hesap oluştur" : "Giriş yap";
+      ui.forgot.classList.toggle("hidden", signingUp);
+      if (!signingUp) ui.confirm.value = "";
+      updateAuthPasswordRules(scope);
+    });
+    [["#loginScreenSignInMode", "signin"], ["#loginScreenSignUp", "signup"], ["#supabaseSignInMode", "signin"], ["#supabaseSignUp", "signup"]]
+      .forEach(([selector, buttonMode]) => {
+        const button = $(selector);
+        const active = buttonMode === supabaseAuthMode;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+    document.querySelectorAll(".auth-mode-switch").forEach((switcher) => switcher.classList.remove("hidden"));
+    $("#loginVerificationPanel").classList.add("hidden");
+    $("#supabaseVerificationPanel").classList.add("hidden");
+    $("#loginScreenTitle").textContent = signingUp ? "Yeni hesabınızı oluşturun" : "Tekrar hoş geldiniz";
+    $("#loginScreenDescription").textContent = signingUp
+      ? "E-posta adresinizi doğruladıktan sonra kişisel çalışma alanınız hazırlanır."
+      : "Çalışma alanınıza devam etmek için hesabınıza giriş yapın.";
+  }
+
+  function updateVerificationResendButtons() {
+    ["#loginResendVerification", "#supabaseResendVerification"].forEach((selector) => {
+      const button = $(selector);
+      if (!button) return;
+      button.disabled = supabaseBusy || verificationResendSeconds > 0;
+      button.textContent = verificationResendSeconds > 0
+        ? `Tekrar gönder (${verificationResendSeconds} sn)`
+        : (selector === "#loginResendVerification" ? "Doğrulama e-postasını tekrar gönder" : "Tekrar gönder");
+    });
+  }
+
+  function startVerificationResendCooldown(seconds = 60) {
+    if (verificationResendTimer) window.clearInterval(verificationResendTimer);
+    verificationResendSeconds = Math.max(0, Number(seconds) || 0);
+    updateVerificationResendButtons();
+    if (!verificationResendSeconds) return;
+    verificationResendTimer = window.setInterval(() => {
+      verificationResendSeconds = Math.max(0, verificationResendSeconds - 1);
+      updateVerificationResendButtons();
+      if (!verificationResendSeconds) {
+        window.clearInterval(verificationResendTimer);
+        verificationResendTimer = 0;
+      }
+    }, 1000);
+  }
+
+  function showVerificationPending(email, message = "") {
+    pendingVerificationEmail = String(email || "").trim().toLowerCase();
+    clearAuthPasswords();
+    $("#loginScreenForm").classList.add("hidden");
+    $("#supabaseAuthForm").classList.add("hidden");
+    document.querySelectorAll(".auth-mode-switch").forEach((switcher) => switcher.classList.add("hidden"));
+    $("#loginVerificationPanel").classList.remove("hidden");
+    $("#supabaseVerificationPanel").classList.remove("hidden");
+    $("#loginVerificationEmail").textContent = pendingVerificationEmail;
+    $("#supabaseVerificationEmail").textContent = pendingVerificationEmail;
+    $("#loginScreenTitle").textContent = "E-postanızı kontrol edin";
+    $("#loginScreenDescription").textContent = "Doğrulama tamamlanana kadar hesabınızla giriş yapılamaz.";
+    $("#headerSupabaseMenuBadge").classList.remove("hidden");
+    $("#headerSupabaseMenuBadge").textContent = "Doğrula";
+    setSupabaseStatus(message || "Doğrulama e-postası gönderildi. Bağlantıya tıkladıktan sonra uygulamaya dönebilirsiniz.", "success");
+    startVerificationResendCooldown(60);
+  }
+
+  function validateAuthForm(scope) {
+    const ui = authFormUi(scope);
+    ui.email.setCustomValidity("");
+    ui.password.setCustomValidity("");
+    ui.confirm.setCustomValidity("");
+    const validation = window.AuthValidation.validate({
+      mode: supabaseAuthMode,
+      email: ui.email.value,
+      password: ui.password.value,
+      confirmation: ui.confirm.value
+    });
+    if (validation.valid && ui.form.reportValidity()) return validation;
+
+    if (validation.errors.email) ui.email.setCustomValidity(validation.errors.email);
+    if (validation.errors.password || validation.errors.spaces) ui.password.setCustomValidity(validation.errors.password || validation.errors.spaces);
+    if (validation.errors.confirmation) ui.confirm.setCustomValidity(validation.errors.confirmation);
+    if (supabaseAuthMode === "signup") updateAuthPasswordRules(scope, true);
+    const firstInvalid = [ui.email, ui.password, ui.confirm].find((input) => !input.checkValidity());
+    firstInvalid?.reportValidity();
+    setSupabaseStatus(Object.values(validation.errors)[0] || "E-posta veya şifre bilgilerini kontrol edin.", "error");
+    return null;
+  }
+
+  async function submitSupabaseCredentials(scope) {
+    const credentials = validateAuthForm(scope);
+    if (!credentials) return false;
+    syncSupabaseAuthInputs(credentials.email, credentials.password, credentials.confirmation);
+    if (supabaseAuthMode === "signup") {
+      setSupabaseStatus("Supabase hesabınız oluşturuluyor…", "busy");
+      const result = await window.SupabaseCloud.signUp(credentials.email, credentials.password);
+      if (result.session) {
+        await refreshSupabaseAccount(result.session);
+        setSupabaseStatus("Hesabınız oluşturuldu ve Supabase’e bağlandı.", "success");
+      } else {
+        showVerificationPending(credentials.email);
+      }
+      return true;
+    }
+
+    setSupabaseStatus("Supabase hesabınıza giriş yapılıyor…", "busy");
+    try {
+      const result = await window.SupabaseCloud.signIn(credentials.email, credentials.password);
+      if (!result.session) throw Object.assign(new Error("Giriş oturumu oluşturulamadı."), { code: "invalid_credentials" });
+      await refreshSupabaseAccount(result.session);
+      setSupabaseStatus("Supabase hesabınıza giriş yapıldı.", "success");
+      return true;
+    } catch (error) {
+      if (String(error?.code || "").toLowerCase() === "email_not_confirmed") {
+        showVerificationPending(credentials.email, friendlyAuthError(error));
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async function resendVerificationEmail() {
+    if (!pendingVerificationEmail || verificationResendSeconds > 0) return false;
+    await window.SupabaseCloud.resendSignUpConfirmation(pendingVerificationEmail);
+    setSupabaseStatus("Doğrulama e-postası yeniden gönderildi.", "success");
+    startVerificationResendCooldown(60);
+    return true;
+  }
+
   function setSupabaseBusy(busy) {
     supabaseBusy = Boolean(busy);
-    ["#supabaseEmail", "#supabasePassword", "#supabaseSignIn", "#supabaseSignUp", "#supabaseForgotPassword", "#supabaseNewPassword", "#supabasePull", "#supabaseSignOut", "#loginScreenEmail", "#loginScreenPassword", "#loginScreenSignIn", "#loginScreenSignUp", "#loginScreenForgotPassword"]
+    ["#supabaseEmail", "#supabasePassword", "#supabaseConfirmPassword", "#supabaseSignIn", "#supabaseSignInMode", "#supabaseSignUp", "#supabaseForgotPassword", "#supabaseNewPassword", "#supabasePull", "#supabaseSignOut", "#loginScreenEmail", "#loginScreenPassword", "#loginScreenConfirmPassword", "#loginScreenSignIn", "#loginScreenSignInMode", "#loginScreenSignUp", "#loginScreenForgotPassword", "#loginVerificationBack", "#supabaseVerificationBack"]
       .forEach((selector) => { const element = $(selector); if (element) element.disabled = supabaseBusy; });
     $("#supabaseHeaderMenu").classList.toggle("is-busy", supabaseBusy);
     $("#loginScreen")?.classList.toggle("is-busy", supabaseBusy);
+    updateVerificationResendButtons();
   }
 
   function setLoginScreenVisible(visible) {
@@ -4421,7 +4961,7 @@
     if (pageMain) pageMain.inert = visible;
   }
 
-  function syncSupabaseAuthInputs(email, password = "") {
+  function syncSupabaseAuthInputs(email, password = "", confirmation = "") {
     const normalizedEmail = String(email || "").trim();
     ["#supabaseEmail", "#loginScreenEmail"].forEach((selector) => {
       const input = $(selector);
@@ -4431,6 +4971,11 @@
     ["#supabasePassword", "#loginScreenPassword"].forEach((selector) => {
       const input = $(selector);
       if (input) input.value = password;
+    });
+    if (!confirmation) return;
+    ["#supabaseConfirmPassword", "#loginScreenConfirmPassword"].forEach((selector) => {
+      const input = $(selector);
+      if (input) input.value = confirmation;
     });
   }
 
@@ -4518,12 +5063,22 @@
   async function refreshSupabaseAccount(session = supabaseSession) {
     supabaseSession = session || null;
     const signedIn = Boolean(supabaseSession?.user);
+    if (signedIn) {
+      pendingVerificationEmail = "";
+      verificationResendSeconds = 0;
+      if (verificationResendTimer) window.clearInterval(verificationResendTimer);
+      verificationResendTimer = 0;
+      $("#loginVerificationPanel").classList.add("hidden");
+      $("#supabaseVerificationPanel").classList.add("hidden");
+    }
     updateAccessLogVisibility();
     setLoginScreenVisible(!signedIn);
-    $("#supabaseAuthForm").classList.toggle("hidden", signedIn);
+    $("#supabaseAuthForm").classList.toggle("hidden", signedIn || Boolean(pendingVerificationEmail));
+    document.querySelector(".auth-mode-switch.compact")?.classList.toggle("hidden", signedIn || Boolean(pendingVerificationEmail));
     $("#supabaseSignedInPanel").classList.toggle("hidden", !signedIn);
     $("#supabaseHeaderMenu").classList.toggle("is-connected", signedIn);
-    $("#headerSupabaseMenuBadge").classList.add("hidden");
+    $("#headerSupabaseMenuBadge").classList.toggle("hidden", signedIn || !pendingVerificationEmail);
+    $("#headerSupabaseMenuBadge").textContent = pendingVerificationEmail ? "Doğrula" : "";
     $("#supabaseConnectionBadge").dataset.state = signedIn ? "signed-in" : "signed-out";
     $("#supabaseConnectionBadge").textContent = signedIn ? "Bağlı" : "Bağlı değil";
     $("#headerSupabaseMenuLabel").textContent = signedIn ? "Supabase bağlı" : "Giriş gerekli";
@@ -4539,8 +5094,10 @@
       $("#supabaseUserEmail").textContent = "-";
       $("#supabaseOrganizationName").textContent = "-";
       setCloudDataGate("signed_out");
-      setSupabaseStatus("Uygulama verilerini açmak için Supabase hesabınıza giriş yapın.");
-      window.setTimeout(() => $("#loginScreenEmail")?.focus(), 0);
+      setSupabaseStatus(pendingVerificationEmail
+        ? "E-posta doğrulama bağlantısını açtıktan sonra hesabınıza giriş yapabilirsiniz."
+        : "Uygulama verilerini açmak için Supabase hesabınıza giriş yapın.", pendingVerificationEmail ? "success" : "neutral");
+      window.setTimeout(() => $(pendingVerificationEmail ? "#loginResendVerification" : "#loginScreenEmail")?.focus(), 0);
       return;
     }
 
@@ -4649,7 +5206,7 @@
     setSupabaseBusy(true);
     try { return await action(); }
     catch (error) {
-      setSupabaseStatus(error.message || "Supabase işlemi tamamlanamadı.", "error");
+      setSupabaseStatus(friendlyAuthError(error), "error");
       return false;
     } finally { setSupabaseBusy(false); }
   }
@@ -5315,6 +5872,12 @@
     });
   });
 
+  $("#homeJiraStatusFilter").addEventListener("change", (event) => {
+    homeAssignedJiraStatus = event.target.value;
+    renderHomeAssignedJiraIssues();
+  });
+  $("#refreshHomeJiraIssues").addEventListener("click", () => refreshHomeAssignedJiraIssues({ force: true }));
+
   $("#organizationLeaderFilter").addEventListener("change", renderOrganization);
 
   document.querySelectorAll(".task-subtab-button").forEach((button) => {
@@ -5478,32 +6041,19 @@
 
   $("#loginScreenForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    runSupabaseAction(async () => {
-      const email = $("#loginScreenEmail").value;
-      const password = $("#loginScreenPassword").value;
-      syncSupabaseAuthInputs(email, password);
-      setSupabaseStatus("Supabase hesabınıza giriş yapılıyor…", "busy");
-      const result = await window.SupabaseCloud.signIn(email, password);
-      await refreshSupabaseAccount(result.session);
-      setSupabaseStatus("Supabase hesabınıza giriş yapıldı.", "success");
-    });
+    runSupabaseAction(() => submitSupabaseCredentials("login"));
   });
 
-  $("#loginScreenSignUp").addEventListener("click", () => runSupabaseAction(async () => {
-    if (!$("#loginScreenForm").reportValidity()) return;
-    const email = $("#loginScreenEmail").value;
-    const password = $("#loginScreenPassword").value;
-    syncSupabaseAuthInputs(email, password);
-    setSupabaseStatus("Supabase hesabınız oluşturuluyor…", "busy");
-    const result = await window.SupabaseCloud.signUp(email, password);
-    if (result.session) {
-      await refreshSupabaseAccount(result.session);
-      setSupabaseStatus("Hesabınız oluşturuldu ve Supabase’e bağlandı.", "success");
-    } else {
-      $("#headerSupabaseMenuBadge").classList.remove("hidden");
-      setSupabaseStatus("Doğrulama e-postası gönderildi. E-postadaki bağlantıya tıklayıp bu sayfaya dönün.", "success");
-    }
-  }));
+  $("#loginScreenSignInMode").addEventListener("click", () => {
+    setSupabaseAuthMode("signin");
+    setSupabaseStatus("Hesabınıza giriş yapmak için e-posta ve şifrenizi yazın.");
+    $("#loginScreenEmail").focus();
+  });
+  $("#loginScreenSignUp").addEventListener("click", () => {
+    setSupabaseAuthMode("signup");
+    setSupabaseStatus("Yeni hesap için e-posta, şifre ve şifre tekrarını doldurun.");
+    $("#loginScreenEmail").focus();
+  });
 
   $("#loginScreenForgotPassword").addEventListener("click", () => runSupabaseAction(async () => {
     const emailInput = $("#loginScreenEmail");
@@ -5515,30 +6065,37 @@
 
   $("#supabaseAuthForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    runSupabaseAction(async () => {
-      const email = $("#supabaseEmail").value;
-      const password = $("#supabasePassword").value;
-      syncSupabaseAuthInputs(email, password);
-      const result = await window.SupabaseCloud.signIn(email, password);
-      await refreshSupabaseAccount(result.session);
-      setSupabaseStatus("Supabase hesabınıza giriş yapıldı.", "success");
-    });
+    runSupabaseAction(() => submitSupabaseCredentials("header"));
   });
 
-  $("#supabaseSignUp").addEventListener("click", () => runSupabaseAction(async () => {
-    if (!$("#supabaseAuthForm").reportValidity()) return;
-    const email = $("#supabaseEmail").value;
-    const password = $("#supabasePassword").value;
-    syncSupabaseAuthInputs(email, password);
-    const result = await window.SupabaseCloud.signUp(email, password);
-    if (result.session) {
-      await refreshSupabaseAccount(result.session);
-      setSupabaseStatus("Hesabınız oluşturuldu ve Supabase’e bağlandı.", "success");
-    } else {
-      $("#headerSupabaseMenuBadge").classList.remove("hidden");
-      setSupabaseStatus("Doğrulama e-postası gönderildi. E-postadaki bağlantıya tıklayıp bu sayfaya dönün.", "success");
-    }
-  }));
+  $("#supabaseSignInMode").addEventListener("click", () => {
+    setSupabaseAuthMode("signin");
+    setSupabaseStatus("Hesabınıza giriş yapmak için e-posta ve şifrenizi yazın.");
+    $("#supabaseEmail").focus();
+  });
+  $("#supabaseSignUp").addEventListener("click", () => {
+    setSupabaseAuthMode("signup");
+    setSupabaseStatus("Yeni hesap için e-posta, şifre ve şifre tekrarını doldurun.");
+    $("#supabaseEmail").focus();
+  });
+
+  ["#loginScreenPassword", "#loginScreenConfirmPassword"].forEach((selector) => {
+    $(selector).addEventListener("input", () => updateAuthPasswordRules("login"));
+  });
+  ["#supabasePassword", "#supabaseConfirmPassword"].forEach((selector) => {
+    $(selector).addEventListener("input", () => updateAuthPasswordRules("header"));
+  });
+
+  ["#loginResendVerification", "#supabaseResendVerification"].forEach((selector) => {
+    $(selector).addEventListener("click", () => runSupabaseAction(resendVerificationEmail));
+  });
+  ["#loginVerificationBack", "#supabaseVerificationBack"].forEach((selector) => {
+    $(selector).addEventListener("click", () => {
+      setSupabaseAuthMode("signup");
+      setSupabaseStatus("E-posta adresinizi düzeltip kayıt işlemini yeniden başlatabilirsiniz.");
+      $(selector === "#loginVerificationBack" ? "#loginScreenEmail" : "#supabaseEmail").focus();
+    });
+  });
 
   $("#supabaseForgotPassword").addEventListener("click", () => runSupabaseAction(async () => {
     const emailInput = $("#supabaseEmail");
@@ -5598,6 +6155,8 @@
     });
   });
   $("#refreshAccessLogs").addEventListener("click", loadAccessLogs);
+  $("#refreshAdminUsers").addEventListener("click", loadAdminUsers);
+  $("#adminUserSearch").addEventListener("input", renderAdminUsers);
   $("#accessLogStatusFilter").addEventListener("change", renderAccessLogs);
   $("#accessLogSearch").addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -5621,6 +6180,7 @@
     event.returnValue = "";
   });
 
+  setSupabaseAuthMode("signin");
   try {
     window.CloudDataRuntime.setChangeHandler(queueCloudChange);
     window.SupabaseCloud.onAuthStateChange((event, session) => {

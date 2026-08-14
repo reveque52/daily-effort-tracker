@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260813-1">
+    <link rel="stylesheet" href="styles.css?v=20260814-3">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
@@ -21,8 +21,9 @@
     <script src="google-calendar.js?v=20260810-1" defer></script>
     <script src="weather-client.js?v=20260811-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
-    <script src="supabase-cloud.js?v=20260813-1" defer></script>
-    <script src="app.js?v=20260813-1" defer></script>
+    <script src="auth-validation.js?v=20260814-3" defer></script>
+    <script src="supabase-cloud.js?v=20260814-3" defer></script>
+    <script src="app.js?v=20260814-3" defer></script>
   </head>
   <body class="auth-required">
     <section id="loginScreen" class="login-screen" aria-labelledby="loginScreenTitle">
@@ -46,11 +47,15 @@
           <div class="login-card-heading">
             <span class="eyebrow">Supabase ile güvenli giriş</span>
             <h2 id="loginScreenTitle">Tekrar hoş geldiniz</h2>
-            <p>Çalışma alanınıza devam etmek için hesabınıza giriş yapın.</p>
+            <p id="loginScreenDescription">Çalışma alanınıza devam etmek için hesabınıza giriş yapın.</p>
           </div>
 
           <p id="loginScreenStatus" class="login-screen-status is-busy" role="status" aria-live="polite">Oturumunuz kontrol ediliyor…</p>
 
+          <div class="auth-mode-switch" role="group" aria-label="Hesap işlemi">
+            <button id="loginScreenSignInMode" class="auth-mode-button active" type="button" aria-pressed="true">Giriş yap</button>
+            <button id="loginScreenSignUp" class="auth-mode-button" type="button" aria-pressed="false">Yeni hesap oluştur</button>
+          </div>
           <form id="loginScreenForm" class="login-screen-form">
             <label>
               <span>E-posta</span>
@@ -60,12 +65,29 @@
               <span>Şifre</span>
               <input id="loginScreenPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="En az 8 karakter">
             </label>
+            <label id="loginScreenConfirmPasswordField" class="hidden">
+              <span>Şifreyi tekrar girin</span>
+              <input id="loginScreenConfirmPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Şifrenizi yeniden yazın">
+            </label>
+            <ul id="loginScreenPasswordRules" class="auth-password-rules hidden" aria-label="Şifre kuralları">
+              <li data-rule="length">En az 8 karakter</li>
+              <li data-rule="match">Şifreler birbiriyle aynı</li>
+              <li data-rule="spaces">Başında veya sonunda boşluk yok</li>
+            </ul>
             <button id="loginScreenSignIn" class="button primary login-primary-action" type="submit">Giriş yap</button>
             <div class="login-secondary-actions">
-              <button id="loginScreenSignUp" class="button secondary" type="button">Hesap oluştur</button>
               <button id="loginScreenForgotPassword" class="button link-button" type="button">Şifremi unuttum</button>
             </div>
           </form>
+
+          <section id="loginVerificationPanel" class="auth-verification-panel hidden" aria-labelledby="loginVerificationTitle">
+            <span class="auth-verification-icon" aria-hidden="true">✉</span>
+            <div><h3 id="loginVerificationTitle">E-postanızı doğrulayın</h3><p><strong id="loginVerificationEmail"></strong> adresine gönderilen bağlantıya tıklayın. Doğrulamadan giriş yapılamaz.</p></div>
+            <div class="auth-verification-actions">
+              <button id="loginResendVerification" class="button primary" type="button">Doğrulama e-postasını tekrar gönder</button>
+              <button id="loginVerificationBack" class="button secondary" type="button">E-postayı değiştir</button>
+            </div>
+          </section>
 
           <p class="login-security-note"><span aria-hidden="true">●</span> Oturumunuz Supabase tarafından güvenli biçimde yönetilir.</p>
         </div>
@@ -184,15 +206,28 @@
 
                 <p id="supabaseStatus" class="supabase-status" role="status" aria-live="polite">Uygulama verilerini açmak için giriş yapın.</p>
 
+                <div class="auth-mode-switch compact" role="group" aria-label="Hesap işlemi">
+                  <button id="supabaseSignInMode" class="auth-mode-button active" type="button" aria-pressed="true">Giriş yap</button>
+                  <button id="supabaseSignUp" class="auth-mode-button" type="button" aria-pressed="false">Yeni hesap</button>
+                </div>
                 <form id="supabaseAuthForm" class="supabase-auth-form">
                   <label><span>E-posta</span><input id="supabaseEmail" type="email" autocomplete="email" required placeholder="adiniz@firma.com"></label>
                   <label><span>Şifre</span><input id="supabasePassword" type="password" autocomplete="current-password" minlength="8" required placeholder="En az 8 karakter"></label>
+                  <label id="supabaseConfirmPasswordField" class="hidden"><span>Şifreyi tekrar girin</span><input id="supabaseConfirmPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Şifrenizi yeniden yazın"></label>
+                  <ul id="supabasePasswordRules" class="auth-password-rules hidden" aria-label="Şifre kuralları">
+                    <li data-rule="length">En az 8 karakter</li><li data-rule="match">Şifreler aynı</li><li data-rule="spaces">Dış boşluk yok</li>
+                  </ul>
                   <div class="supabase-auth-actions">
                     <button id="supabaseSignIn" class="button primary" type="submit">Giriş yap</button>
-                    <button id="supabaseSignUp" class="button secondary" type="button">Hesap oluştur</button>
                     <button id="supabaseForgotPassword" class="button link-button" type="button">Şifremi unuttum</button>
                   </div>
                 </form>
+
+                <section id="supabaseVerificationPanel" class="auth-verification-panel compact hidden" aria-labelledby="supabaseVerificationTitle">
+                  <span class="auth-verification-icon" aria-hidden="true">✉</span>
+                  <div><h3 id="supabaseVerificationTitle">E-posta doğrulaması gerekli</h3><p><strong id="supabaseVerificationEmail"></strong> adresine gönderilen bağlantıyı açın.</p></div>
+                  <div class="auth-verification-actions"><button id="supabaseResendVerification" class="button primary" type="button">Tekrar gönder</button><button id="supabaseVerificationBack" class="button secondary" type="button">E-postayı değiştir</button></div>
+                </section>
 
                 <form id="supabaseRecoveryForm" class="supabase-recovery-form hidden">
                   <label><span>Yeni şifre</span><input id="supabaseNewPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="En az 8 karakter"></label>
@@ -281,6 +316,7 @@
                   <label class="field"><span>JIRA API token</span><input id="jiraCredentialToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="Atlassian API tokenınızı yapıştırın"></label>
                 </div>
                 <div class="jira-credential-actions">
+                  <a id="getJiraApiToken" class="button secondary" href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" aria-label="Atlassian API token oluşturma sayfasını yeni sekmede aç">API key al ↗</a>
                   <button id="saveJiraCredentials" class="button primary" type="button">Bağlantıyı doğrula ve kaydet</button>
                   <button id="removeJiraCredentials" class="button secondary hidden" type="button">Kayıtlı bağlantıyı kaldır</button>
                 </div>
@@ -402,6 +438,39 @@
         </div>
 
         <div class="home-dashboard-grid">
+          <section class="panel dashboard-panel home-jira-status-panel" aria-labelledby="homeJiraStatusTitle">
+            <div class="panel-heading dashboard-panel-heading">
+              <div>
+                <span class="eyebrow">JIRA dağılımı</span>
+                <h2 id="homeJiraStatusTitle">JIRA durumları</h2>
+              </div>
+            </div>
+            <div id="homeJiraStatusChart" class="task-status-chart home-jira-status-chart" role="group" aria-label="Bana atanan JIRA kayıtlarının statü dağılımı"></div>
+          </section>
+
+          <section class="panel dashboard-panel home-assigned-jira-panel" aria-labelledby="homeAssignedJiraTitle">
+            <div class="panel-heading dashboard-panel-heading home-assigned-jira-heading">
+              <div>
+                <span class="eyebrow">JIRA gündemi</span>
+                <h2 id="homeAssignedJiraTitle">Bana atanan JIRA kayıtları</h2>
+              </div>
+              <div class="home-assigned-jira-actions">
+                <label class="home-jira-status-filter" for="homeJiraStatusFilter">
+                  <span>Statü</span>
+                  <select id="homeJiraStatusFilter" aria-label="Atanan JIRA kayıtlarını statüye göre filtrele">
+                    <option value="In Progress" selected>In Progress</option>
+                    <option value="__all__">Tüm statüler</option>
+                  </select>
+                </label>
+                <strong id="homeJiraIssueCount" class="task-count-badge">0 madde</strong>
+                <button id="refreshHomeJiraIssues" class="button secondary compact-button" type="button">Yenile</button>
+              </div>
+            </div>
+            <p id="homeJiraIssueStatus" class="home-jira-issue-status" role="status" aria-live="polite">JIRA bağlantısı kontrol ediliyor…</p>
+            <div id="homeJiraIssueList" class="home-jira-issue-list" aria-live="polite"></div>
+            <div id="homeJiraIssueEmpty" class="dashboard-empty hidden">Seçili statüde size atanmış JIRA kaydı bulunmuyor.</div>
+          </section>
+
           <section class="panel dashboard-panel weekly-chart-panel" aria-labelledby="weeklyEffortTitle">
             <div class="panel-heading dashboard-panel-heading">
               <div><span id="weeklyEffortEyebrow" class="eyebrow">Günlük dağılım</span><h2 id="weeklyEffortTitle">Haftalık efor</h2></div>
@@ -855,6 +924,27 @@
             </table>
           </div>
           <footer class="access-log-footnote"><span aria-hidden="true">ⓘ</span><p>IP ve cihaz bilgileri güvenlik ve denetim amacıyla tutulur. Ani tarayıcı kapanışlarında süre, son alınan aktiflik sinyaline kadar hesaplanır.</p></footer>
+        </section>
+
+        <section class="panel admin-user-panel" aria-labelledby="adminUserTitle">
+          <div class="panel-heading admin-user-heading">
+            <div><span class="eyebrow">Supabase Auth</span><h2 id="adminUserTitle">Kullanıcı yönetimi</h2><p>Hatalı oluşturulan hesapları ve bu hesaplara ait kişisel çalışma alanlarını güvenli biçimde kaldırın.</p></div>
+            <button id="refreshAdminUsers" class="button primary" type="button">Kullanıcıları yenile</button>
+          </div>
+          <div class="admin-user-toolbar">
+            <label class="field"><span>Kullanıcı ara</span><input id="adminUserSearch" type="search" autocomplete="off" placeholder="E-posta veya ad"></label>
+            <div class="admin-user-count"><strong id="adminUserCount">0</strong><span>kullanıcı</span></div>
+          </div>
+          <p id="adminUserStatus" class="access-log-status" role="status" aria-live="polite">Kullanıcılar yüklendiğinde burada güncelleme bilgisi yer alır.</p>
+          <div id="adminUserEmpty" class="empty-state hidden"><div aria-hidden="true">◎</div><h3>Kullanıcı bulunamadı</h3><p>Arama ölçütüyle eşleşen Supabase hesabı yok.</p></div>
+          <div id="adminUserTableWrap" class="access-log-table-wrap hidden">
+            <table class="access-log-table admin-user-table">
+              <caption class="sr-only">Supabase kullanıcı hesapları ve silme işlemleri</caption>
+              <thead><tr><th>Kullanıcı</th><th>Oluşturulma</th><th>Son giriş</th><th>Doğrulama</th><th>İşlem</th></tr></thead>
+              <tbody id="adminUserTableBody"></tbody>
+            </table>
+          </div>
+          <footer class="access-log-footnote admin-user-warning"><span aria-hidden="true">⚠</span><p>Kullanıcı silme kalıcıdır. Hesabın tek sahibi olduğu çalışma alanı ve içindeki kayıtlar da kaldırılır. Başka üyeleri olan çalışma alanları güvenlik amacıyla otomatik silinmez.</p></footer>
         </section>
       </section>
     </main>
