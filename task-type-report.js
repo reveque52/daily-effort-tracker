@@ -269,8 +269,13 @@
       if (!session?.user) throw new Error("Görev raporunu görüntülemek için ana sayfadan Supabase hesabınıza giriş yapın.");
       const bundle = await window.SupabaseCloud.pullBundle();
       const savedTheme = String(bundle.settings?.theme || "violet").toLowerCase();
-      document.documentElement.dataset.theme = ["violet", "ocean", "forest", "sunset", "midnight", "graphite"].includes(savedTheme) ? savedTheme : "violet";
-      document.documentElement.style.colorScheme = ["midnight", "graphite"].includes(savedTheme) ? "dark" : "light";
+      const supportedThemes = ["violet", "ocean", "forest", "sunset", "midnight", "graphite", "aurora", "navy", "burgundy"];
+      const darkThemes = ["midnight", "graphite", "aurora", "navy", "burgundy"];
+      const activeTheme = supportedThemes.includes(savedTheme) ? savedTheme : "violet";
+      const colorMode = darkThemes.includes(activeTheme) ? "dark" : "light";
+      document.documentElement.dataset.theme = activeTheme;
+      document.documentElement.dataset.colorMode = colorMode;
+      document.documentElement.style.colorScheme = colorMode;
       reportLayout = loadReportLayout(bundle.settings?.taskTypeReportLayout);
       window.CloudDataRuntime.suspend(() => {
         const result = window.TaskStore.replaceAll(bundle.tasks || []);

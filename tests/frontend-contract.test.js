@@ -38,12 +38,12 @@ const effortModalSubmitBlock = app.slice(app.indexOf('effortEditModalForm.addEve
 assert.doesNotMatch([app, dataStore, tasks, peopleStore, jira, reminders, drive, aiClient, jiraCloudClient, outlookCalendarClient, weatherClient].join("\n"), /localStorage\.(?:getItem|setItem|removeItem)/, "App data and user preferences must not persist in localStorage");
 assert.match(supabaseCloudClient, /async function getUserSettings[\s\S]*async function updateUserSettings[\s\S]*from\("user_settings"\)/, "User preferences must be read from and written to Supabase user_settings");
 assert.match(app, /function queueCloudUserSettings[\s\S]*SupabaseCloud\.updateUserSettings[\s\S]*applyCloudUserSettings\(bundle\.settings/, "Cloud preferences must load automatically and save to Supabase");
-assert.ok(["themeHeaderMenu", "violet", "ocean", "forest", "sunset", "midnight", "graphite"].every((token) => html.includes(token)), "Header theme menu must expose all supported palettes");
-assert.ok(["APP_THEMES", "async function applyTheme", "document.documentElement.dataset.theme", "queueCloudUserSettings({ theme })"].every((token) => app.includes(token)), "Theme selection must update the document and persist to Supabase settings");
+assert.ok(["themeHeaderMenu", "violet", "ocean", "forest", "sunset", "midnight", "graphite", "aurora", "navy", "burgundy"].every((token) => html.includes(token)), "Header theme menu must expose all supported palettes");
+assert.ok(["APP_THEMES", "async function applyTheme", "document.documentElement.dataset.theme", "document.documentElement.dataset.colorMode", "queueCloudUserSettings({ theme })"].every((token) => app.includes(token)), "Theme selection must update the document and persist to Supabase settings");
 assert.ok(app.includes('applyTheme(cloudUserSettings.theme || "violet")'), "Saved theme must load with cloud user settings");
 assert.ok(taskDetailApp.includes('bundle.settings?.theme') && taskTypeReportApp.includes('bundle.settings?.theme'), "Task detail and type report pages must inherit the saved Supabase theme");
 assert.ok([':root[data-theme="ocean"]', ':root[data-theme="forest"]', ':root[data-theme="sunset"]'].every((token) => css.includes(token)), "All application themes must define shared design tokens");
-assert.ok([':root[data-theme="midnight"]', ':root[data-theme="graphite"]', 'color-scheme: dark'].every((token) => css.includes(token)), "Dark themes must define accessible dark color tokens");
+assert.ok([':root[data-theme="midnight"]', ':root[data-theme="graphite"]', ':root[data-theme="aurora"]', ':root[data-theme="navy"]', ':root[data-theme="burgundy"]', ':root[data-color-mode="dark"]', 'color-scheme: dark'].every((token) => css.includes(token)), "Dark themes must define accessible dark color tokens and shared contrast fixes");
 assert.ok(app.includes('meta.dark ? "dark" : "light"'), "Theme selection must update the browser color scheme for dark palettes");
 assert.ok(["var(--header-start)", ".home-kpi-primary", "var(--brand-accent)"].every((token) => css.includes(token)), "Core application surfaces must consume the shared theme tokens");
 
