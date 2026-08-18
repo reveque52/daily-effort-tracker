@@ -54,7 +54,10 @@
     forest: { label: "Orman", menuLabel: "Orman teması" },
     sunset: { label: "Günbatımı", menuLabel: "Günbatımı teması" },
     midnight: { label: "Gece", menuLabel: "Gece teması", dark: true },
-    graphite: { label: "Kömür", menuLabel: "Kömür teması", dark: true }
+    graphite: { label: "Kömür", menuLabel: "Kömür teması", dark: true },
+    aurora: { label: "Aurora", menuLabel: "Aurora teması", dark: true },
+    navy: { label: "Lacivert", menuLabel: "Lacivert tema", dark: true },
+    burgundy: { label: "Bordo", menuLabel: "Bordo tema", dark: true }
   });
   const DASHBOARD_WIDGET_DEFAULTS = Object.freeze([
     { id: "summary", label: "Çalışma özeti", span: 12 },
@@ -201,6 +204,7 @@
     const meta = APP_THEMES[theme];
     activeTheme = theme;
     document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.colorMode = meta.dark ? "dark" : "light";
     document.documentElement.style.colorScheme = meta.dark ? "dark" : "light";
     if ($("#headerThemeMenuLabel")) $("#headerThemeMenuLabel").textContent = meta.menuLabel;
     if ($("#themeSelectionBadge")) $("#themeSelectionBadge").textContent = meta.label;

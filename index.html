@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="tr" data-theme="violet">
+<html lang="tr" data-theme="violet" data-color-mode="light">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260818-2">
+    <link rel="stylesheet" href="styles.css?v=20260818-3">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
@@ -23,7 +23,7 @@
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
     <script src="auth-validation.js?v=20260818-2" defer></script>
     <script src="supabase-cloud.js?v=20260818-2" defer></script>
-    <script src="app.js?v=20260818-2" defer></script>
+    <script src="app.js?v=20260818-3" defer></script>
   </head>
   <body class="auth-required">
     <section id="loginScreen" class="login-screen" aria-labelledby="loginScreenTitle">
@@ -182,6 +182,18 @@
                   <button class="theme-option" type="button" data-theme-option="graphite" role="radio" aria-checked="false">
                     <span class="theme-option-preview theme-preview-graphite" aria-hidden="true"><i></i><i></i><i></i></span>
                     <span><strong>Kömür</strong><small>Nötr ve sade</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="aurora" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-aurora" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Aurora</strong><small>Koyu yeşil ve canlı</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="navy" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-navy" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Lacivert</strong><small>Serin ve profesyonel</small></span><b aria-hidden="true">✓</b>
+                  </button>
+                  <button class="theme-option" type="button" data-theme-option="burgundy" role="radio" aria-checked="false">
+                    <span class="theme-option-preview theme-preview-burgundy" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span><strong>Bordo</strong><small>Sıcak ve güçlü</small></span><b aria-hidden="true">✓</b>
                   </button>
                 </div>
                 <p id="themeStatus" class="theme-status" role="status" aria-live="polite">Mor tema etkin.</p>
