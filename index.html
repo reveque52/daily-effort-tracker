@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260814-3">
+    <link rel="stylesheet" href="styles.css?v=20260818-2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
@@ -21,9 +21,9 @@
     <script src="google-calendar.js?v=20260810-1" defer></script>
     <script src="weather-client.js?v=20260811-1" defer></script>
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
-    <script src="auth-validation.js?v=20260814-3" defer></script>
-    <script src="supabase-cloud.js?v=20260814-3" defer></script>
-    <script src="app.js?v=20260814-3" defer></script>
+    <script src="auth-validation.js?v=20260818-2" defer></script>
+    <script src="supabase-cloud.js?v=20260818-2" defer></script>
+    <script src="app.js?v=20260818-2" defer></script>
   </head>
   <body class="auth-required">
     <section id="loginScreen" class="login-screen" aria-labelledby="loginScreenTitle">
@@ -342,7 +342,24 @@
       </section>
 
       <section id="homeView" class="tab-view">
-        <section class="home-summary-panel" aria-labelledby="homeSummaryTitle">
+        <div class="dashboard-customize-bar" aria-label="Ana sayfa düzeni">
+          <div>
+            <strong>Dashboard düzeni</strong>
+            <small id="dashboardLayoutStatus">Kutuların yerini ve boyutunu hesabınıza göre düzenleyebilirsiniz.</small>
+          </div>
+          <button id="toggleDashboardEdit" class="button secondary" type="button" aria-pressed="false">Dashboard’u düzenle</button>
+          <div id="dashboardEditTools" class="dashboard-edit-tools hidden">
+            <span>Kutuyu taşıma simgesinden sürükleyin; − ve + ile boyutlandırın.</span>
+            <details class="dashboard-widget-manager">
+              <summary>Kutu ekle / çıkar</summary>
+              <div id="dashboardWidgetVisibility" class="dashboard-widget-visibility"></div>
+            </details>
+            <button id="resetDashboardLayout" class="button secondary" type="button">Varsayılan düzene dön</button>
+          </div>
+        </div>
+
+        <div id="homeCustomizableGrid" class="home-customizable-grid">
+        <section class="home-summary-panel dashboard-widget" data-dashboard-widget="summary" data-dashboard-span="12" aria-labelledby="homeSummaryTitle">
           <header class="home-intro">
             <div>
               <span class="eyebrow">Güncel durum</span>
@@ -376,7 +393,7 @@
         </section>
 
         <div class="home-top-widgets">
-          <section class="panel outlook-calendar-dashboard" aria-labelledby="outlookCalendarTitle">
+          <section class="panel outlook-calendar-dashboard dashboard-widget" data-dashboard-widget="calendar" data-dashboard-span="6" aria-labelledby="outlookCalendarTitle">
             <div class="panel-heading outlook-calendar-heading">
               <div>
                 <span class="eyebrow">Ajanda</span>
@@ -422,11 +439,12 @@
             <div id="outlookCalendarEmpty" class="calendar-empty-note">Bu ay etkinlik bulunmuyor.</div>
           </section>
 
-          <section class="panel home-quick-reminder" aria-labelledby="reminderPanelTitle">
+          <section class="panel home-quick-reminder dashboard-widget" data-dashboard-widget="reminders" data-dashboard-span="6" aria-labelledby="reminderPanelTitle">
             <div class="panel-heading reminder-panel-heading">
               <div><span class="eyebrow">Hızlı erişim</span><h2 id="reminderPanelTitle">Önemli Notlar ve Hatırlatmalar</h2></div>
               <div class="reminder-panel-actions">
                 <strong id="reminderOpenCount" class="task-count-badge">0 aktif</strong>
+                <button id="toggleReminderTicker" class="button secondary" type="button" aria-pressed="false">Durdur</button>
                 <button id="openReminderModal" class="button primary" type="button">+ Ekle</button>
               </div>
             </div>
@@ -438,7 +456,7 @@
         </div>
 
         <div class="home-dashboard-grid">
-          <section class="panel dashboard-panel home-jira-status-panel" aria-labelledby="homeJiraStatusTitle">
+          <section class="panel dashboard-panel home-jira-status-panel dashboard-widget" data-dashboard-widget="jira-status" data-dashboard-span="4" aria-labelledby="homeJiraStatusTitle">
             <div class="panel-heading dashboard-panel-heading">
               <div>
                 <span class="eyebrow">JIRA dağılımı</span>
@@ -448,7 +466,7 @@
             <div id="homeJiraStatusChart" class="task-status-chart home-jira-status-chart" role="group" aria-label="Bana atanan JIRA kayıtlarının statü dağılımı"></div>
           </section>
 
-          <section class="panel dashboard-panel home-assigned-jira-panel" aria-labelledby="homeAssignedJiraTitle">
+          <section class="panel dashboard-panel home-assigned-jira-panel dashboard-widget" data-dashboard-widget="assigned-jira" data-dashboard-span="8" aria-labelledby="homeAssignedJiraTitle">
             <div class="panel-heading dashboard-panel-heading home-assigned-jira-heading">
               <div>
                 <span class="eyebrow">JIRA gündemi</span>
@@ -471,7 +489,7 @@
             <div id="homeJiraIssueEmpty" class="dashboard-empty hidden">Seçili statüde size atanmış JIRA kaydı bulunmuyor.</div>
           </section>
 
-          <section class="panel dashboard-panel weekly-chart-panel" aria-labelledby="weeklyEffortTitle">
+          <section class="panel dashboard-panel weekly-chart-panel dashboard-widget" data-dashboard-widget="weekly-effort" data-dashboard-span="8" aria-labelledby="weeklyEffortTitle">
             <div class="panel-heading dashboard-panel-heading">
               <div><span id="weeklyEffortEyebrow" class="eyebrow">Günlük dağılım</span><h2 id="weeklyEffortTitle">Haftalık efor</h2></div>
               <div class="dashboard-panel-actions">
@@ -486,7 +504,7 @@
             <div id="weeklyEffortChart" class="weekly-effort-chart" role="img" aria-label="Bu haftanın günlere göre efor grafiği"></div>
           </section>
 
-          <section class="panel dashboard-panel task-chart-panel" aria-labelledby="taskStatusTitle">
+          <section class="panel dashboard-panel task-chart-panel dashboard-widget" data-dashboard-widget="task-status" data-dashboard-span="4" aria-labelledby="taskStatusTitle">
             <div class="panel-heading dashboard-panel-heading">
               <div><span class="eyebrow">Görev dağılımı</span><h2 id="taskStatusTitle">Görev durumları</h2></div>
               <button class="dashboard-link" type="button" data-home-target="tasksView">Tüm görevler →</button>
@@ -494,7 +512,7 @@
             <div id="taskStatusChart" class="task-status-chart" role="img" aria-label="Görevlerin durumlara göre dağılımı"></div>
           </section>
 
-          <section class="panel dashboard-panel jira-effort-panel" aria-labelledby="jiraEffortTitle">
+          <section class="panel dashboard-panel jira-effort-panel dashboard-widget" data-dashboard-widget="jira-effort" data-dashboard-span="7" aria-labelledby="jiraEffortTitle">
             <div class="panel-heading dashboard-panel-heading">
               <div><span class="eyebrow">Bu hafta</span><h2 id="jiraEffortTitle">JIRA bazlı efor</h2></div>
               <span class="dashboard-note">İlk 5 madde</span>
@@ -502,7 +520,7 @@
             <div id="jiraEffortChart" class="jira-effort-chart"></div>
           </section>
 
-          <section class="panel dashboard-panel pending-task-panel" aria-labelledby="pendingTasksTitle">
+          <section class="panel dashboard-panel pending-task-panel dashboard-widget" data-dashboard-widget="open-tasks" data-dashboard-span="5" aria-labelledby="pendingTasksTitle">
             <div class="panel-heading dashboard-panel-heading">
               <div><span class="eyebrow">Öncelik sırası</span><h2 id="pendingTasksTitle">Açık görevler</h2></div>
               <span id="homeOpenTaskCount" class="task-count-badge">0 açık</span>
@@ -510,6 +528,7 @@
             <div id="homePendingTaskList" class="home-pending-task-list"></div>
           </section>
 
+        </div>
         </div>
       </section>
 

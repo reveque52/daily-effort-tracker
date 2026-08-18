@@ -91,10 +91,10 @@ test("Drive yedeğini doğrulayıp yerel kayıtların yerine yükler", () => {
   assert.equal(store.list().length, 1);
 });
 
-test("aynı tarihte birden fazla efor kaydını ayrı tutup toplamını hesaplar", () => {
+test("aynı JIRA maddesine aynı tarihte birden fazla efor kaydını ayrı tutup toplamını hesaplar", () => {
   const rows = [
-    { id: "same-1", date: "2026-08-06", project: "Alpha", task: "Analiz", hours: 2, notes: "", createdAt: "2026-08-06T08:00:00Z", updatedAt: "2026-08-06T08:00:00Z" },
-    { id: "same-2", date: "2026-08-06", project: "Beta", task: "Test", hours: 3.5, notes: "", createdAt: "2026-08-06T10:00:00Z", updatedAt: "2026-08-06T10:00:00Z" }
+    { id: "same-1", date: "2026-08-06", project: "FITINTRN-76", jiraId: "jira-76", task: "Analiz", hours: 2, notes: "", createdAt: "2026-08-06T08:00:00Z", updatedAt: "2026-08-06T08:00:00Z" },
+    { id: "same-2", date: "2026-08-06", project: "FITINTRN-76", jiraId: "jira-76", task: "Test", hours: 3.5, notes: "", createdAt: "2026-08-06T10:00:00Z", updatedAt: "2026-08-06T10:00:00Z" }
   ];
   const { store } = loadStore(JSON.stringify(rows));
   assert.equal(store.list({ date: "2026-08-06" }).length, 2);

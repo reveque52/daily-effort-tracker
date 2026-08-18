@@ -56,6 +56,18 @@
     midnight: { label: "Gece", menuLabel: "Gece teması", dark: true },
     graphite: { label: "Kömür", menuLabel: "Kömür teması", dark: true }
   });
+  const DASHBOARD_WIDGET_DEFAULTS = Object.freeze([
+    { id: "summary", label: "Çalışma özeti", span: 12 },
+    { id: "calendar", label: "Takvim", span: 6 },
+    { id: "reminders", label: "Önemli Notlar ve Hatırlatmalar", span: 6 },
+    { id: "jira-status", label: "JIRA durumları", span: 4 },
+    { id: "assigned-jira", label: "Bana atanan JIRA kayıtları", span: 8 },
+    { id: "weekly-effort", label: "Haftalık efor", span: 8 },
+    { id: "task-status", label: "Görev durumları", span: 4 },
+    { id: "jira-effort", label: "JIRA bazlı efor", span: 7 },
+    { id: "open-tasks", label: "Açık görevler", span: 5 }
+  ]);
+  const DASHBOARD_WIDGET_SPANS = Object.freeze(Array.from({ length: 10 }, (_, index) => index + 3));
   const ACCESS_LOG_ADMIN_EMAIL = "selcuk.dere@fit-global.com";
   const ACCESS_LOG_HEARTBEAT_MS = 60_000;
   const ACCESS_LOG_ACTIVE_WINDOW_MS = 180_000;
@@ -67,6 +79,10 @@
   let accessTrackingSessionId = "";
   let accessHeartbeatTimer = 0;
   let homeEffortChartPeriod = "week";
+  let reminderTickerPaused = false;
+  let dashboardEditMode = false;
+  let dashboardDraggedWidgetId = "";
+  let dashboardLayout = [];
   const HOME_JIRA_DEFAULT_STATUS = "In Progress";
   const HOME_JIRA_ALL_STATUSES = "__all__";
   const HOME_ASSIGNED_JIRA_JQL = "assignee = currentUser() ORDER BY updated DESC";
@@ -811,6 +827,187 @@
     jiraNavigatorSyncPromise = syncJiraCloudIssues({ jql: JIRA_WORKLOGGED_ISSUES_JQL, navigator: true })
       .finally(() => { jiraNavigatorSyncPromise = null; });
     return jiraNavigatorSyncPromise;
+  }
+
+  function loadDashboardLayout(savedLayout = []) {
+    const defaultsById = new Map(DASHBOARD_WIDGET_DEFAULTS.map((item) => [item.id, item]));
+    const savedRows = Array.isArray(savedLayout) ? savedLayout : [];
+    const savedById = new Map(savedRows
+      .filter((item) => item && defaultsById.has(item.id))
+      .map((item) => [item.id, item]));
+    const order = [
+      ...savedRows.map((item) => item?.id).filter((id, index, ids) => defaultsById.has(id) && ids.indexOf(id) === index),
+      ...DASHBOARD_WIDGET_DEFAULTS.map((item) => item.id).filter((id) => !savedById.has(id))
+    ];
+    return order.map((id) => {
+      const defaults = defaultsById.get(id);
+      const saved = savedById.get(id) || {};
+      const requestedSpan = Math.round(Number(saved.span));
+      return {
+        id,
+        label: defaults.label,
+        span: DASHBOARD_WIDGET_SPANS.includes(requestedSpan) ? requestedSpan : defaults.span,
+        visible: saved.visible !== false
+      };
+    });
+  }
+
+  function setDashboardLayoutStatus(message, state = "") {
+    const status = $("#dashboardLayoutStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.dataset.state = state;
+  }
+
+  function renderDashboardWidgetVisibility() {
+    const container = $("#dashboardWidgetVisibility");
+    if (!container) return;
+    container.replaceChildren();
+    dashboardLayout.forEach((item) => {
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = item.visible;
+      checkbox.dataset.dashboardVisibility = item.id;
+      checkbox.addEventListener("change", () => updateDashboardWidget(item.id, { visible: checkbox.checked }, `${item.label} ${checkbox.checked ? "eklendi" : "kaldırıldı"}.`));
+      const text = document.createElement("span");
+      text.textContent = item.label;
+      label.append(checkbox, text);
+      container.append(label);
+    });
+  }
+
+  function refreshDashboardWidgetControls() {
+    dashboardLayout.forEach((item) => {
+      const widget = document.querySelector(`[data-dashboard-widget="${item.id}"]`);
+      if (!widget) return;
+      const index = DASHBOARD_WIDGET_SPANS.indexOf(item.span);
+      const shrink = widget.querySelector('[data-dashboard-action="shrink"]');
+      const grow = widget.querySelector('[data-dashboard-action="grow"]');
+      if (shrink) shrink.disabled = index <= 0;
+      if (grow) grow.disabled = index >= DASHBOARD_WIDGET_SPANS.length - 1;
+    });
+  }
+
+  function applyDashboardLayout(savedLayout = dashboardLayout) {
+    dashboardLayout = loadDashboardLayout(savedLayout);
+    dashboardLayout.forEach((item, order) => {
+      const widget = document.querySelector(`[data-dashboard-widget="${item.id}"]`);
+      if (!widget) return;
+      widget.style.setProperty("--dashboard-order", String(order));
+      widget.style.setProperty("--dashboard-span", String(item.span));
+      widget.dataset.dashboardSpan = String(item.span);
+      widget.classList.toggle("hidden", !item.visible);
+    });
+    renderDashboardWidgetVisibility();
+    refreshDashboardWidgetControls();
+  }
+
+  async function persistDashboardLayout(message) {
+    setDashboardLayoutStatus("Dashboard düzeni Supabase’e kaydediliyor…", "busy");
+    const saved = await queueCloudUserSettings({
+      dashboardLayout: dashboardLayout.map(({ id, span, visible }) => ({ id, span, visible }))
+    });
+    setDashboardLayoutStatus(saved ? `${message} Düzen hesabınıza kaydedildi.` : "Düzen değişti ancak Supabase’e kaydedilemedi.", saved ? "success" : "error");
+  }
+
+  function updateDashboardWidget(widgetId, patch, message) {
+    dashboardLayout = dashboardLayout.map((item) => item.id === widgetId ? { ...item, ...patch } : item);
+    applyDashboardLayout(dashboardLayout);
+    persistDashboardLayout(message);
+  }
+
+  function resizeDashboardWidget(widgetId, direction) {
+    const item = dashboardLayout.find((row) => row.id === widgetId);
+    if (!item) return;
+    const currentIndex = DASHBOARD_WIDGET_SPANS.indexOf(item.span);
+    const nextIndex = Math.min(DASHBOARD_WIDGET_SPANS.length - 1, Math.max(0, currentIndex + direction));
+    if (nextIndex === currentIndex) return;
+    updateDashboardWidget(widgetId, { span: DASHBOARD_WIDGET_SPANS[nextIndex] }, `${item.label} boyutu güncellendi.`);
+  }
+
+  function moveDashboardWidget(draggedId, targetId) {
+    if (!draggedId || !targetId || draggedId === targetId) return;
+    const next = dashboardLayout.slice();
+    const fromIndex = next.findIndex((item) => item.id === draggedId);
+    const targetIndex = next.findIndex((item) => item.id === targetId);
+    if (fromIndex < 0 || targetIndex < 0) return;
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    dashboardLayout = next;
+    applyDashboardLayout(dashboardLayout);
+    persistDashboardLayout(`${moved.label} yeni konumuna taşındı.`);
+  }
+
+  function createDashboardControl(text, label, action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "dashboard-widget-control";
+    button.dataset.dashboardAction = action;
+    button.textContent = text;
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    return button;
+  }
+
+  function setupDashboardCustomization() {
+    dashboardLayout = loadDashboardLayout();
+    document.querySelectorAll("[data-dashboard-widget]").forEach((widget) => {
+      const widgetId = widget.dataset.dashboardWidget;
+      const defaults = DASHBOARD_WIDGET_DEFAULTS.find((item) => item.id === widgetId);
+      const controls = document.createElement("div");
+      controls.className = "dashboard-widget-controls";
+      const drag = createDashboardControl("↕", `${defaults?.label || "Kutuyu"} taşı`, "drag");
+      drag.classList.add("dashboard-widget-drag-handle");
+      drag.draggable = true;
+      const shrink = createDashboardControl("−", `${defaults?.label || "Kutuyu"} daralt`, "shrink");
+      const grow = createDashboardControl("+", `${defaults?.label || "Kutuyu"} genişlet`, "grow");
+      const remove = createDashboardControl("Kaldır", `${defaults?.label || "Kutuyu"} ana sayfadan kaldır`, "remove");
+      remove.classList.add("dashboard-widget-remove");
+      drag.addEventListener("dragstart", (event) => {
+        dashboardDraggedWidgetId = widgetId;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", widgetId);
+        widget.classList.add("is-dashboard-dragging");
+      });
+      drag.addEventListener("dragend", () => {
+        dashboardDraggedWidgetId = "";
+        document.querySelectorAll(".dashboard-widget").forEach((item) => item.classList.remove("is-dashboard-dragging", "is-dashboard-drop-target"));
+      });
+      shrink.addEventListener("click", () => resizeDashboardWidget(widgetId, -1));
+      grow.addEventListener("click", () => resizeDashboardWidget(widgetId, 1));
+      remove.addEventListener("click", () => updateDashboardWidget(widgetId, { visible: false }, `${defaults?.label || "Kutu"} kaldırıldı.`));
+      controls.append(drag, shrink, grow, remove);
+      widget.append(controls);
+      widget.addEventListener("dragover", (event) => {
+        if (!dashboardEditMode || !dashboardDraggedWidgetId || dashboardDraggedWidgetId === widgetId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        widget.classList.add("is-dashboard-drop-target");
+      });
+      widget.addEventListener("dragleave", () => widget.classList.remove("is-dashboard-drop-target"));
+      widget.addEventListener("drop", (event) => {
+        if (!dashboardEditMode) return;
+        event.preventDefault();
+        widget.classList.remove("is-dashboard-drop-target");
+        moveDashboardWidget(dashboardDraggedWidgetId || event.dataTransfer.getData("text/plain"), widgetId);
+      });
+    });
+    $("#toggleDashboardEdit").addEventListener("click", () => {
+      dashboardEditMode = !dashboardEditMode;
+      $("#homeCustomizableGrid").classList.toggle("is-editing", dashboardEditMode);
+      $("#dashboardEditTools").classList.toggle("hidden", !dashboardEditMode);
+      $("#toggleDashboardEdit").textContent = dashboardEditMode ? "Düzenlemeyi bitir" : "Dashboard’u düzenle";
+      $("#toggleDashboardEdit").setAttribute("aria-pressed", String(dashboardEditMode));
+      if (!dashboardEditMode) document.querySelector(".dashboard-widget-manager")?.removeAttribute("open");
+      setDashboardLayoutStatus(dashboardEditMode ? "Düzenleme modu açık. Kutuları taşıyabilir, boyutlandırabilir veya kaldırabilirsiniz." : "Dashboard düzeni kullanıma hazır.");
+    });
+    $("#resetDashboardLayout").addEventListener("click", () => {
+      dashboardLayout = loadDashboardLayout();
+      applyDashboardLayout(dashboardLayout);
+      persistDashboardLayout("Varsayılan dashboard düzeni geri yüklendi.");
+    });
+    applyDashboardLayout(dashboardLayout);
   }
 
   function setHomeAssignedJiraStatus(message, state = "") {
@@ -2158,11 +2355,27 @@
     resetReminderForm();
   }
 
+  function updatePausedReminderHeight(reminderCount) {
+    const tickerWindow = $("#reminderTickerWindow");
+    if (!tickerWindow) return;
+    const viewportRows = Math.max(3, Math.floor((window.innerHeight * .55) / 76));
+    const visibleRows = Math.max(3, Math.min(reminderCount || 3, viewportRows));
+    tickerWindow.style.setProperty("--reminder-paused-height", `${visibleRows * 76}px`);
+  }
+
   function renderReminders() {
     const reminders = window.ReminderStore.list();
+    if (reminders.length <= 3) reminderTickerPaused = false;
     const activeCount = reminders.filter((item) => !item.completed).length;
     $("#reminderOpenCount").textContent = `${activeCount} aktif`;
     $("#reminderEmptyState").classList.toggle("hidden", reminders.length > 0);
+    const tickerToggle = $("#toggleReminderTicker");
+    tickerToggle.disabled = reminders.length <= 3;
+    tickerToggle.textContent = reminderTickerPaused ? "Devam" : "Durdur";
+    tickerToggle.setAttribute("aria-pressed", String(reminderTickerPaused));
+    tickerToggle.setAttribute("aria-label", reminderTickerPaused ? "Hatırlatma akışını devam ettir" : "Hatırlatma akışını durdur ve tüm notları sabitle");
+    $("#reminderTickerWindow").classList.toggle("is-paused", reminderTickerPaused);
+    updatePausedReminderHeight(reminders.length);
     const list = $("#reminderList");
     list.replaceChildren();
     reminders.forEach((item) => {
@@ -2220,9 +2433,10 @@
       row.append(complete, content, actions);
       list.append(row);
     });
-    list.classList.toggle("is-ticker", reminders.length > 1);
+    const shouldRotate = reminders.length > 3 && !reminderTickerPaused;
+    list.classList.toggle("is-ticker", shouldRotate);
     list.style.setProperty("--reminder-count", String(reminders.length));
-    if (reminders.length > 1) {
+    if (shouldRotate) {
       [...list.children].forEach((row) => {
         const clone = row.cloneNode(true);
         clone.setAttribute("aria-hidden", "true");
@@ -4427,7 +4641,17 @@
           effortButton.title = effortDescription;
           effortButton.setAttribute("aria-label", `${row.issueKey} · ${dateFormatter.format(date)} · ${sheetHours(hours)} · Açıklama: ${effortDescription.replaceAll("\n", " · ")}${syncedCount ? ` · ${syncedCount} JIRA’ya gönderildi` : ""}${importedCount ? ` · ${importedCount} JIRA’dan alındı` : ""}${localCount ? ` · ${localCount} JIRA’ya gönderilmedi` : ""}${pendingCount ? ` · ${pendingCount} gönderim onayı bekliyor` : ""}${failedCount ? ` · ${failedCount} gönderilemedi` : ""}`);
           effortButton.addEventListener("click", () => openEffortEditModal(entriesForCell));
-          cell.append(effortButton);
+          const effortActions = document.createElement("div");
+          effortActions.className = "timesheet-cell-effort-actions";
+          const addAdditionalEffort = document.createElement("button");
+          addAdditionalEffort.type = "button";
+          addAdditionalEffort.className = "timesheet-additional-effort-button";
+          addAdditionalEffort.textContent = "+";
+          addAdditionalEffort.setAttribute("aria-label", `${row.issueKey} için ${dateFormatter.format(date)} tarihine yeni bir efor daha ekle`);
+          addAdditionalEffort.title = `${row.issueKey} · ${dateFormatter.format(date)} · Yeni efor ekle`;
+          addAdditionalEffort.addEventListener("click", () => openEffortCreateModal(row.jiraId, iso));
+          effortActions.append(effortButton, addAdditionalEffort);
+          cell.append(effortActions);
         } else {
           const addEffortButton = document.createElement("button");
           addEffortButton.type = "button";
@@ -4991,6 +5215,7 @@
     activeCalendarProvider = cloudUserSettings.calendarProvider === "outlook" ? "outlook" : "google";
     applyTheme(cloudUserSettings.theme || "violet");
     jiraTableLayout = loadJiraTableLayout(cloudUserSettings.jiraTableLayout);
+    applyDashboardLayout(cloudUserSettings.dashboardLayout);
     window.DriveSync?.setClientId(cloudUserSettings.googleClientId || "");
     window.DriveSync?.setLastBackupTime(cloudUserSettings.lastDriveBackupAt || "");
     window.OutlookCalendar?.saveSettings(
@@ -5478,6 +5703,14 @@
   $("#peopleSearchInput").addEventListener("input", renderPeople);
   $("#peopleSourceFilter").addEventListener("change", renderPeople);
   $("#openReminderModal").addEventListener("click", openReminderCreateModal);
+  $("#toggleReminderTicker").addEventListener("click", () => {
+    if (window.ReminderStore.list().length <= 3) return;
+    reminderTickerPaused = !reminderTickerPaused;
+    renderReminders();
+  });
+  window.addEventListener("resize", () => {
+    if (reminderTickerPaused) updatePausedReminderHeight(window.ReminderStore.list().length);
+  });
   $("#closeReminderModal").addEventListener("click", closeReminderModal);
   $("#cancelReminderEdit").addEventListener("click", closeReminderModal);
   $("#reminderModal").addEventListener("cancel", () => resetReminderForm());
@@ -6231,6 +6464,7 @@
   const jiraOAuthResult = consumeJiraOAuthResult();
   refreshJiraOAuthStatus(!jiraOAuthResult);
   $("#jiraAutoWorklog").checked = true;
+  setupDashboardCustomization();
   renderJiraItems();
   render();
   initializeCalendar();
