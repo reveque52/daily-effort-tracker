@@ -50,10 +50,11 @@ assert.ok(["var(--header-start)", ".home-kpi-primary", "var(--brand-accent)"].ev
 const requiredIds = [
   "todayLabel", "weatherIcon", "weatherLocationMenu", "weatherLocationLabel", "weatherLocationForm", "weatherLocationInput", "weatherUseDeviceLocation", "weatherLocationStatus", "weatherLocationResults", "weatherTemperature", "weatherCondition", "weatherMeta", "refreshWeather",
   "homeView", "homeWeekLabel", "homeWeeklyHours", "homeWeeklyGoal", "homeWeeklyEntryCount",
+  "dashboardLayoutStatus", "toggleDashboardEdit", "dashboardEditTools", "dashboardWidgetVisibility", "resetDashboardLayout", "homeCustomizableGrid",
   "homePlannedTasks", "homeInProgressTasks", "weeklyEffortChart", "taskStatusChart",
   "jiraEffortChart", "homeOpenTaskCount", "homePendingTaskList", "homeJiraStatusTitle", "homeJiraStatusChart", "homeAssignedJiraTitle", "homeJiraStatusFilter",
   "homeJiraIssueCount", "refreshHomeJiraIssues", "homeJiraIssueStatus", "homeJiraIssueList", "homeJiraIssueEmpty",
-  "reminderPanelTitle", "reminderOpenCount", "openReminderModal", "reminderTickerWindow", "reminderModal", "reminderModalTitle", "closeReminderModal", "reminderForm", "reminderId", "reminderTextInput",
+  "reminderPanelTitle", "reminderOpenCount", "toggleReminderTicker", "openReminderModal", "reminderTickerWindow", "reminderModal", "reminderModalTitle", "closeReminderModal", "reminderForm", "reminderId", "reminderTextInput",
   "reminderDateInput", "reminderImportanceInput", "reminderOptions", "reminderSubmitLabel", "cancelReminderEdit", "reminderFormMessage", "reminderEmptyState", "reminderList",
   "outlookCalendarTitle", "showGoogleCalendar", "showOutlookCalendar", "outlookCalendarConnection", "connectOutlookCalendar", "refreshOutlookCalendar", "disconnectOutlookCalendar", "calendarPreviousMonth", "calendarToday", "calendarNextMonth", "outlookCalendarPeriod", "outlookCalendarSettings", "outlookClientId", "outlookTenantId", "saveOutlookSettings", "outlookRedirectUri", "googleCalendarSettings", "googleCalendarClientState", "outlookCalendarStatus", "outlookCalendarEmpty", "outlookCalendarList",
   "openAiAssistant", "aiAssistantPanel", "aiAssistantTitle", "aiAssistantStatus", "closeAiAssistant",
@@ -180,22 +181,31 @@ assert.match(css, /calendar-day-cell[^{]*\{[^}]*height:\s*46px[\s\S]*calendar-ev
 assert.match(app, /function selectCalendarProvider[\s\S]*CALENDAR_PROVIDER_KEY[\s\S]*function initializeCalendar[\s\S]*OutlookCalendar\.initialize/, "Takvim sağlayıcısı seçilebilmeli ve Outlook oturumu gerektiğinde geri yüklenmeli");
 assert.match(app, /reminderForm\.addEventListener\("submit"[\s\S]*ReminderStore\.(?:update|create)/, "Not ve hatırlatma formu CRUD akışına bağlanmalı");
 assert.match(reminders, /function validate[\s\S]*function replaceAll/, "Hatırlatma veri modeli doğrulama ve yedek geri yükleme sağlamalı");
-const homeSummaryStart = html.indexOf('class="home-summary-panel"');
+const homeSummaryStart = html.indexOf('class="home-summary-panel dashboard-widget"');
 const homeWidgetsStart = html.indexOf('class="home-top-widgets"');
 assert.ok(homeSummaryStart < html.indexOf('class="home-kpi-grid"') && html.indexOf('class="home-kpi-grid"') < homeWidgetsStart, "Çalışma özeti ve haftalık göstergeler tek üst bölümde birleştirilmeli");
 assert.doesNotMatch(html.slice(homeSummaryStart, homeWidgetsStart), />\+ Efor ekle<\/button>/, "Çalışma özeti bölümünde Efor ekle düğmesi bulunmamalı");
 assert.match(html.slice(homeSummaryStart, homeWidgetsStart), /class="home-kpi-card home-kpi-primary"[^>]*data-home-target="effortsView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="effortsView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="tasksView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="tasksView"/, "Çalışma özeti kartları ilgili Eforlar ve Görevler bölümlerine bağlanmalı");
 assert.match(css, /home-kpi-card:hover[^{]*\{[^}]*transform:\s*translateY/, "Tıklanabilir çalışma özeti kartları hover geri bildirimi vermeli");
 assert.match(app, /data-home-target[\s\S]*targetView[\s\S]*activateMainView\(targetView\)[\s\S]*targetView === "tasksView"[\s\S]*activateTaskSubview\("taskReportView"\)/, "Görev özet kartları Görevler rapor sayfasını açmalı");
-assert.ok(html.indexOf('class="panel home-quick-reminder"') < html.indexOf('class="home-dashboard-grid"'), "Önemli Notlar ve Hatırlatmalar Ana Sayfanın üst kısmında olmalı");
-assert.ok(html.indexOf('class="home-top-widgets"') < html.indexOf('class="panel outlook-calendar-dashboard"') && html.indexOf('class="panel outlook-calendar-dashboard"') < html.indexOf('class="panel home-quick-reminder"'), "Outlook Takvim solda, Önemli Notlar ve Hatırlatmalar sağda aynı üst bölümde olmalı");
-assert.match(css, /home-top-widgets[^{]*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/, "Takvim ve hatırlatma kutuları masaüstünde eşit genişlikte yerleşmeli");
-assert.match(css, /home-top-widgets[^{]*\{[^}]*align-items:\s*stretch/, "Takvim ve hatırlatma kutularının yükseklikleri eşit olmalı");
-assert.match(css, /@media\s*\(max-width:\s*850px\)[\s\S]*home-top-widgets[^{]*\{[^}]*grid-template-columns:\s*1fr/, "Takvim ve hatırlatma kutuları dar ekranda alt alta geçmeli");
+assert.ok(html.indexOf('data-dashboard-widget="reminders"') < html.indexOf('class="home-dashboard-grid"'), "Önemli Notlar ve Hatırlatmalar Ana Sayfanın üst kısmında olmalı");
+assert.ok(html.indexOf('class="home-top-widgets"') < html.indexOf('data-dashboard-widget="calendar"') && html.indexOf('data-dashboard-widget="calendar"') < html.indexOf('data-dashboard-widget="reminders"'), "Takvim ve Önemli Notlar varsayılan düzende yan yana sıralanmalı");
+assert.match(html, /id="toggleDashboardEdit"[\s\S]*id="dashboardWidgetVisibility"[\s\S]*id="resetDashboardLayout"[\s\S]*id="homeCustomizableGrid"/, "Ana Sayfada düzenleme, kutu ekleme/çıkarma ve sıfırlama araçları bulunmalı");
+assert.ok(["summary", "calendar", "reminders", "jira-status", "assigned-jira", "weekly-effort", "task-status", "jira-effort", "open-tasks"].every((id) => html.includes(`data-dashboard-widget="${id}"`)), "Tüm Ana Sayfa kutuları özelleştirilebilir olmalı");
+assert.match(app, /function loadDashboardLayout[\s\S]*function applyDashboardLayout[\s\S]*--dashboard-order[\s\S]*--dashboard-span/, "Dashboard sırası ve kutu boyutları kayıtlı ayardan uygulanmalı");
+assert.match(app, /function setupDashboardCustomization[\s\S]*dragstart[\s\S]*dragover[\s\S]*drop[\s\S]*moveDashboardWidget/, "Dashboard kutuları sürükle-bırak ile taşınabilmeli");
+assert.match(app, /function resizeDashboardWidget[\s\S]*DASHBOARD_WIDGET_SPANS[\s\S]*createDashboardControl\("−"[\s\S]*"shrink"\)[\s\S]*createDashboardControl\("\+"[\s\S]*"grow"\)/, "Dashboard kutuları daraltılıp genişletilebilmeli");
+assert.match(app, /function renderDashboardWidgetVisibility[\s\S]*dashboardVisibility[\s\S]*visible: checkbox\.checked[\s\S]*dashboard-widget-remove/, "Dashboard kutuları kaldırılıp yeniden eklenebilmeli");
+assert.match(app, /function persistDashboardLayout[\s\S]*queueCloudUserSettings\([\s\S]*dashboardLayout/, "Dashboard düzeni Supabase kullanıcı ayarına kaydedilmeli");
+assert.match(app, /function applyCloudUserSettings[\s\S]*applyDashboardLayout\(cloudUserSettings\.dashboardLayout\)/, "Dashboard düzeni Supabase kullanıcı ayarından yüklenmeli");
+assert.match(css, /home-customizable-grid[^{]*\{[^}]*grid-template-columns:\s*repeat\(12[\s\S]*dashboard-widget[^{]*\{[^}]*grid-column:\s*span\s*var\(--dashboard-span/, "Ana Sayfa kutuları 12 kolonlu yeniden boyutlandırılabilir grid kullanmalı");
+assert.match(css, /@media\s*\(max-width:\s*850px\)[\s\S]*home-customizable-grid[^{]*\{[^}]*grid-template-columns:\s*1fr[\s\S]*dashboard-widget[^{]*\{[^}]*grid-column:\s*1\s*\/\s*-1/, "Dashboard kutuları dar ekranda tek kolona geçmeli");
 assert.match(html, /id="openReminderModal"[\s\S]*id="reminderTickerWindow"[\s\S]*id="reminderModal"[\s\S]*id="reminderForm"/, "Hatırlatma ekleme formu Ana Sayfayı kaplamadan popup içinde açılmalı");
 assert.match(app, /openReminderModal"\)\.addEventListener\("click", openReminderCreateModal\)/, "Hatırlatma ekle düğmesi popup formunu açmalı");
-assert.match(app, /classList\.toggle\("is-ticker", reminders\.length > 1\)[\s\S]*cloneNode\(true\)/, "Hatırlatmalar kesintisiz kayan akış için çoğaltılmalı");
-assert.match(css, /reminder-ticker-window[^{]*\{[^}]*height:\s*76px[\s\S]*@keyframes reminder-flow[^{]*\{[^}]*translateY/, "Hatırlatma kutusu kompakt olmalı ve aşağıdan yukarı akmalı");
+assert.match(app, /reminders\.length <= 3[\s\S]*shouldRotate = reminders\.length > 3 && !reminderTickerPaused[\s\S]*cloneNode\(true\)/, "Hatırlatma akışı aynı anda üç not göstermeli ve yalnızca daha fazla not varsa dönmeli");
+assert.match(app, /toggleReminderTicker[\s\S]*reminderTickerPaused = !reminderTickerPaused[\s\S]*renderReminders\(\)/, "Hatırlatma akışı durdurulup yeniden başlatılabilmeli");
+assert.match(app, /function updatePausedReminderHeight[\s\S]*window\.innerHeight \* \.55[\s\S]*--reminder-paused-height/, "Durdurulan hatırlatma alanı ekrana sığan satır sayısına göre büyümeli");
+assert.match(css, /reminder-ticker-window[^{]*\{[^}]*height:\s*228px[\s\S]*reminder-ticker-window\.is-paused[^{]*\{[^}]*height:\s*var\(--reminder-paused-height[^}]*overflow-y:\s*auto[\s\S]*@keyframes reminder-flow[^{]*\{[^}]*translateY/, "Hatırlatma kutusu üç satır göstermeli; durdurulduğunda ekrana göre büyüyüp kaydırılabilir olmalı");
 assert.match(app, /weeklyEntries[\s\S]*homeWeeklyHours[\s\S]*homeWeeklyEntryCount/, "Haftalık efor özeti eksik");
 assert.match(html, /data-effort-chart-period="week"[\s\S]*data-effort-chart-period="month"[\s\S]*data-effort-chart-period="year"/, "Efor dağılımı grafiğinde haftalık, aylık ve yıllık dönem seçenekleri bulunmalı");
 assert.match(app, /function buildHomeEffortChartModel[\s\S]*period === "year"[\s\S]*length:\s*12|function buildHomeEffortChartModel[\s\S]*Array\.from\(\{ length: 12 \}/, "Yıllık efor görünümü 12 aylık dağılım üretmeli");
@@ -216,7 +226,7 @@ assert.match(app, /plannedTasks[\s\S]*inProgressTasks[\s\S]*completedTasks/, "G�
 assert.match(app, /weekly-bar-column[\s\S]*task-donut[\s\S]*jira-effort-row/, "Dashboard grafikleri eksik");
 assert.match(app, /renderTimesheet\(\);\s*renderHomeDashboard\(\);/, "Efor render sonrası Ana Sayfa güncellenmeli");
 assert.match(app, /function renderTasks[\s\S]*renderHomeDashboard\(\);\s*\}/, "Görev render sonrası Ana Sayfa güncellenmeli");
-assert.match(css, /home-dashboard-grid[^{]*\{[^}]*grid-template-columns/, "Ana Sayfa responsive grid yapısı eksik");
+assert.match(css, /home-customizable-grid[^{]*\{[^}]*grid-template-columns/, "Ana Sayfa responsive grid yapısı eksik");
 assert.doesNotMatch(html, /id="projectInput"/, "Efor formunda bağımsız proje alanı olmamalı");
 assert.match(html, /id="descriptionInput"[^>]*maxlength="1000"/, "Ana efor açıklaması 1000 karakter desteklemeli");
 assert.match(html, /id="modalDescriptionInput"[^>]*maxlength="1000"/, "Timesheet efor açıklaması 1000 karakter desteklemeli");
@@ -470,6 +480,7 @@ assert.match(css, /timesheet-jira-status\[data-status="synced"\][^{]*\{[^}]*back
 assert.match(css, /timesheet-jira-status\[data-status="imported"\][^{]*\{[^}]*background:\s*#1f9d74/, "Timesheet JIRA’dan alınan eforu yeşil simgeyle göstermeli");
 assert.match(css, /timesheet-jira-status\[data-status="local"\][^{]*\{[^}]*background:\s*#d29b19/, "Timesheet JIRA’ya gönderilmeyen yerel eforu sarı simgeyle göstermeli");
 assert.match(app, /timesheet-empty-effort-button[\s\S]*openEffortCreateModal\(row\.jiraId, iso\)/, "Boş Timesheet hücresinden JIRA ve tarih bazlı efor ekleme eksik");
+assert.match(app, /timesheet-additional-effort-button[\s\S]*openEffortCreateModal\(row\.jiraId, iso\)/, "Dolu Timesheet hücresinden aynı JIRA ve tarihe yeni bir efor daha eklenebilmeli");
 assert.match(app, /function openEffortCreateModal[\s\S]*modalDateInput[\s\S]*showModal/, "Yeni Timesheet efor popup akışı eksik");
 assert.match(html, /id="modalRepeatEntryToggle"[\s\S]*Ardışık çoklu giriş[\s\S]*yalnızca tarih ve süreyi girersiniz/, "Efor popup'ında ardışık çoklu giriş seçeneği bulunmalı");
 assert.match(app, /function renderRepeatEntryMode[\s\S]*modalRepeatEntryToggle[\s\S]*Kaydet ve yeni giriş aç/, "Çoklu giriş seçeneği kaydetme düğmesini ardışık giriş moduna çevirmeli");
