@@ -172,6 +172,8 @@
     priority: "—",
     status: "Open"
   });
+  const TIMESHEET_JIRA_FILTER_ALL = "__all__";
+  const TIMESHEET_JIRA_FILTER_UNASSIGNED = "__unassigned__";
 
   const dateFormatter = new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long", year: "numeric" });
   const calendarMonthFormatter = new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" });
@@ -4402,6 +4404,50 @@
     return { start: parseDate(startValue), end: parseDate(endValue), period };
   }
 
+  function populateTimesheetJiraFilter() {
+    const select = $("#timesheetJiraFilter");
+    if (!select) return;
+    const selectedValue = select.value || TIMESHEET_JIRA_FILTER_ALL;
+    const linkedJiraIds = new Set();
+    let hasUnassignedEntries = false;
+    readEntries().forEach((entry) => {
+      const jiraItem = getJiraItem(entry.jiraId);
+      if (jiraItem && jiraItem.id !== DUMMY_JIRA.id) linkedJiraIds.add(jiraItem.id);
+      else hasUnassignedEntries = true;
+    });
+
+    const options = [];
+    const allOption = document.createElement("option");
+    allOption.value = TIMESHEET_JIRA_FILTER_ALL;
+    allOption.textContent = "Tüm JIRA maddeleri";
+    options.push(allOption);
+    if (hasUnassignedEntries) {
+      const unassignedOption = document.createElement("option");
+      unassignedOption.value = TIMESHEET_JIRA_FILTER_UNASSIGNED;
+      unassignedOption.textContent = "JIRA’sı olmayan eforlar";
+      options.push(unassignedOption);
+    }
+    window.JiraStore.list()
+      .filter((item) => linkedJiraIds.has(item.id))
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "tr", { numeric: true, sensitivity: "base" }))
+      .forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = `${item.name} — ${item.description || "Açıklama yok"}`;
+        options.push(option);
+      });
+    select.replaceChildren(...options);
+    select.value = options.some((option) => option.value === selectedValue) ? selectedValue : TIMESHEET_JIRA_FILTER_ALL;
+  }
+
+  function timesheetEntryMatchesJiraFilter(entry, filterValue) {
+    if (!filterValue || filterValue === TIMESHEET_JIRA_FILTER_ALL) return true;
+    const jiraItem = getJiraItem(entry.jiraId);
+    const hasRealJira = Boolean(jiraItem && jiraItem.id !== DUMMY_JIRA.id);
+    if (filterValue === TIMESHEET_JIRA_FILTER_UNASSIGNED) return !hasRealJira;
+    return hasRealJira && jiraItem.id === filterValue;
+  }
+
   function tableCell(tag, text, className = "") {
     const cell = document.createElement(tag);
     cell.textContent = text;
@@ -4484,6 +4530,7 @@
   }
 
   function renderTimesheet() {
+    populateTimesheetJiraFilter();
     const range = getTimesheetRange();
     const table = $("#timesheetTable");
     const head = table.querySelector("thead");
@@ -4506,7 +4553,11 @@
     }
     const startIso = isoFromDate(range.start);
     const endIso = isoFromDate(range.end);
-    const filtered = readEntries().filter((entry) => entry.date >= startIso && entry.date <= endIso && (includeWeekends || ![0, 6].includes(parseDate(entry.date).getDay())));
+    const selectedJiraFilter = $("#timesheetJiraFilter").value || TIMESHEET_JIRA_FILTER_ALL;
+    const filtered = readEntries().filter((entry) => entry.date >= startIso
+      && entry.date <= endIso
+      && (includeWeekends || ![0, 6].includes(parseDate(entry.date).getDay()))
+      && timesheetEntryMatchesJiraFilter(entry, selectedJiraFilter));
     const grouping = $("#timesheetGrouping").value;
     const groups = new Map();
     filtered.forEach((entry) => {
@@ -4701,7 +4752,16 @@
     foot.append(totalRow);
 
     table.classList.toggle("hidden", rows.length === 0);
-    $("#timesheetEmpty").classList.toggle("hidden", rows.length > 0);
+    const emptyState = $("#timesheetEmpty");
+    emptyState.classList.toggle("hidden", rows.length > 0);
+    if (!rows.length && selectedJiraFilter !== TIMESHEET_JIRA_FILTER_ALL) {
+      const selectedLabel = $("#timesheetJiraFilter").selectedOptions[0]?.textContent || "Seçili JIRA maddesi";
+      emptyState.querySelector("h3").textContent = "Seçili JIRA maddesinde efor yok";
+      emptyState.querySelector("p").textContent = `${selectedLabel} için bu tarih aralığında kayıt bulunamadı.`;
+    } else {
+      emptyState.querySelector("h3").textContent = "Bu dönemde efor yok";
+      emptyState.querySelector("p").textContent = "Seçili tarih aralığı için kayıt bulunamadı.";
+    }
     $("#timesheetTotalHours").textContent = formatHours(grandTotal);
     $("#timesheetPeriodLabel").textContent = `${dateFormatter.format(range.start)} – ${dateFormatter.format(range.end)}`;
     $("#timesheetDayCount").textContent = `${dates.length} gün · ${rows.length} satır`;
@@ -6214,6 +6274,7 @@
 
   $("#timesheetPeriod").addEventListener("change", updateTimesheetControls);
   $("#timesheetGrouping").addEventListener("change", renderTimesheet);
+  $("#timesheetJiraFilter").addEventListener("change", renderTimesheet);
   $("#timesheetReferenceDate").addEventListener("change", renderTimesheet);
   $("#timesheetStartDate").addEventListener("change", renderTimesheet);
   $("#timesheetEndDate").addEventListener("change", renderTimesheet);
