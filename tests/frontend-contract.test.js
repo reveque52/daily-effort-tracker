@@ -73,7 +73,7 @@ const requiredIds = [
   "taskList", "taskTemplate", "taskTypeGroupTemplate", "taskCreateView", "taskReportView", "taskDetailView", "taskDetailTitle",
   "taskDetailDescription", "taskDetailParentItem", "taskDetailAssignee", "taskDetailType", "taskDetailPriority", "taskDetailPlan", "taskDetailSubtaskList", "taskDetailSubtaskCount", "addSubtaskButton", "taskTypeFilter", "taskStatusFilter", "taskFilterEmpty", "reviseTaskButton", "backToTaskReport", "taskReportCount", "taskReportTableWrap",
   "timesheetView", "timesheetPeriod", "timesheetReferenceDate", "timesheetStartDate",
-  "timesheetEndDate", "includeWeekends", "addTimesheetEffort", "syncJiraWorklogs", "timesheetJiraSyncStatus", "timesheetTable", "timesheetTotalHours",
+  "timesheetEndDate", "includeWeekends", "timesheetJiraFilter", "addTimesheetEffort", "syncJiraWorklogs", "timesheetJiraSyncStatus", "timesheetTable", "timesheetTotalHours",
   "timesheetGrouping",
   "jiraItemPicker", "jiraItemPickerButton", "jiraItemPickerValue", "jiraItemPickerDropdown", "jiraItemSearchInput", "jiraItemSearchCount", "jiraItemOptionList", "jiraItemInput", "jiraView", "jiraForm", "jiraNameInput", "jiraSubmitButton", "jiraSubmitLabel",
   "jiraList", "jiraTemplate", "jiraHtmlImport",
@@ -453,6 +453,8 @@ assert.match(html, /driveSettingsSummary[\s\S]*editDriveSettings[\s\S]*driveSett
 assert.match(app, /editDriveSettings"\)\.addEventListener[\s\S]*setDriveSettingsEditing\(true\)[\s\S]*cancelDriveSettings/, "Kayıtlı Drive ayarı yalnızca kullanıcı düzenlemek istediğinde açılmalı");
 assert.match(html, /value="week"[\s\S]*value="month"[\s\S]*value="custom"/, "Timesheet dönem seçenekleri eksik");
 assert.match(app, /getTimesheetRange/, "Timesheet tarih aralığı hesaplaması eksik");
+assert.match(html, /id="timesheetJiraFilter"[\s\S]*Tüm JIRA maddeleri/, "Timesheet JIRA maddesi filtresi eksik");
+assert.match(app, /function populateTimesheetJiraFilter[\s\S]*function timesheetEntryMatchesJiraFilter[\s\S]*timesheetJiraFilter/, "Timesheet JIRA filtresi seçenekleri ve kayıt süzme akışı eksik");
 assert.match(app, /includeWeekends/, "Hafta sonu filtresi eksik");
 assert.match(app, /dayTotals/, "Timesheet günlük toplamları eksik");
 assert.match(css, /timesheet-scroll[^{]*\{[^}]*overflow-x:\s*auto/, "Timesheet yatay kaydırma eksik");

@@ -1055,6 +1055,8 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .timesheet-total span { color: var(--muted); font-size: .7rem; text-transform: uppercase; }
 .timesheet-total strong { margin-top: .15rem; font-size: 1.2rem; }
 .timesheet-filters { display: flex; align-items: end; gap: .75rem; padding: .9rem 1.3rem; border-bottom: 1px solid var(--line); background: #fafbfe; flex-wrap: wrap; }
+.timesheet-jira-filter-control { min-width: min(320px, 100%); flex: 1 1 260px; }
+.timesheet-jira-filter-control select { max-width: 440px; text-overflow: ellipsis; }
 .timesheet-jira-sync-message { min-height: 1.1rem; margin: 0; padding: .6rem 1.3rem 0; color: var(--muted); font-size: .73rem; }
 .timesheet-jira-sync-message.is-success { color: #137052; font-weight: 750; }
 .timesheet-jira-sync-message.is-error { color: var(--danger); font-weight: 750; }
@@ -1920,6 +1922,8 @@ table thead th,
   .timesheet-heading-actions .timesheet-total { text-align: left; }
   .timesheet-filters { display: grid; grid-template-columns: 1fr 1fr; padding: .8rem; }
   .period-navigation, .weekend-toggle { grid-column: 1 / -1; }
+  .timesheet-jira-filter-control { min-width: 0; grid-column: 1 / -1; }
+  .timesheet-jira-filter-control select { max-width: none; }
   .timesheet-expand-controls { grid-column: 1 / -1; }
   .period-navigation .filter-control { flex: 1; }
   .timesheet-period-summary { flex-direction: column; gap: .2rem; padding: .6rem .8rem; }
