@@ -42,10 +42,12 @@
   function list() {
     return readAll().slice().sort((a, b) => {
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      const aTime = a.updatedAt || a.createdAt || "";
+      const bTime = b.updatedAt || b.createdAt || "";
+      const byRecency = String(bTime).localeCompare(String(aTime));
+      if (byRecency !== 0) return byRecency;
       if (a.importance !== b.importance) return a.importance === "important" ? -1 : 1;
-      const aDate = a.remindAt || "9999-12-31T23:59";
-      const bDate = b.remindAt || "9999-12-31T23:59";
-      return aDate.localeCompare(bDate) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+      return 0;
     });
   }
 

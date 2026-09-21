@@ -544,6 +544,18 @@ a.home-jira-issue-link:hover span { color: var(--brand-dark); text-decoration: u
 .reminder-importance[data-importance="important"] { color: #92500e; background: #fff0d5; }
 .reminder-row-actions { display: flex; gap: .4rem; }
 .reminder-row-actions .button { padding: .42rem .62rem; font-size: .68rem; }
+button.reminder-row-content { width: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; border-radius: 8px; }
+button.reminder-row-content:hover > strong, button.reminder-row-content:focus-visible > strong { color: var(--brand-dark); }
+button.reminder-row-content:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.reminder-status-filter { display: inline-flex; }
+.reminder-status-filter select { padding: .4rem .55rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: .7rem; font-weight: 700; }
+.reminder-status-filter select option { background: var(--surface); color: var(--ink); }
+.reminder-view { display: grid; gap: .9rem; padding: 0 1.4rem 1.4rem; }
+.reminder-view-text { margin: 0; white-space: pre-wrap; font-size: .92rem; line-height: 1.45; color: var(--ink); }
+.reminder-view-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; }
+.reminder-view-meta time { color: var(--muted); font-size: .74rem; }
+.reminder-view-status { padding: .2rem .5rem; border-radius: 999px; background: var(--brand-soft); color: var(--brand-dark); font-size: .66rem; font-weight: 850; text-transform: uppercase; letter-spacing: .03em; }
+.reminder-view-status[data-status="completed"] { background: color-mix(in srgb, var(--success) 20%, var(--surface)); color: var(--success); }
 .button.danger-text { color: var(--danger); background: #fff0f2; }
 @keyframes reminder-flow { to { transform: translateY(calc(-76px * var(--reminder-count))); } }
 @media (prefers-reduced-motion: reduce) { .reminder-list.is-ticker { animation: none; } }
@@ -1070,6 +1082,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .period-navigation .icon-button { height: 37px; padding: .35rem .7rem; border: 1px solid var(--line); background: #fff; font-size: 1.2rem; }
 .weekend-toggle { display: flex; align-items: center; gap: .5rem; min-height: 37px; padding: .5rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: .76rem; font-weight: 700; }
 .weekend-toggle input { width: auto; accent-color: var(--brand); }
+.timesheet-effort-days-toggle { border-color: color-mix(in srgb, var(--brand) 22%, var(--line)); }
 .timesheet-period-summary { display: flex; justify-content: space-between; gap: 1rem; padding: .65rem 1.3rem; color: var(--muted); font-size: .75rem; }
 .timesheet-period-summary strong { color: var(--ink); }
 .timesheet-scroll { max-width: 100%; overflow-x: auto; border-top: 1px solid var(--line); }

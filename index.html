@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Günlük çalışma eforlarını kaydedin ve takip edin.">
     <title>Günlük Efor Takibi</title>
-    <link rel="stylesheet" href="styles.css?v=20260820-1">
+    <link rel="stylesheet" href="styles.css?v=20260921-2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="cloud-data-runtime.js?v=20260811-1" defer></script>
     <script src="data-store.js?v=20260811-1" defer></script>
     <script src="tasks-store.js?v=20260811-2" defer></script>
     <script src="people-store.js?v=20260811-1" defer></script>
     <script src="jira-store.js?v=20260811-1" defer></script>
-    <script src="reminders-store.js?v=20260811-1" defer></script>
+    <script src="reminders-store.js?v=20260921-1" defer></script>
     <script src="ai-assistant.js?v=20260811-1" defer></script>
     <script src="jira-cloud.js?v=20260811-2" defer></script>
     <script src="drive-sync.js?v=20260811-1" defer></script>
@@ -23,7 +23,7 @@
     <script src="vendor/supabase.js?v=2.112.2" defer></script>
     <script src="auth-validation.js?v=20260818-2" defer></script>
     <script src="supabase-cloud.js?v=20260818-2" defer></script>
-    <script src="app.js?v=20260820-1" defer></script>
+    <script src="app.js?v=20260921-2" defer></script>
   </head>
   <body class="auth-required">
     <section id="loginScreen" class="login-screen" aria-labelledby="loginScreenTitle">
@@ -456,6 +456,7 @@
               <div><span class="eyebrow">Hızlı erişim</span><h2 id="reminderPanelTitle">Önemli Notlar ve Hatırlatmalar</h2></div>
               <div class="reminder-panel-actions">
                 <strong id="reminderOpenCount" class="task-count-badge">0 aktif</strong>
+                <label class="reminder-status-filter"><span class="sr-only">Durum filtresi</span><select id="reminderStatusFilter" aria-label="Durum filtresi"><option value="all">Tümü</option><option value="active">Aktif</option><option value="completed">Tamamlanan</option></select></label>
                 <button id="toggleReminderTicker" class="button secondary" type="button" aria-pressed="false">Durdur</button>
                 <button id="openReminderModal" class="button primary" type="button">+ Ekle</button>
               </div>
@@ -643,6 +644,7 @@
             <label id="timesheetStartField" class="filter-control hidden"><span>Başlangıç</span><input id="timesheetStartDate" type="date"></label>
             <label id="timesheetEndField" class="filter-control hidden"><span>Bitiş</span><input id="timesheetEndDate" type="date"></label>
             <label class="weekend-toggle"><input id="includeWeekends" type="checkbox"><span>Hafta sonlarını dahil et</span></label>
+            <label class="weekend-toggle timesheet-effort-days-toggle"><input id="onlyEffortDays" type="checkbox"><span>Sadece efor olan günleri göster</span></label>
           </div>
           <p id="timesheetJiraSyncStatus" class="timesheet-jira-sync-message" role="status" aria-live="polite">Seçili tarih aralığındaki kendi JIRA worklog kayıtlarınızı içe aktarabilirsiniz.</p>
           <div class="timesheet-period-summary"><strong id="timesheetPeriodLabel"></strong><span id="timesheetDayCount"></span></div>
@@ -1009,6 +1011,11 @@
     </aside>
 
     <dialog id="reminderModal" class="effort-edit-modal reminder-modal" aria-labelledby="reminderModalTitle">
+      <div id="reminderView" class="reminder-view hidden">
+        <div class="modal-heading"><div><span class="eyebrow">Not ve hatırlatma</span><h2 id="reminderViewTitle">Not detayı</h2></div><button id="closeReminderView" class="modal-close" type="button" aria-label="Kapat">×</button></div>
+        <p id="reminderViewText" class="reminder-view-text"></p>
+        <div class="reminder-view-meta"><span id="reminderViewImportance" class="reminder-importance"></span><time id="reminderViewTime"></time><span id="reminderViewStatus" class="reminder-view-status"></span></div>
+      </div>
       <form id="reminderForm" class="reminder-form" novalidate>
         <div class="modal-heading"><div><span class="eyebrow">Not ve hatırlatma</span><h2 id="reminderModalTitle">Yeni hatırlatma ekle</h2></div><button id="closeReminderModal" class="modal-close" type="button" aria-label="Kapat">×</button></div>
         <input id="reminderId" type="hidden">
