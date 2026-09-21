@@ -83,6 +83,8 @@
   let accessHeartbeatTimer = 0;
   let homeEffortChartPeriod = "week";
   let reminderTickerPaused = false;
+  let reminderStatusFilter = "all";
+  let reminderViewItemId = "";
   let dashboardEditMode = false;
   let dashboardDraggedWidgetId = "";
   let dashboardLayout = [];
@@ -2327,6 +2329,37 @@
     return !item.completed && date.getTime() < Date.now() ? `Gecikti · ${formatted}` : formatted;
   }
 
+  function setReminderModalMode(mode) {
+    // mode: "view" | "form"
+    $("#reminderView").classList.toggle("hidden", mode !== "view");
+    reminderForm.classList.toggle("hidden", mode === "view");
+  }
+
+  function reminderStatusText(item) {
+    if (item.completed) return "Tamamlandı";
+    if (item.remindAt && new Date(item.remindAt).getTime() < Date.now()) return "Gecikti";
+    return "Aktif";
+  }
+
+  function openReminderView(id) {
+    const item = window.ReminderStore.get(id);
+    if (!item) return;
+    reminderViewItemId = id;
+    $("#reminderViewText").textContent = item.text;
+    const importance = $("#reminderViewImportance");
+    importance.dataset.importance = item.importance;
+    importance.textContent = item.importance === "important" ? "Önemli" : "Normal";
+    const time = $("#reminderViewTime");
+    time.textContent = reminderDateLabel(item);
+    if (item.remindAt) time.dateTime = item.remindAt; else time.removeAttribute("datetime");
+    const status = $("#reminderViewStatus");
+    status.textContent = reminderStatusText(item);
+    status.dataset.status = item.completed ? "completed" : "active";
+    setReminderModalMode("view");
+    if (!$("#reminderModal").open) $("#reminderModal").showModal();
+    $("#closeReminderView").focus();
+  }
+
   function resetReminderForm() {
     reminderForm.reset();
     reminderFields.id.value = "";
@@ -2336,6 +2369,7 @@
     $("#reminderModalTitle").textContent = "Yeni hatırlatma ekle";
     $("#reminderFormMessage").textContent = "";
     $("#reminderFormMessage").classList.remove("success");
+    setReminderModalMode("form");
   }
 
   function startReminderEdit(item) {
@@ -2346,6 +2380,7 @@
     $("#reminderOptions").open = Boolean(item.remindAt || item.importance === "important");
     $("#reminderSubmitLabel").textContent = "Güncelle";
     $("#reminderModalTitle").textContent = "Hatırlatmayı düzenle";
+    setReminderModalMode("form");
     if (!$("#reminderModal").open) $("#reminderModal").showModal();
     reminderFields.text.focus();
   }
@@ -2369,12 +2404,24 @@
     tickerWindow.style.setProperty("--reminder-paused-height", `${visibleRows * 76}px`);
   }
 
+  function reminderMatchesStatusFilter(item) {
+    if (reminderStatusFilter === "active") return !item.completed;
+    if (reminderStatusFilter === "completed") return Boolean(item.completed);
+    return true;
+  }
+
   function renderReminders() {
-    const reminders = window.ReminderStore.list();
+    const allReminders = window.ReminderStore.list();
+    const filterSelect = $("#reminderStatusFilter");
+    if (filterSelect && filterSelect.value !== reminderStatusFilter) filterSelect.value = reminderStatusFilter;
+    const reminders = allReminders.filter(reminderMatchesStatusFilter);
     if (reminders.length <= 3) reminderTickerPaused = false;
-    const activeCount = reminders.filter((item) => !item.completed).length;
+    const activeCount = allReminders.filter((item) => !item.completed).length;
     $("#reminderOpenCount").textContent = `${activeCount} aktif`;
     $("#reminderEmptyState").classList.toggle("hidden", reminders.length > 0);
+    $("#reminderEmptyState").textContent = allReminders.length === 0
+      ? "Henüz önemli bir not veya hatırlatma eklenmedi."
+      : "Bu filtreye uygun not bulunmuyor.";
     const tickerToggle = $("#toggleReminderTicker");
     tickerToggle.disabled = reminders.length <= 3;
     tickerToggle.textContent = reminderTickerPaused ? "Devam" : "Durdur";
@@ -2402,8 +2449,11 @@
         backupAndReport("Hatırlatma durumu Drive’a gönderildi.");
       });
 
-      const content = document.createElement("div");
+      const content = document.createElement("button");
+      content.type = "button";
       content.className = "reminder-row-content";
+      content.setAttribute("aria-label", `${item.text} notunu görüntüle`);
+      content.addEventListener("click", () => openReminderView(item.id));
       const text = document.createElement("strong");
       text.textContent = item.text;
       const meta = document.createElement("div");
@@ -4547,9 +4597,9 @@
     }
 
     const includeWeekends = $("#includeWeekends").checked;
-    const dates = [];
+    const availableDates = [];
     for (let date = new Date(range.start); date <= range.end; date = addDays(date, 1)) {
-      if (includeWeekends || (date.getDay() !== 0 && date.getDay() !== 6)) dates.push(new Date(date));
+      if (includeWeekends || (date.getDay() !== 0 && date.getDay() !== 6)) availableDates.push(new Date(date));
     }
     const startIso = isoFromDate(range.start);
     const endIso = isoFromDate(range.end);
@@ -4558,6 +4608,11 @@
       && entry.date <= endIso
       && (includeWeekends || ![0, 6].includes(parseDate(entry.date).getDay()))
       && timesheetEntryMatchesJiraFilter(entry, selectedJiraFilter));
+    const onlyEffortDays = $("#onlyEffortDays").checked;
+    const datesWithEffort = new Set(filtered.map((entry) => entry.date));
+    const dates = onlyEffortDays
+      ? availableDates.filter((date) => datesWithEffort.has(isoFromDate(date)))
+      : availableDates;
     const grouping = $("#timesheetGrouping").value;
     const groups = new Map();
     filtered.forEach((entry) => {
@@ -5293,6 +5348,10 @@
       $("#jiraSyncJql").value = cloudUserSettings.jiraSyncJql;
     }
     if ($("#jiraAutoWorklog")) $("#jiraAutoWorklog").checked = cloudUserSettings.jiraAutoWorklog !== false;
+    reminderStatusFilter = ["all", "active", "completed"].includes(cloudUserSettings.reminderStatusFilter)
+      ? cloudUserSettings.reminderStatusFilter
+      : "all";
+    if ($("#reminderStatusFilter")) $("#reminderStatusFilter").value = reminderStatusFilter;
     if ($("#googleClientId")) $("#googleClientId").value = window.DriveSync?.getClientId() || "";
     if ($("#aiAssistantEndpoint")) $("#aiAssistantEndpoint").value = window.AiAssistantClient.getEndpoint();
     updateLastBackupTime();
@@ -5777,6 +5836,12 @@
   });
   $("#closeReminderModal").addEventListener("click", closeReminderModal);
   $("#cancelReminderEdit").addEventListener("click", closeReminderModal);
+  $("#closeReminderView").addEventListener("click", closeReminderModal);
+  $("#reminderStatusFilter").addEventListener("change", (event) => {
+    reminderStatusFilter = event.target.value;
+    renderReminders();
+    queueCloudUserSettings({ reminderStatusFilter });
+  });
   $("#reminderModal").addEventListener("cancel", () => resetReminderForm());
   document.querySelectorAll("[data-calendar-provider]").forEach((button) => {
     button.addEventListener("click", () => selectCalendarProvider(button.dataset.calendarProvider));
@@ -6279,6 +6344,7 @@
   $("#timesheetStartDate").addEventListener("change", renderTimesheet);
   $("#timesheetEndDate").addEventListener("change", renderTimesheet);
   $("#includeWeekends").addEventListener("change", renderTimesheet);
+  $("#onlyEffortDays").addEventListener("change", renderTimesheet);
   $("#addTimesheetEffort").addEventListener("click", () => openEffortCreateModal(DUMMY_JIRA.id, isoToday()));
   $("#syncJiraWorklogs").addEventListener("click", syncTimesheetJiraWorklogs);
   $("#timesheetPrevious").addEventListener("click", () => {

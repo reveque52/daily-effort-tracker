@@ -73,7 +73,7 @@ const requiredIds = [
   "taskList", "taskTemplate", "taskTypeGroupTemplate", "taskCreateView", "taskReportView", "taskDetailView", "taskDetailTitle",
   "taskDetailDescription", "taskDetailParentItem", "taskDetailAssignee", "taskDetailType", "taskDetailPriority", "taskDetailPlan", "taskDetailSubtaskList", "taskDetailSubtaskCount", "addSubtaskButton", "taskTypeFilter", "taskStatusFilter", "taskFilterEmpty", "reviseTaskButton", "backToTaskReport", "taskReportCount", "taskReportTableWrap",
   "timesheetView", "timesheetPeriod", "timesheetReferenceDate", "timesheetStartDate",
-  "timesheetEndDate", "includeWeekends", "timesheetJiraFilter", "addTimesheetEffort", "syncJiraWorklogs", "timesheetJiraSyncStatus", "timesheetTable", "timesheetTotalHours",
+  "timesheetEndDate", "includeWeekends", "onlyEffortDays", "timesheetJiraFilter", "addTimesheetEffort", "syncJiraWorklogs", "timesheetJiraSyncStatus", "timesheetTable", "timesheetTotalHours",
   "timesheetGrouping",
   "jiraItemPicker", "jiraItemPickerButton", "jiraItemPickerValue", "jiraItemPickerDropdown", "jiraItemSearchInput", "jiraItemSearchCount", "jiraItemOptionList", "jiraItemInput", "jiraView", "jiraForm", "jiraNameInput", "jiraSubmitButton", "jiraSubmitLabel",
   "jiraList", "jiraTemplate", "jiraHtmlImport",
@@ -456,6 +456,9 @@ assert.match(app, /getTimesheetRange/, "Timesheet tarih aralığı hesaplaması 
 assert.match(html, /id="timesheetJiraFilter"[\s\S]*Tüm JIRA maddeleri/, "Timesheet JIRA maddesi filtresi eksik");
 assert.match(app, /function populateTimesheetJiraFilter[\s\S]*function timesheetEntryMatchesJiraFilter[\s\S]*timesheetJiraFilter/, "Timesheet JIRA filtresi seçenekleri ve kayıt süzme akışı eksik");
 assert.match(app, /includeWeekends/, "Hafta sonu filtresi eksik");
+assert.match(html, /id="onlyEffortDays"[^>]*>[\s\S]*Sadece efor olan günleri göster/, "Yalnızca efor bulunan günleri gösterme filtresi eksik");
+assert.match(app, /const onlyEffortDays[\s\S]*datesWithEffort[\s\S]*availableDates\.filter/, "Timesheet efor bulunan gün sütunlarını süzme akışı eksik");
+assert.match(app, /onlyEffortDays"\)\.addEventListener\("change", renderTimesheet\)/, "Timesheet eforlu gün filtresi değişiklik olayına bağlanmalı");
 assert.match(app, /dayTotals/, "Timesheet günlük toplamları eksik");
 assert.match(css, /timesheet-scroll[^{]*\{[^}]*overflow-x:\s*auto/, "Timesheet yatay kaydırma eksik");
 assert.match(app, /groupedByDate/, "Aynı gün eforlarının tarih bazında gruplanması eksik");
