@@ -51,8 +51,8 @@ const requiredIds = [
   "todayLabel", "weatherIcon", "weatherLocationMenu", "weatherLocationLabel", "weatherLocationForm", "weatherLocationInput", "weatherUseDeviceLocation", "weatherLocationStatus", "weatherLocationResults", "weatherTemperature", "weatherCondition", "weatherMeta", "refreshWeather",
   "homeView", "homeWeekLabel", "homeWeeklyHours", "homeWeeklyGoal", "homeWeeklyEntryCount",
   "dashboardLayoutStatus", "toggleDashboardEdit", "dashboardEditTools", "dashboardWidgetVisibility", "resetDashboardLayout", "homeCustomizableGrid",
-  "homePlannedTasks", "homeInProgressTasks", "weeklyEffortChart", "taskStatusChart",
-  "jiraEffortChart", "homeOpenTaskCount", "homePendingTaskList", "homeJiraStatusTitle", "homeJiraStatusChart", "homeAssignedJiraTitle", "homeJiraStatusFilter",
+  "weeklyEffortChart",
+  "jiraEffortChart", "homeJiraStatusTitle", "homeJiraStatusChart", "homeAssignedJiraTitle", "homeJiraStatusFilter",
   "homeJiraIssueCount", "refreshHomeJiraIssues", "homeJiraIssueStatus", "homeJiraIssueList", "homeJiraIssueEmpty",
   "reminderPanelTitle", "reminderOpenCount", "toggleReminderTicker", "openReminderModal", "reminderTickerWindow", "reminderModal", "reminderModalTitle", "closeReminderModal", "reminderForm", "reminderId", "reminderTextInput",
   "reminderDateInput", "reminderImportanceInput", "reminderOptions", "reminderSubmitLabel", "cancelReminderEdit", "reminderFormMessage", "reminderEmptyState", "reminderList",
@@ -185,13 +185,13 @@ const homeSummaryStart = html.indexOf('class="home-summary-panel dashboard-widge
 const homeWidgetsStart = html.indexOf('class="home-top-widgets"');
 assert.ok(homeSummaryStart < html.indexOf('class="home-kpi-grid"') && html.indexOf('class="home-kpi-grid"') < homeWidgetsStart, "Çalışma özeti ve haftalık göstergeler tek üst bölümde birleştirilmeli");
 assert.doesNotMatch(html.slice(homeSummaryStart, homeWidgetsStart), />\+ Efor ekle<\/button>/, "Çalışma özeti bölümünde Efor ekle düğmesi bulunmamalı");
-assert.match(html.slice(homeSummaryStart, homeWidgetsStart), /class="home-kpi-card home-kpi-primary"[^>]*data-home-target="effortsView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="effortsView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="tasksView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="tasksView"/, "Çalışma özeti kartları ilgili Eforlar ve Görevler bölümlerine bağlanmalı");
+assert.match(html.slice(homeSummaryStart, homeWidgetsStart), /class="home-kpi-card home-kpi-primary"[^>]*data-home-target="effortsView"[\s\S]*class="home-kpi-card"[^>]*data-home-target="effortsView"/, "Çalışma özeti kartları Eforlar bölümüne bağlanmalı");
 assert.match(css, /home-kpi-card:hover[^{]*\{[^}]*transform:\s*translateY/, "Tıklanabilir çalışma özeti kartları hover geri bildirimi vermeli");
 assert.match(app, /data-home-target[\s\S]*targetView[\s\S]*activateMainView\(targetView\)[\s\S]*targetView === "tasksView"[\s\S]*activateTaskSubview\("taskReportView"\)/, "Görev özet kartları Görevler rapor sayfasını açmalı");
 assert.ok(html.indexOf('data-dashboard-widget="reminders"') < html.indexOf('class="home-dashboard-grid"'), "Önemli Notlar ve Hatırlatmalar Ana Sayfanın üst kısmında olmalı");
 assert.ok(html.indexOf('class="home-top-widgets"') < html.indexOf('data-dashboard-widget="calendar"') && html.indexOf('data-dashboard-widget="calendar"') < html.indexOf('data-dashboard-widget="reminders"'), "Takvim ve Önemli Notlar varsayılan düzende yan yana sıralanmalı");
 assert.match(html, /id="toggleDashboardEdit"[\s\S]*id="dashboardWidgetVisibility"[\s\S]*id="resetDashboardLayout"[\s\S]*id="homeCustomizableGrid"/, "Ana Sayfada düzenleme, kutu ekleme/çıkarma ve sıfırlama araçları bulunmalı");
-assert.ok(["summary", "calendar", "reminders", "jira-status", "assigned-jira", "weekly-effort", "task-status", "jira-effort", "open-tasks"].every((id) => html.includes(`data-dashboard-widget="${id}"`)), "Tüm Ana Sayfa kutuları özelleştirilebilir olmalı");
+assert.ok(["summary", "calendar", "reminders", "jira-status", "assigned-jira", "weekly-effort", "jira-effort"].every((id) => html.includes(`data-dashboard-widget="${id}"`)), "Tüm Ana Sayfa kutuları özelleştirilebilir olmalı");
 assert.match(app, /function loadDashboardLayout[\s\S]*function applyDashboardLayout[\s\S]*--dashboard-order[\s\S]*--dashboard-span/, "Dashboard sırası ve kutu boyutları kayıtlı ayardan uygulanmalı");
 assert.match(app, /function setupDashboardCustomization[\s\S]*dragstart[\s\S]*dragover[\s\S]*drop[\s\S]*moveDashboardWidget/, "Dashboard kutuları sürükle-bırak ile taşınabilmeli");
 assert.match(app, /function resizeDashboardWidget[\s\S]*DASHBOARD_WIDGET_SPANS[\s\S]*createDashboardControl\("−"[\s\S]*"shrink"\)[\s\S]*createDashboardControl\("\+"[\s\S]*"grow"\)/, "Dashboard kutuları daraltılıp genişletilebilmeli");
