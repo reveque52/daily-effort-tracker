@@ -1119,11 +1119,53 @@
     chart.append(donut, legend);
   }
 
+  function renderHomeJiraStatusSummary() {
+    const container = $("#homeJiraStatusSummary");
+    if (!container) return;
+    const statusRows = homeJiraStatuses()
+      .map((status, index) => ({
+        status,
+        index,
+        count: homeAssignedJiraItems.filter((item) => normalizeJiraSearch(item.status) === normalizeJiraSearch(status)).length
+      }))
+      .filter((row) => row.count > 0);
+    container.replaceChildren();
+    if (!statusRows.length) {
+      const empty = document.createElement("p");
+      empty.className = "dashboard-empty home-jira-status-summary-empty";
+      empty.textContent = "Çalıştığınız JIRA kaydı bulunmuyor.";
+      container.append(empty);
+      return;
+    }
+    statusRows.forEach((row) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "home-jira-status-chip";
+      const active = normalizeJiraSearch(row.status) === normalizeJiraSearch(homeAssignedJiraStatus);
+      chip.classList.toggle("is-active", active);
+      chip.setAttribute("aria-pressed", String(active));
+      chip.setAttribute("aria-label", `${row.status}: ${row.count} JIRA kaydı. Bu kayıtları göster`);
+      const dot = document.createElement("i");
+      dot.style.background = homeJiraStatusColor(row.status, row.index);
+      const label = document.createElement("span");
+      label.textContent = row.status;
+      const count = document.createElement("strong");
+      count.textContent = String(row.count);
+      chip.append(dot, label, count);
+      chip.addEventListener("click", () => {
+        homeAssignedJiraStatus = active ? HOME_JIRA_ALL_STATUSES : row.status;
+        renderHomeAssignedJiraIssues();
+      });
+      container.append(chip);
+    });
+  }
+
   function renderHomeAssignedJiraIssues() {
     const list = $("#homeJiraIssueList");
     if (!list) return;
     renderHomeJiraStatusFilter();
     renderHomeJiraStatusChart();
+    renderHomeJiraStatusSummary();
     const visibleItems = homeAssignedJiraItems.filter((item) => homeAssignedJiraStatus === HOME_JIRA_ALL_STATUSES
       || normalizeJiraSearch(item.status) === normalizeJiraSearch(homeAssignedJiraStatus));
     $("#homeJiraIssueCount").textContent = `${visibleItems.length} madde`;
