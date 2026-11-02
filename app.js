@@ -66,9 +66,7 @@
     { id: "jira-status", label: "JIRA durumları", span: 4 },
     { id: "assigned-jira", label: "Bana atanan JIRA kayıtları", span: 8 },
     { id: "weekly-effort", label: "Haftalık efor", span: 8 },
-    { id: "task-status", label: "Görev durumları", span: 4 },
-    { id: "jira-effort", label: "JIRA bazlı efor", span: 7 },
-    { id: "open-tasks", label: "Açık görevler", span: 5 }
+    { id: "jira-effort", label: "JIRA bazlı efor", span: 7 }
   ]);
   const DASHBOARD_WIDGET_SPANS = Object.freeze(Array.from({ length: 10 }, (_, index) => index + 3));
   const ACCESS_LOG_ADMIN_EMAIL = "selcuk.dere@fit-global.com";
@@ -2166,8 +2164,10 @@
     $("#homeWeekLabel").textContent = `${dateFormatter.format(monday)} – ${dateFormatter.format(sunday)}`;
     $("#homeWeeklyHours").textContent = formatHours(weeklyHours);
     $("#homeWeeklyEntryCount").textContent = String(weeklyEntries.length);
-    $("#homePlannedTasks").textContent = String(plannedTasks.length);
-    $("#homeInProgressTasks").textContent = String(inProgressTasks.length);
+    const homePlannedTasksEl = $("#homePlannedTasks");
+    if (homePlannedTasksEl) homePlannedTasksEl.textContent = String(plannedTasks.length);
+    const homeInProgressTasksEl = $("#homeInProgressTasks");
+    if (homeInProgressTasksEl) homeInProgressTasksEl.textContent = String(inProgressTasks.length);
     $("#homeWeeklyGoal").textContent = `40 saatlik hedefin %${Math.round((weeklyHours / 40) * 100)}’si`;
 
     const weeklyChart = $("#weeklyEffortChart");
@@ -2207,6 +2207,7 @@
     });
 
     const taskChart = $("#taskStatusChart");
+    if (taskChart) {
     taskChart.replaceChildren();
     const taskTotal = dashboardTasks.length;
     const plannedEnd = taskTotal ? (plannedTasks.length / taskTotal) * 100 : 0;
@@ -2246,6 +2247,7 @@
       legend.append(item);
     });
     taskChart.append(donut, legend);
+    }
 
     const jiraTotals = new Map();
     weeklyEntries.forEach((entry) => {
@@ -2289,8 +2291,10 @@
     }
 
     const openTasks = dashboardTasks.filter((task) => task.status !== "completed").slice(0, 5);
-    $("#homeOpenTaskCount").textContent = `${dashboardTasks.filter((task) => task.status !== "completed").length} açık`;
+    const homeOpenTaskCountEl = $("#homeOpenTaskCount");
+    if (homeOpenTaskCountEl) homeOpenTaskCountEl.textContent = `${dashboardTasks.filter((task) => task.status !== "completed").length} açık`;
     const taskList = $("#homePendingTaskList");
+    if (taskList) {
     taskList.replaceChildren();
     if (!openTasks.length) {
       const empty = document.createElement("p");
@@ -2318,6 +2322,7 @@
         });
         taskList.append(button);
       });
+    }
     }
     renderReminders();
   }
