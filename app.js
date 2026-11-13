@@ -360,10 +360,35 @@
       .some((value) => normalizeJiraSearch(value).includes(searchTerm));
   }
 
+  const FREQUENT_JIRA_LIMIT = 10;
+  const FREQUENT_JIRA_WINDOW_DAYS = 90;
+
+  // Son dönemde en çok efor girilen JIRA maddeleri; hızlı giriş için seçicide en üste alınır.
+  function frequentJiraIds() {
+    const since = isoFromDate(addDays(parseDate(isoToday()), -FREQUENT_JIRA_WINDOW_DAYS));
+    const usage = new Map();
+    Array.from(readEntries() || []).forEach((entry) => {
+      if (!entry.jiraId || entry.jiraId === DUMMY_JIRA.id || String(entry.date || "") < since) return;
+      const current = usage.get(entry.jiraId) || { count: 0, lastDate: "" };
+      current.count += 1;
+      if (entry.date > current.lastDate) current.lastDate = entry.date;
+      usage.set(entry.jiraId, current);
+    });
+    return Array.from(usage.entries())
+      .sort((a, b) => b[1].count - a[1].count || b[1].lastDate.localeCompare(a[1].lastDate))
+      .slice(0, FREQUENT_JIRA_LIMIT)
+      .map(([id]) => id);
+  }
+
   function populateJiraSelect(select, includePrompt = false, searchValue = "", preferredValue = select.value) {
     const searchTerm = normalizeJiraSearch(searchValue);
     const allItems = window.JiraStore.list();
-    const matchingItems = allItems.filter((item) => jiraMatchesSearch(item, searchTerm));
+    const frequentRank = new Map(frequentJiraIds().map((id, index) => [id, index]));
+    const matchingItems = allItems
+      .filter((item) => jiraMatchesSearch(item, searchTerm))
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => (frequentRank.get(a.item.id) ?? Infinity) - (frequentRank.get(b.item.id) ?? Infinity) || a.index - b.index)
+      .map(({ item }) => item);
     const selectedItem = preferredValue && preferredValue !== DUMMY_JIRA.id
       ? allItems.find((item) => item.id === preferredValue)
       : null;
@@ -433,6 +458,13 @@
     summary.className = "jira-picker-option-summary";
     summary.textContent = item.description || "Summary bilgisi yok";
     button.append(key, summary);
+    if (options.frequent) {
+      button.classList.add("jira-picker-option-frequent");
+      const badge = document.createElement("span");
+      badge.className = "jira-picker-frequent-badge";
+      badge.textContent = "Sık kullanılan";
+      button.append(badge);
+    }
     if (options.remote) {
       const badge = document.createElement("span");
       badge.className = "jira-picker-live-badge";
@@ -447,11 +479,16 @@
     const state = effortJiraPickerSearchState[kind];
     const localOptions = [...config.select.options].filter((option) => option.value);
     const localKeys = new Set();
+    const frequentIds = new Set(frequentJiraIds());
     config.list.replaceChildren();
     localOptions.forEach((option) => {
       const item = getJiraItem(option.value) || { id: option.value, name: option.textContent, description: "" };
       if (item.name) localKeys.add(String(item.name).toUpperCase());
-      appendIntegratedJiraPickerOption(config.list, item, { value: option.value, selected: option.value === config.select.value });
+      appendIntegratedJiraPickerOption(config.list, item, {
+        value: option.value,
+        selected: option.value === config.select.value,
+        frequent: frequentIds.has(option.value)
+      });
     });
     state.remote
       .filter((item) => item?.name && !localKeys.has(String(item.name).toUpperCase()))
