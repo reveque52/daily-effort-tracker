@@ -715,6 +715,9 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .jira-picker-options { display: grid; gap: .2rem; max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }
 .jira-picker-option { width: 100%; border: 0; border-radius: 8px; padding: .62rem .7rem; color: var(--ink); background: transparent; text-align: left; }
 .jira-picker-option-remote { position: relative; padding-right: 5rem; }
+.jira-picker-option-frequent { position: relative; padding-right: 6.4rem; }
+.jira-picker-frequent-badge { position: absolute; top: 50%; right: .65rem; transform: translateY(-50%); border-radius: 999px; padding: .2rem .42rem; color: var(--brand-dark); background: var(--brand-soft); font-size: .56rem; font-weight: 900; white-space: nowrap; }
+.jira-picker-option-frequent:hover .jira-picker-frequent-badge, .jira-picker-option-frequent:focus .jira-picker-frequent-badge, .jira-picker-option-frequent[aria-selected="true"] .jira-picker-frequent-badge { background: var(--surface); }
 .jira-picker-live-badge { position: absolute; top: 50%; right: .65rem; transform: translateY(-50%); border-radius: 999px; padding: .2rem .38rem; color: #075e46; background: #e4f7ef; font-size: .56rem; font-weight: 900; white-space: nowrap; }
 .jira-picker-option:hover, .jira-picker-option:focus { background: var(--brand-soft); outline: none; }
 .jira-picker-option[aria-selected="true"] { color: var(--brand-dark); background: #e9e7ff; font-weight: 800; }
